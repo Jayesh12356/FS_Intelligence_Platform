@@ -1,0 +1,121 @@
+﻿python : C:\Learnings\
+Projects\fs_intelligen
+ce_platform\backend\.v
+env\Lib\site-packages\
+pytest_asyncio\plugin.
+py:207: PytestDeprecat
+ionWarning: The 
+configuration option "
+asyncio_default_fixtur
+e_loop_scope" is 
+unset.
+At line:1 char:31
++ .\.venv\Scripts\Acti
+vate.ps1; python -m 
+pytest tests/ -v 2>&1 
+| Out-F ...
++                     
+          ~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo    
+          : 
+NotSpecified: (C    
+:\Learnings\Pr...cope 
+   " is 
+unset.:String) [    
+], RemoteException
+    + 
+FullyQualifiedError   
+ Id : 
+NativeCommandErr    or
+ 
+The event loop scope 
+for asynchronous 
+fixtures will default 
+to the fixture 
+caching scope. Future 
+versions of 
+pytest-asyncio will 
+default the loop 
+scope for 
+asynchronous fixtures 
+to function scope. 
+Set the default 
+fixture loop scope 
+explicitly in order 
+to avoid unexpected 
+behavior in the 
+future. Valid fixture 
+loop scopes are: 
+"function", "class", 
+"module", "package", 
+"session"
+
+  warnings.warn(Pytest
+DeprecationWarning(_DE
+FAULT_FIXTURE_LOOP_SCO
+PE_UNSET))
+============================= test session starts =============================
+platform win32 -- Python 3.12.7, pytest-8.3.4, pluggy-1.6.0 -- C:\Learnings\Projects\fs_intelligence_platform\backend\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Learnings\Projects\fs_intelligence_platform\backend
+configfile: pyproject.toml
+plugins: anyio-4.13.0, asyncio-0.25.0
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=None
+collecting ... collected 39 items
+
+tests/test_ambiguity.py::TestPipelineState::test_ambiguity_flag_creation PASSED [  2%]
+tests/test_ambiguity.py::TestPipelineState::test_severity_enum PASSED    [  5%]
+tests/test_ambiguity.py::TestPipelineState::test_section_input PASSED    [  7%]
+tests/test_ambiguity.py::TestPipelineState::test_analysis_state_structure PASSED [ 10%]
+tests/test_ambiguity.py::TestAmbiguityNode::test_detect_ambiguities_returns_flags PASSED [ 12%]
+tests/test_ambiguity.py::TestAmbiguityNode::test_detect_empty_section_skipped PASSED [ 15%]
+tests/test_ambiguity.py::TestAmbiguityNode::test_ambiguity_node_full_flow PASSED [ 17%]
+tests/test_ambiguity.py::TestAmbiguityNode::test_ambiguity_node_handles_llm_error PASSED [ 20%]
+tests/test_ambiguity.py::TestPipelineGraph::test_pipeline_runs_with_mocked_llm PASSED [ 23%]
+tests/test_ambiguity.py::TestAnalysisAPI::test_analyze_requires_parsed_status PASSED [ 25%]
+tests/test_ambiguity.py::TestAnalysisAPI::test_list_ambiguities_empty PASSED [ 28%]
+tests/test_ambiguity.py::TestAnalysisAPI::test_full_analyze_flow_mocked PASSED [ 30%]
+tests/test_ambiguity.py::TestAnalysisAPI::test_resolve_nonexistent_flag PASSED [ 33%]
+tests/test_parser.py::TestTxtParser::test_parse_txt_with_sections PASSED [ 35%]
+tests/test_parser.py::TestTxtParser::test_parse_txt_empty PASSED         [ 38%]
+tests/test_parser.py::TestTxtParser::test_parse_txt_no_headings PASSED   [ 41%]
+tests/test_parser.py::TestTxtParser::test_parse_txt_file_not_found PASSED [ 43%]
+tests/test_parser.py::TestPdfParser::test_parse_pdf_file_not_found PASSED [ 46%]
+tests/test_parser.py::TestPdfParser::test_heading_detection PASSED       [ 48%]
+tests/test_parser.py::TestDocxParser::test_parse_docx_file_not_found PASSED [ 51%]
+tests/test_parser.py::TestChunker::test_chunk_short_section PASSED       [ 53%]
+tests/test_parser.py::TestChunker::test_chunk_long_section PASSED        [ 56%]
+tests/test_parser.py::TestChunker::test_chunk_multiple_sections PASSED   [ 58%]
+tests/test_parser.py::TestChunker::test_chunk_empty_parsed PASSED        [ 61%]
+tests/test_parser.py::TestParserRouter::test_get_parser_pdf PASSED       [ 64%]
+tests/test_parser.py::TestParserRouter::test_get_parser_docx PASSED      [ 66%]
+tests/test_parser.py::TestParserRouter::test_get_parser_txt PASSED       [ 69%]
+tests/test_parser.py::TestParserRouter::test_get_parser_unsupported PASSED [ 71%]
+tests/test_parser.py::TestParseAPI::test_parse_uploaded_txt PASSED       [ 74%]
+tests/test_parser.py::TestParseAPI::test_parse_nonexistent_document PASSED [ 76%]
+tests/test_parser.py::TestParseAPI::test_document_status_after_parse PASSED [ 79%]
+tests/test_upload.py::test_root PASSED                                   [ 82%]
+tests/test_upload.py::test_upload_txt_file PASSED                        [ 84%]
+tests/test_upload.py::test_upload_invalid_extension PASSED               [ 87%]
+tests/test_upload.py::test_list_documents PASSED                         [ 89%]
+tests/test_upload.py::test_get_document PASSED                           [ 92%]
+tests/test_upload.py::test_get_document_not_found PASSED                 [ 94%]
+tests/test_upload.py::test_delete_document PASSED                        [ 97%]
+tests/test_upload.py::test_get_document_status PASSED                    [100%]
+
+============================== warnings summary ===============================
+tests/test_ambiguity.py::TestAmbiguityNode::test_detect_ambiguities_returns_flags
+  C:\Learnings\Projects\fs_intelligence_platform\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:854: DeprecationWarning: The event_loop fixture provided by pytest-asyncio has been redefined in
+  C:\Learnings\Projects\fs_intelligence_platform\backend\tests\conftest.py:24
+  Replacing the event_loop fixture with a custom implementation is deprecated
+  and will lead to errors in the future.
+  If you want to request an asyncio event loop with a scope other than function
+  scope, use the "scope" argument to the asyncio mark when marking the tests.
+  If you want to return different types of event loops, use the event_loop_policy
+  fixture.
+  
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 39 passed, 1 warning in 4.96s ========================

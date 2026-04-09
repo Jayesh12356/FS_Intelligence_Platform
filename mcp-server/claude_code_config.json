@@ -1,0 +1,6 @@
+{
+  "name": "fs-intelligence-platform",
+  "command": "python server.py",
+  "description": "FS Intelligence Platform MCP wrapper for analysis, tasks, impact, exports, and reverse FS"
+}
+

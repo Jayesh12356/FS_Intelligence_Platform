@@ -1,0 +1,1777 @@
+﻿python : C:\Learnings\Proj
+ects\fs_intelligence_platf
+orm\backend\.venv\Lib\site
+-packages\pytest_asyncio\p
+lugin.py:207: 
+PytestDeprecationWarning: 
+The configuration option "
+asyncio_default_fixture_lo
+op_scope" is unset.
+At line:1 char:31
++ .\.venv\Scripts\Activate
+.ps1; python -m pytest 
+tests/ -v 2>&1 | Out-F ...
++                         
+      ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~
+    + CategoryInfo        
+      : NotSpecified: (C  
+  :\Learnings\Pr...cope   
+ " is unset.:String) [    
+], RemoteException
+    + FullyQualifiedError 
+   Id : NativeCommandErr  
+  or
+ 
+The event loop scope for 
+asynchronous fixtures 
+will default to the 
+fixture caching scope. 
+Future versions of 
+pytest-asyncio will 
+default the loop scope 
+for asynchronous fixtures 
+to function scope. Set 
+the default fixture loop 
+scope explicitly in order 
+to avoid unexpected 
+behavior in the future. 
+Valid fixture loop scopes 
+are: "function", "class", 
+"module", "package", 
+"session"
+
+  warnings.warn(PytestDepr
+ecationWarning(_DEFAULT_FI
+XTURE_LOOP_SCOPE_UNSET))
+============================= test session starts =============================
+platform win32 -- Python 3.12.7, pytest-8.3.4, pluggy-1.6.0 -- C:\Learnings\Projects\fs_intelligence_platform\backend\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Learnings\Projects\fs_intelligence_platform\backend
+configfile: pyproject.toml
+plugins: anyio-4.13.0, asyncio-0.25.0
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=None
+collecting ... collected 8 items
+
+tests/test_upload.py::test_root ERROR                                    [ 12%]
+tests/test_upload.py::test_upload_txt_file ERROR                         [ 25%]
+tests/test_upload.py::test_upload_invalid_extension ERROR                [ 37%]
+tests/test_upload.py::test_list_documents ERROR                          [ 50%]
+tests/test_upload.py::test_get_document ERROR                            [ 62%]
+tests/test_upload.py::test_get_document_not_found ERROR                  [ 75%]
+tests/test_upload.py::test_delete_document ERROR                         [ 87%]
+tests/test_upload.py::test_get_document_status ERROR                     [100%]
+
+=================================== ERRORS ====================================
+_________________________ ERROR at setup of test_root _________________________
+
+self = JSONB(astext_type=Text())
+visitor = <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF5D28B60>
+kw = {'type_expression': Column('result_json', JSONB(astext_type=Text()), table=<analysis_results>)}
+
+    def _compiler_dispatch(
+        self: Visitable, visitor: Any, **kw: Any
+    ) -> str:
+        """Look for an attribute named "visit_<visit_name>" on the
+        visitor, and call it with the same kw params.
+    
+        """
+        try:
+>           meth = getter(visitor)
+E           AttributeError: 'SQLiteTypeCompiler' object has no attribute 'visit_JSONB'. Did you mean: 'visit_JSON'?
+
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:137: AttributeError
+
+The above exception was the direct cause of the following exception:
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteDDLCompiler object at 0x000001BAF5CA3B30>
+create = <sqlalchemy.sql.ddl.CreateTable object at 0x000001BAF5D52DE0>, kw = {}
+table = Table('analysis_results', MetaData(), Column('id', UUID(), table=<analysis_results>, primary_key=True, nullable=False,... nullable=False, default=CallableColumnDefault(<function AnalysisResult.<lambda> at 0x000001BACB876A20>)), schema=None)
+preparer = <sqlalchemy.dialects.sqlite.base.SQLiteIdentifierPreparer object at 0x000001BAF5CF5DC0>
+text = '\nCREATE TABLE analysis_results (\n\tid UUID NOT NULL, \n\tfs_id UUID NOT NULL, \n\tanalysis_type VARCHAR(64) NOT NULL'
+create_table_suffix = '', separator = ', \n', first_pk = True
+create_column = <sqlalchemy.sql.ddl.CreateColumn object at 0x000001BAF5D70F20>
+
+    def visit_create_table(self, create, **kw):
+        table = create.element
+        preparer = self.preparer
+    
+        text = "\nCREATE "
+        if table._prefixes:
+            text += " ".join(table._prefixes) + " "
+    
+        text += "TABLE "
+        if create.if_not_exists:
+            text += "IF NOT EXISTS "
+    
+        text += preparer.format_table(table) + " "
+    
+        create_table_suffix = self.create_table_suffix(table)
+        if create_table_suffix:
+            text += create_table_suffix + " "
+    
+        text += "("
+    
+        separator = "\n"
+    
+        # if only one primary key, specify it along with the column
+        first_pk = False
+        for create_column in create.columns:
+            column = create_column.element
+            try:
+>               processed = self.process(
+                    create_column, first_pk=column.primary_key and not first_pk
+                )
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6647: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:915: in process
+    return obj._compiler_dispatch(self, **kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:141: in _compiler_dispatch
+    return meth(self, **kw)  # type: ignore  # noqa: E501
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6678: in visit_create_column
+    text = self.get_column_specification(column, first_pk=first_pk)
+.venv\Lib\site-packages\sqlalchemy\dialects\sqlite\base.py:1540: in get_column_specification
+    coltype = self.dialect.type_compiler_instance.process(
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:960: in process
+    return type_._compiler_dispatch(self, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:139: in _compiler_dispatch
+    return visitor.visit_unsupported_compilation(self, err, **kw)  # type: ignore  # noqa: E501
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF5D28B60>
+element = JSONB(astext_type=Text())
+err = AttributeError("'SQLiteTypeCompiler' object has no attribute 'visit_JSONB'")
+kw = {'type_expression': Column('result_json', JSONB(astext_type=Text()), table=<analysis_results>)}
+
+    def visit_unsupported_compilation(
+        self, element: Any, err: Exception, **kw: Any
+    ) -> NoReturn:
+>       raise exc.UnsupportedCompilationError(self, element) from err
+E       sqlalchemy.exc.UnsupportedCompilationError: Compiler <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF5D28B60> can't render element of type JSONB (Background on this error at: https://sqlalche.me/e/20/l7de)
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:965: UnsupportedCompilationError
+
+The above exception was the direct cause of the following exception:
+
+request = <SubRequest 'test_db' for <Coroutine test_root>>, kwargs = {}
+func = <function test_db at 0x000001BAF5CB0400>
+event_loop_fixture_id = 'event_loop'
+setup = <function _wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.setup at 0x000001BAF5D2CC20>
+setup_task = <Task finished name='Task-1' coro=<_wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.setup() done, de...<sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF5D28B60> can't render element of type JSONB")>
+
+    @functools.wraps(fixture)
+    def _asyncgen_fixture_wrapper(request: FixtureRequest, **kwargs: Any):
+        func = _perhaps_rebind_fixture_func(fixture, request.instance)
+        event_loop_fixture_id = _get_event_loop_fixture_id_for_async_fixture(
+            request, func
+        )
+        event_loop = request.getfixturevalue(event_loop_fixture_id)
+        kwargs.pop(event_loop_fixture_id, None)
+        gen_obj = func(**_add_kwargs(func, kwargs, event_loop, request))
+    
+        async def setup():
+            res = await gen_obj.__anext__()  # type: ignore[union-attr]
+            return res
+    
+        context = contextvars.copy_context()
+        setup_task = _create_task_in_context(event_loop, setup(), context)
+>       result = event_loop.run_until_complete(setup_task)
+
+.venv\Lib\site-packages\pytest_asyncio\plugin.py:329: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\jkoli\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py:687: in run_until_complete
+    return future.result()
+.venv\Lib\site-packages\pytest_asyncio\plugin.py:324: in setup
+    res = await gen_obj.__anext__()  # type: ignore[union-attr]
+tests\conftest.py:38: in test_db
+    await conn.run_sync(Base.metadata.create_all)
+.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py:886: in run_sync
+    return await greenlet_spawn(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:203: in greenlet_spawn
+    result = context.switch(value)
+.venv\Lib\site-packages\sqlalchemy\sql\schema.py:5868: in create_all
+    bind._run_ddl_visitor(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:2459: in _run_ddl_visitor
+    visitorcallable(self.dialect, self, **kwargs).traverse_single(element)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:664: in traverse_single
+    return meth(obj, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:918: in visit_metadata
+    self.traverse_single(
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:664: in traverse_single
+    return meth(obj, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:956: in visit_table
+    )._invoke_with(self.connection)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:314: in _invoke_with
+    return bind.execute(self)
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1418: in execute
+    return meth(
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:180: in _execute_on_connection
+    return connection._execute_ddl(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1526: in _execute_ddl
+    compiled = ddl.compile(
+.venv\Lib\site-packages\sqlalchemy\sql\elements.py:308: in compile
+    return self._compiler(dialect, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:69: in _compiler
+    return dialect.ddl_compiler(dialect, self, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:870: in __init__
+    self.string = self.process(self.statement, **compile_kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:915: in process
+    return obj._compiler_dispatch(self, **kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:141: in _compiler_dispatch
+    return meth(self, **kw)  # type: ignore  # noqa: E501
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteDDLCompiler object at 0x000001BAF5CA3B30>
+create = <sqlalchemy.sql.ddl.CreateTable object at 0x000001BAF5D52DE0>, kw = {}
+table = Table('analysis_results', MetaData(), Column('id', UUID(), table=<analysis_results>, primary_key=True, nullable=False,... nullable=False, default=CallableColumnDefault(<function AnalysisResult.<lambda> at 0x000001BACB876A20>)), schema=None)
+preparer = <sqlalchemy.dialects.sqlite.base.SQLiteIdentifierPreparer object at 0x000001BAF5CF5DC0>
+text = '\nCREATE TABLE analysis_results (\n\tid UUID NOT NULL, \n\tfs_id UUID NOT NULL, \n\tanalysis_type VARCHAR(64) NOT NULL'
+create_table_suffix = '', separator = ', \n', first_pk = True
+create_column = <sqlalchemy.sql.ddl.CreateColumn object at 0x000001BAF5D70F20>
+
+    def visit_create_table(self, create, **kw):
+        table = create.element
+        preparer = self.preparer
+    
+        text = "\nCREATE "
+        if table._prefixes:
+            text += " ".join(table._prefixes) + " "
+    
+        text += "TABLE "
+        if create.if_not_exists:
+            text += "IF NOT EXISTS "
+    
+        text += preparer.format_table(table) + " "
+    
+        create_table_suffix = self.create_table_suffix(table)
+        if create_table_suffix:
+            text += create_table_suffix + " "
+    
+        text += "("
+    
+        separator = "\n"
+    
+        # if only one primary key, specify it along with the column
+        first_pk = False
+        for create_column in create.columns:
+            column = create_column.element
+            try:
+                processed = self.process(
+                    create_column, first_pk=column.primary_key and not first_pk
+                )
+                if processed is not None:
+                    text += separator
+                    separator = ", \n"
+                    text += "\t" + processed
+                if column.primary_key:
+                    first_pk = True
+            except exc.CompileError as ce:
+>               raise exc.CompileError(
+                    "(in table '%s', column '%s'): %s"
+                    % (table.description, column.name, ce.args[0])
+                ) from ce
+E               sqlalchemy.exc.CompileError: (in table 'analysis_results', column 'result_json'): Compiler <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF5D28B60> can't render element of type JSONB
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6657: CompileError
+___________________ ERROR at setup of test_upload_txt_file ____________________
+
+self = JSONB(astext_type=Text())
+visitor = <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF5D73AA0>
+kw = {'type_expression': Column('result_json', JSONB(astext_type=Text()), table=<analysis_results>)}
+
+    def _compiler_dispatch(
+        self: Visitable, visitor: Any, **kw: Any
+    ) -> str:
+        """Look for an attribute named "visit_<visit_name>" on the
+        visitor, and call it with the same kw params.
+    
+        """
+        try:
+>           meth = getter(visitor)
+E           AttributeError: 'SQLiteTypeCompiler' object has no attribute 'visit_JSONB'. Did you mean: 'visit_JSON'?
+
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:137: AttributeError
+
+The above exception was the direct cause of the following exception:
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteDDLCompiler object at 0x000001BAF5E1FF80>
+create = <sqlalchemy.sql.ddl.CreateTable object at 0x000001BAF5E1FF20>, kw = {}
+table = Table('analysis_results', MetaData(), Column('id', UUID(), table=<analysis_results>, primary_key=True, nullable=False,... nullable=False, default=CallableColumnDefault(<function AnalysisResult.<lambda> at 0x000001BACB876A20>)), schema=None)
+preparer = <sqlalchemy.dialects.sqlite.base.SQLiteIdentifierPreparer object at 0x000001BAF5D73470>
+text = '\nCREATE TABLE analysis_results (\n\tid UUID NOT NULL, \n\tfs_id UUID NOT NULL, \n\tanalysis_type VARCHAR(64) NOT NULL'
+create_table_suffix = '', separator = ', \n', first_pk = True
+create_column = <sqlalchemy.sql.ddl.CreateColumn object at 0x000001BAF5E1DA60>
+
+    def visit_create_table(self, create, **kw):
+        table = create.element
+        preparer = self.preparer
+    
+        text = "\nCREATE "
+        if table._prefixes:
+            text += " ".join(table._prefixes) + " "
+    
+        text += "TABLE "
+        if create.if_not_exists:
+            text += "IF NOT EXISTS "
+    
+        text += preparer.format_table(table) + " "
+    
+        create_table_suffix = self.create_table_suffix(table)
+        if create_table_suffix:
+            text += create_table_suffix + " "
+    
+        text += "("
+    
+        separator = "\n"
+    
+        # if only one primary key, specify it along with the column
+        first_pk = False
+        for create_column in create.columns:
+            column = create_column.element
+            try:
+>               processed = self.process(
+                    create_column, first_pk=column.primary_key and not first_pk
+                )
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6647: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:915: in process
+    return obj._compiler_dispatch(self, **kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:141: in _compiler_dispatch
+    return meth(self, **kw)  # type: ignore  # noqa: E501
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6678: in visit_create_column
+    text = self.get_column_specification(column, first_pk=first_pk)
+.venv\Lib\site-packages\sqlalchemy\dialects\sqlite\base.py:1540: in get_column_specification
+    coltype = self.dialect.type_compiler_instance.process(
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:960: in process
+    return type_._compiler_dispatch(self, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:139: in _compiler_dispatch
+    return visitor.visit_unsupported_compilation(self, err, **kw)  # type: ignore  # noqa: E501
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF5D73AA0>
+element = JSONB(astext_type=Text())
+err = AttributeError("'SQLiteTypeCompiler' object has no attribute 'visit_JSONB'")
+kw = {'type_expression': Column('result_json', JSONB(astext_type=Text()), table=<analysis_results>)}
+
+    def visit_unsupported_compilation(
+        self, element: Any, err: Exception, **kw: Any
+    ) -> NoReturn:
+>       raise exc.UnsupportedCompilationError(self, element) from err
+E       sqlalchemy.exc.UnsupportedCompilationError: Compiler <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF5D73AA0> can't render element of type JSONB (Background on this error at: https://sqlalche.me/e/20/l7de)
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:965: UnsupportedCompilationError
+
+The above exception was the direct cause of the following exception:
+
+request = <SubRequest 'test_db' for <Coroutine test_upload_txt_file>>
+kwargs = {}, func = <function test_db at 0x000001BAF5CB0400>
+event_loop_fixture_id = 'event_loop'
+setup = <function _wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.setup at 0x000001BAF5DFF380>
+setup_task = <Task finished name='Task-3' coro=<_wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.setup() done, de...<sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF5D73AA0> can't render element of type JSONB")>
+
+    @functools.wraps(fixture)
+    def _asyncgen_fixture_wrapper(request: FixtureRequest, **kwargs: Any):
+        func = _perhaps_rebind_fixture_func(fixture, request.instance)
+        event_loop_fixture_id = _get_event_loop_fixture_id_for_async_fixture(
+            request, func
+        )
+        event_loop = request.getfixturevalue(event_loop_fixture_id)
+        kwargs.pop(event_loop_fixture_id, None)
+        gen_obj = func(**_add_kwargs(func, kwargs, event_loop, request))
+    
+        async def setup():
+            res = await gen_obj.__anext__()  # type: ignore[union-attr]
+            return res
+    
+        context = contextvars.copy_context()
+        setup_task = _create_task_in_context(event_loop, setup(), context)
+>       result = event_loop.run_until_complete(setup_task)
+
+.venv\Lib\site-packages\pytest_asyncio\plugin.py:329: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\jkoli\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py:687: in run_until_complete
+    return future.result()
+.venv\Lib\site-packages\pytest_asyncio\plugin.py:324: in setup
+    res = await gen_obj.__anext__()  # type: ignore[union-attr]
+tests\conftest.py:38: in test_db
+    await conn.run_sync(Base.metadata.create_all)
+.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py:886: in run_sync
+    return await greenlet_spawn(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:203: in greenlet_spawn
+    result = context.switch(value)
+.venv\Lib\site-packages\sqlalchemy\sql\schema.py:5868: in create_all
+    bind._run_ddl_visitor(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:2459: in _run_ddl_visitor
+    visitorcallable(self.dialect, self, **kwargs).traverse_single(element)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:664: in traverse_single
+    return meth(obj, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:918: in visit_metadata
+    self.traverse_single(
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:664: in traverse_single
+    return meth(obj, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:956: in visit_table
+    )._invoke_with(self.connection)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:314: in _invoke_with
+    return bind.execute(self)
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1418: in execute
+    return meth(
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:180: in _execute_on_connection
+    return connection._execute_ddl(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1526: in _execute_ddl
+    compiled = ddl.compile(
+.venv\Lib\site-packages\sqlalchemy\sql\elements.py:308: in compile
+    return self._compiler(dialect, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:69: in _compiler
+    return dialect.ddl_compiler(dialect, self, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:870: in __init__
+    self.string = self.process(self.statement, **compile_kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:915: in process
+    return obj._compiler_dispatch(self, **kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:141: in _compiler_dispatch
+    return meth(self, **kw)  # type: ignore  # noqa: E501
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteDDLCompiler object at 0x000001BAF5E1FF80>
+create = <sqlalchemy.sql.ddl.CreateTable object at 0x000001BAF5E1FF20>, kw = {}
+table = Table('analysis_results', MetaData(), Column('id', UUID(), table=<analysis_results>, primary_key=True, nullable=False,... nullable=False, default=CallableColumnDefault(<function AnalysisResult.<lambda> at 0x000001BACB876A20>)), schema=None)
+preparer = <sqlalchemy.dialects.sqlite.base.SQLiteIdentifierPreparer object at 0x000001BAF5D73470>
+text = '\nCREATE TABLE analysis_results (\n\tid UUID NOT NULL, \n\tfs_id UUID NOT NULL, \n\tanalysis_type VARCHAR(64) NOT NULL'
+create_table_suffix = '', separator = ', \n', first_pk = True
+create_column = <sqlalchemy.sql.ddl.CreateColumn object at 0x000001BAF5E1DA60>
+
+    def visit_create_table(self, create, **kw):
+        table = create.element
+        preparer = self.preparer
+    
+        text = "\nCREATE "
+        if table._prefixes:
+            text += " ".join(table._prefixes) + " "
+    
+        text += "TABLE "
+        if create.if_not_exists:
+            text += "IF NOT EXISTS "
+    
+        text += preparer.format_table(table) + " "
+    
+        create_table_suffix = self.create_table_suffix(table)
+        if create_table_suffix:
+            text += create_table_suffix + " "
+    
+        text += "("
+    
+        separator = "\n"
+    
+        # if only one primary key, specify it along with the column
+        first_pk = False
+        for create_column in create.columns:
+            column = create_column.element
+            try:
+                processed = self.process(
+                    create_column, first_pk=column.primary_key and not first_pk
+                )
+                if processed is not None:
+                    text += separator
+                    separator = ", \n"
+                    text += "\t" + processed
+                if column.primary_key:
+                    first_pk = True
+            except exc.CompileError as ce:
+>               raise exc.CompileError(
+                    "(in table '%s', column '%s'): %s"
+                    % (table.description, column.name, ce.args[0])
+                ) from ce
+E               sqlalchemy.exc.CompileError: (in table 'analysis_results', column 'result_json'): Compiler <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF5D73AA0> can't render element of type JSONB
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6657: CompileError
+_______________ ERROR at setup of test_upload_invalid_extension _______________
+
+self = JSONB(astext_type=Text())
+visitor = <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75FB770>
+kw = {'type_expression': Column('result_json', JSONB(astext_type=Text()), table=<analysis_results>)}
+
+    def _compiler_dispatch(
+        self: Visitable, visitor: Any, **kw: Any
+    ) -> str:
+        """Look for an attribute named "visit_<visit_name>" on the
+        visitor, and call it with the same kw params.
+    
+        """
+        try:
+>           meth = getter(visitor)
+E           AttributeError: 'SQLiteTypeCompiler' object has no attribute 'visit_JSONB'. Did you mean: 'visit_JSON'?
+
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:137: AttributeError
+
+The above exception was the direct cause of the following exception:
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteDDLCompiler object at 0x000001BAF75FB7D0>
+create = <sqlalchemy.sql.ddl.CreateTable object at 0x000001BAF75F9190>, kw = {}
+table = Table('analysis_results', MetaData(), Column('id', UUID(), table=<analysis_results>, primary_key=True, nullable=False,... nullable=False, default=CallableColumnDefault(<function AnalysisResult.<lambda> at 0x000001BACB876A20>)), schema=None)
+preparer = <sqlalchemy.dialects.sqlite.base.SQLiteIdentifierPreparer object at 0x000001BAF75F9370>
+text = '\nCREATE TABLE analysis_results (\n\tid UUID NOT NULL, \n\tfs_id UUID NOT NULL, \n\tanalysis_type VARCHAR(64) NOT NULL'
+create_table_suffix = '', separator = ', \n', first_pk = True
+create_column = <sqlalchemy.sql.ddl.CreateColumn object at 0x000001BAF75F8530>
+
+    def visit_create_table(self, create, **kw):
+        table = create.element
+        preparer = self.preparer
+    
+        text = "\nCREATE "
+        if table._prefixes:
+            text += " ".join(table._prefixes) + " "
+    
+        text += "TABLE "
+        if create.if_not_exists:
+            text += "IF NOT EXISTS "
+    
+        text += preparer.format_table(table) + " "
+    
+        create_table_suffix = self.create_table_suffix(table)
+        if create_table_suffix:
+            text += create_table_suffix + " "
+    
+        text += "("
+    
+        separator = "\n"
+    
+        # if only one primary key, specify it along with the column
+        first_pk = False
+        for create_column in create.columns:
+            column = create_column.element
+            try:
+>               processed = self.process(
+                    create_column, first_pk=column.primary_key and not first_pk
+                )
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6647: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:915: in process
+    return obj._compiler_dispatch(self, **kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:141: in _compiler_dispatch
+    return meth(self, **kw)  # type: ignore  # noqa: E501
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6678: in visit_create_column
+    text = self.get_column_specification(column, first_pk=first_pk)
+.venv\Lib\site-packages\sqlalchemy\dialects\sqlite\base.py:1540: in get_column_specification
+    coltype = self.dialect.type_compiler_instance.process(
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:960: in process
+    return type_._compiler_dispatch(self, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:139: in _compiler_dispatch
+    return visitor.visit_unsupported_compilation(self, err, **kw)  # type: ignore  # noqa: E501
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75FB770>
+element = JSONB(astext_type=Text())
+err = AttributeError("'SQLiteTypeCompiler' object has no attribute 'visit_JSONB'")
+kw = {'type_expression': Column('result_json', JSONB(astext_type=Text()), table=<analysis_results>)}
+
+    def visit_unsupported_compilation(
+        self, element: Any, err: Exception, **kw: Any
+    ) -> NoReturn:
+>       raise exc.UnsupportedCompilationError(self, element) from err
+E       sqlalchemy.exc.UnsupportedCompilationError: Compiler <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75FB770> can't render element of type JSONB (Background on this error at: https://sqlalche.me/e/20/l7de)
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:965: UnsupportedCompilationError
+
+The above exception was the direct cause of the following exception:
+
+request = <SubRequest 'test_db' for <Coroutine test_upload_invalid_extension>>
+kwargs = {}, func = <function test_db at 0x000001BAF5CB0400>
+event_loop_fixture_id = 'event_loop'
+setup = <function _wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.setup at 0x000001BAF5DFEC00>
+setup_task = <Task finished name='Task-5' coro=<_wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.setup() done, de...<sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75FB770> can't render element of type JSONB")>
+
+    @functools.wraps(fixture)
+    def _asyncgen_fixture_wrapper(request: FixtureRequest, **kwargs: Any):
+        func = _perhaps_rebind_fixture_func(fixture, request.instance)
+        event_loop_fixture_id = _get_event_loop_fixture_id_for_async_fixture(
+            request, func
+        )
+        event_loop = request.getfixturevalue(event_loop_fixture_id)
+        kwargs.pop(event_loop_fixture_id, None)
+        gen_obj = func(**_add_kwargs(func, kwargs, event_loop, request))
+    
+        async def setup():
+            res = await gen_obj.__anext__()  # type: ignore[union-attr]
+            return res
+    
+        context = contextvars.copy_context()
+        setup_task = _create_task_in_context(event_loop, setup(), context)
+>       result = event_loop.run_until_complete(setup_task)
+
+.venv\Lib\site-packages\pytest_asyncio\plugin.py:329: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\jkoli\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py:687: in run_until_complete
+    return future.result()
+.venv\Lib\site-packages\pytest_asyncio\plugin.py:324: in setup
+    res = await gen_obj.__anext__()  # type: ignore[union-attr]
+tests\conftest.py:38: in test_db
+    await conn.run_sync(Base.metadata.create_all)
+.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py:886: in run_sync
+    return await greenlet_spawn(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:203: in greenlet_spawn
+    result = context.switch(value)
+.venv\Lib\site-packages\sqlalchemy\sql\schema.py:5868: in create_all
+    bind._run_ddl_visitor(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:2459: in _run_ddl_visitor
+    visitorcallable(self.dialect, self, **kwargs).traverse_single(element)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:664: in traverse_single
+    return meth(obj, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:918: in visit_metadata
+    self.traverse_single(
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:664: in traverse_single
+    return meth(obj, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:956: in visit_table
+    )._invoke_with(self.connection)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:314: in _invoke_with
+    return bind.execute(self)
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1418: in execute
+    return meth(
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:180: in _execute_on_connection
+    return connection._execute_ddl(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1526: in _execute_ddl
+    compiled = ddl.compile(
+.venv\Lib\site-packages\sqlalchemy\sql\elements.py:308: in compile
+    return self._compiler(dialect, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:69: in _compiler
+    return dialect.ddl_compiler(dialect, self, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:870: in __init__
+    self.string = self.process(self.statement, **compile_kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:915: in process
+    return obj._compiler_dispatch(self, **kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:141: in _compiler_dispatch
+    return meth(self, **kw)  # type: ignore  # noqa: E501
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteDDLCompiler object at 0x000001BAF75FB7D0>
+create = <sqlalchemy.sql.ddl.CreateTable object at 0x000001BAF75F9190>, kw = {}
+table = Table('analysis_results', MetaData(), Column('id', UUID(), table=<analysis_results>, primary_key=True, nullable=False,... nullable=False, default=CallableColumnDefault(<function AnalysisResult.<lambda> at 0x000001BACB876A20>)), schema=None)
+preparer = <sqlalchemy.dialects.sqlite.base.SQLiteIdentifierPreparer object at 0x000001BAF75F9370>
+text = '\nCREATE TABLE analysis_results (\n\tid UUID NOT NULL, \n\tfs_id UUID NOT NULL, \n\tanalysis_type VARCHAR(64) NOT NULL'
+create_table_suffix = '', separator = ', \n', first_pk = True
+create_column = <sqlalchemy.sql.ddl.CreateColumn object at 0x000001BAF75F8530>
+
+    def visit_create_table(self, create, **kw):
+        table = create.element
+        preparer = self.preparer
+    
+        text = "\nCREATE "
+        if table._prefixes:
+            text += " ".join(table._prefixes) + " "
+    
+        text += "TABLE "
+        if create.if_not_exists:
+            text += "IF NOT EXISTS "
+    
+        text += preparer.format_table(table) + " "
+    
+        create_table_suffix = self.create_table_suffix(table)
+        if create_table_suffix:
+            text += create_table_suffix + " "
+    
+        text += "("
+    
+        separator = "\n"
+    
+        # if only one primary key, specify it along with the column
+        first_pk = False
+        for create_column in create.columns:
+            column = create_column.element
+            try:
+                processed = self.process(
+                    create_column, first_pk=column.primary_key and not first_pk
+                )
+                if processed is not None:
+                    text += separator
+                    separator = ", \n"
+                    text += "\t" + processed
+                if column.primary_key:
+                    first_pk = True
+            except exc.CompileError as ce:
+>               raise exc.CompileError(
+                    "(in table '%s', column '%s'): %s"
+                    % (table.description, column.name, ce.args[0])
+                ) from ce
+E               sqlalchemy.exc.CompileError: (in table 'analysis_results', column 'result_json'): Compiler <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75FB770> can't render element of type JSONB
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6657: CompileError
+____________________ ERROR at setup of test_list_documents ____________________
+
+self = JSONB(astext_type=Text())
+visitor = <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75FB3E0>
+kw = {'type_expression': Column('result_json', JSONB(astext_type=Text()), table=<analysis_results>)}
+
+    def _compiler_dispatch(
+        self: Visitable, visitor: Any, **kw: Any
+    ) -> str:
+        """Look for an attribute named "visit_<visit_name>" on the
+        visitor, and call it with the same kw params.
+    
+        """
+        try:
+>           meth = getter(visitor)
+E           AttributeError: 'SQLiteTypeCompiler' object has no attribute 'visit_JSONB'. Did you mean: 'visit_JSON'?
+
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:137: AttributeError
+
+The above exception was the direct cause of the following exception:
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteDDLCompiler object at 0x000001BAF75FB3B0>
+create = <sqlalchemy.sql.ddl.CreateTable object at 0x000001BAF75FB4A0>, kw = {}
+table = Table('analysis_results', MetaData(), Column('id', UUID(), table=<analysis_results>, primary_key=True, nullable=False,... nullable=False, default=CallableColumnDefault(<function AnalysisResult.<lambda> at 0x000001BACB876A20>)), schema=None)
+preparer = <sqlalchemy.dialects.sqlite.base.SQLiteIdentifierPreparer object at 0x000001BAF75FAD20>
+text = '\nCREATE TABLE analysis_results (\n\tid UUID NOT NULL, \n\tfs_id UUID NOT NULL, \n\tanalysis_type VARCHAR(64) NOT NULL'
+create_table_suffix = '', separator = ', \n', first_pk = True
+create_column = <sqlalchemy.sql.ddl.CreateColumn object at 0x000001BAF75FB620>
+
+    def visit_create_table(self, create, **kw):
+        table = create.element
+        preparer = self.preparer
+    
+        text = "\nCREATE "
+        if table._prefixes:
+            text += " ".join(table._prefixes) + " "
+    
+        text += "TABLE "
+        if create.if_not_exists:
+            text += "IF NOT EXISTS "
+    
+        text += preparer.format_table(table) + " "
+    
+        create_table_suffix = self.create_table_suffix(table)
+        if create_table_suffix:
+            text += create_table_suffix + " "
+    
+        text += "("
+    
+        separator = "\n"
+    
+        # if only one primary key, specify it along with the column
+        first_pk = False
+        for create_column in create.columns:
+            column = create_column.element
+            try:
+>               processed = self.process(
+                    create_column, first_pk=column.primary_key and not first_pk
+                )
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6647: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:915: in process
+    return obj._compiler_dispatch(self, **kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:141: in _compiler_dispatch
+    return meth(self, **kw)  # type: ignore  # noqa: E501
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6678: in visit_create_column
+    text = self.get_column_specification(column, first_pk=first_pk)
+.venv\Lib\site-packages\sqlalchemy\dialects\sqlite\base.py:1540: in get_column_specification
+    coltype = self.dialect.type_compiler_instance.process(
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:960: in process
+    return type_._compiler_dispatch(self, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:139: in _compiler_dispatch
+    return visitor.visit_unsupported_compilation(self, err, **kw)  # type: ignore  # noqa: E501
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75FB3E0>
+element = JSONB(astext_type=Text())
+err = AttributeError("'SQLiteTypeCompiler' object has no attribute 'visit_JSONB'")
+kw = {'type_expression': Column('result_json', JSONB(astext_type=Text()), table=<analysis_results>)}
+
+    def visit_unsupported_compilation(
+        self, element: Any, err: Exception, **kw: Any
+    ) -> NoReturn:
+>       raise exc.UnsupportedCompilationError(self, element) from err
+E       sqlalchemy.exc.UnsupportedCompilationError: Compiler <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75FB3E0> can't render element of type JSONB (Background on this error at: https://sqlalche.me/e/20/l7de)
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:965: UnsupportedCompilationError
+
+The above exception was the direct cause of the following exception:
+
+request = <SubRequest 'test_db' for <Coroutine test_list_documents>>
+kwargs = {}, func = <function test_db at 0x000001BAF5CB0400>
+event_loop_fixture_id = 'event_loop'
+setup = <function _wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.setup at 0x000001BAF5DFD940>
+setup_task = <Task finished name='Task-7' coro=<_wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.setup() done, de...<sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75FB3E0> can't render element of type JSONB")>
+
+    @functools.wraps(fixture)
+    def _asyncgen_fixture_wrapper(request: FixtureRequest, **kwargs: Any):
+        func = _perhaps_rebind_fixture_func(fixture, request.instance)
+        event_loop_fixture_id = _get_event_loop_fixture_id_for_async_fixture(
+            request, func
+        )
+        event_loop = request.getfixturevalue(event_loop_fixture_id)
+        kwargs.pop(event_loop_fixture_id, None)
+        gen_obj = func(**_add_kwargs(func, kwargs, event_loop, request))
+    
+        async def setup():
+            res = await gen_obj.__anext__()  # type: ignore[union-attr]
+            return res
+    
+        context = contextvars.copy_context()
+        setup_task = _create_task_in_context(event_loop, setup(), context)
+>       result = event_loop.run_until_complete(setup_task)
+
+.venv\Lib\site-packages\pytest_asyncio\plugin.py:329: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\jkoli\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py:687: in run_until_complete
+    return future.result()
+.venv\Lib\site-packages\pytest_asyncio\plugin.py:324: in setup
+    res = await gen_obj.__anext__()  # type: ignore[union-attr]
+tests\conftest.py:38: in test_db
+    await conn.run_sync(Base.metadata.create_all)
+.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py:886: in run_sync
+    return await greenlet_spawn(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:203: in greenlet_spawn
+    result = context.switch(value)
+.venv\Lib\site-packages\sqlalchemy\sql\schema.py:5868: in create_all
+    bind._run_ddl_visitor(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:2459: in _run_ddl_visitor
+    visitorcallable(self.dialect, self, **kwargs).traverse_single(element)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:664: in traverse_single
+    return meth(obj, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:918: in visit_metadata
+    self.traverse_single(
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:664: in traverse_single
+    return meth(obj, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:956: in visit_table
+    )._invoke_with(self.connection)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:314: in _invoke_with
+    return bind.execute(self)
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1418: in execute
+    return meth(
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:180: in _execute_on_connection
+    return connection._execute_ddl(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1526: in _execute_ddl
+    compiled = ddl.compile(
+.venv\Lib\site-packages\sqlalchemy\sql\elements.py:308: in compile
+    return self._compiler(dialect, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:69: in _compiler
+    return dialect.ddl_compiler(dialect, self, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:870: in __init__
+    self.string = self.process(self.statement, **compile_kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:915: in process
+    return obj._compiler_dispatch(self, **kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:141: in _compiler_dispatch
+    return meth(self, **kw)  # type: ignore  # noqa: E501
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteDDLCompiler object at 0x000001BAF75FB3B0>
+create = <sqlalchemy.sql.ddl.CreateTable object at 0x000001BAF75FB4A0>, kw = {}
+table = Table('analysis_results', MetaData(), Column('id', UUID(), table=<analysis_results>, primary_key=True, nullable=False,... nullable=False, default=CallableColumnDefault(<function AnalysisResult.<lambda> at 0x000001BACB876A20>)), schema=None)
+preparer = <sqlalchemy.dialects.sqlite.base.SQLiteIdentifierPreparer object at 0x000001BAF75FAD20>
+text = '\nCREATE TABLE analysis_results (\n\tid UUID NOT NULL, \n\tfs_id UUID NOT NULL, \n\tanalysis_type VARCHAR(64) NOT NULL'
+create_table_suffix = '', separator = ', \n', first_pk = True
+create_column = <sqlalchemy.sql.ddl.CreateColumn object at 0x000001BAF75FB620>
+
+    def visit_create_table(self, create, **kw):
+        table = create.element
+        preparer = self.preparer
+    
+        text = "\nCREATE "
+        if table._prefixes:
+            text += " ".join(table._prefixes) + " "
+    
+        text += "TABLE "
+        if create.if_not_exists:
+            text += "IF NOT EXISTS "
+    
+        text += preparer.format_table(table) + " "
+    
+        create_table_suffix = self.create_table_suffix(table)
+        if create_table_suffix:
+            text += create_table_suffix + " "
+    
+        text += "("
+    
+        separator = "\n"
+    
+        # if only one primary key, specify it along with the column
+        first_pk = False
+        for create_column in create.columns:
+            column = create_column.element
+            try:
+                processed = self.process(
+                    create_column, first_pk=column.primary_key and not first_pk
+                )
+                if processed is not None:
+                    text += separator
+                    separator = ", \n"
+                    text += "\t" + processed
+                if column.primary_key:
+                    first_pk = True
+            except exc.CompileError as ce:
+>               raise exc.CompileError(
+                    "(in table '%s', column '%s'): %s"
+                    % (table.description, column.name, ce.args[0])
+                ) from ce
+E               sqlalchemy.exc.CompileError: (in table 'analysis_results', column 'result_json'): Compiler <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75FB3E0> can't render element of type JSONB
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6657: CompileError
+_____________________ ERROR at setup of test_get_document _____________________
+
+self = JSONB(astext_type=Text())
+visitor = <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF6DF0890>
+kw = {'type_expression': Column('result_json', JSONB(astext_type=Text()), table=<analysis_results>)}
+
+    def _compiler_dispatch(
+        self: Visitable, visitor: Any, **kw: Any
+    ) -> str:
+        """Look for an attribute named "visit_<visit_name>" on the
+        visitor, and call it with the same kw params.
+    
+        """
+        try:
+>           meth = getter(visitor)
+E           AttributeError: 'SQLiteTypeCompiler' object has no attribute 'visit_JSONB'. Did you mean: 'visit_JSON'?
+
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:137: AttributeError
+
+The above exception was the direct cause of the following exception:
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteDDLCompiler object at 0x000001BAF6DF0500>
+create = <sqlalchemy.sql.ddl.CreateTable object at 0x000001BAF6DF04A0>, kw = {}
+table = Table('analysis_results', MetaData(), Column('id', UUID(), table=<analysis_results>, primary_key=True, nullable=False,... nullable=False, default=CallableColumnDefault(<function AnalysisResult.<lambda> at 0x000001BACB876A20>)), schema=None)
+preparer = <sqlalchemy.dialects.sqlite.base.SQLiteIdentifierPreparer object at 0x000001BAF6DF0080>
+text = '\nCREATE TABLE analysis_results (\n\tid UUID NOT NULL, \n\tfs_id UUID NOT NULL, \n\tanalysis_type VARCHAR(64) NOT NULL'
+create_table_suffix = '', separator = ', \n', first_pk = True
+create_column = <sqlalchemy.sql.ddl.CreateColumn object at 0x000001BAF6DF0C80>
+
+    def visit_create_table(self, create, **kw):
+        table = create.element
+        preparer = self.preparer
+    
+        text = "\nCREATE "
+        if table._prefixes:
+            text += " ".join(table._prefixes) + " "
+    
+        text += "TABLE "
+        if create.if_not_exists:
+            text += "IF NOT EXISTS "
+    
+        text += preparer.format_table(table) + " "
+    
+        create_table_suffix = self.create_table_suffix(table)
+        if create_table_suffix:
+            text += create_table_suffix + " "
+    
+        text += "("
+    
+        separator = "\n"
+    
+        # if only one primary key, specify it along with the column
+        first_pk = False
+        for create_column in create.columns:
+            column = create_column.element
+            try:
+>               processed = self.process(
+                    create_column, first_pk=column.primary_key and not first_pk
+                )
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6647: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:915: in process
+    return obj._compiler_dispatch(self, **kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:141: in _compiler_dispatch
+    return meth(self, **kw)  # type: ignore  # noqa: E501
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6678: in visit_create_column
+    text = self.get_column_specification(column, first_pk=first_pk)
+.venv\Lib\site-packages\sqlalchemy\dialects\sqlite\base.py:1540: in get_column_specification
+    coltype = self.dialect.type_compiler_instance.process(
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:960: in process
+    return type_._compiler_dispatch(self, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:139: in _compiler_dispatch
+    return visitor.visit_unsupported_compilation(self, err, **kw)  # type: ignore  # noqa: E501
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF6DF0890>
+element = JSONB(astext_type=Text())
+err = AttributeError("'SQLiteTypeCompiler' object has no attribute 'visit_JSONB'")
+kw = {'type_expression': Column('result_json', JSONB(astext_type=Text()), table=<analysis_results>)}
+
+    def visit_unsupported_compilation(
+        self, element: Any, err: Exception, **kw: Any
+    ) -> NoReturn:
+>       raise exc.UnsupportedCompilationError(self, element) from err
+E       sqlalchemy.exc.UnsupportedCompilationError: Compiler <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF6DF0890> can't render element of type JSONB (Background on this error at: https://sqlalche.me/e/20/l7de)
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:965: UnsupportedCompilationError
+
+The above exception was the direct cause of the following exception:
+
+request = <SubRequest 'test_db' for <Coroutine test_get_document>>, kwargs = {}
+func = <function test_db at 0x000001BAF5CB0400>
+event_loop_fixture_id = 'event_loop'
+setup = <function _wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.setup at 0x000001BAF5DFD760>
+setup_task = <Task finished name='Task-9' coro=<_wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.setup() done, de...<sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF6DF0890> can't render element of type JSONB")>
+
+    @functools.wraps(fixture)
+    def _asyncgen_fixture_wrapper(request: FixtureRequest, **kwargs: Any):
+        func = _perhaps_rebind_fixture_func(fixture, request.instance)
+        event_loop_fixture_id = _get_event_loop_fixture_id_for_async_fixture(
+            request, func
+        )
+        event_loop = request.getfixturevalue(event_loop_fixture_id)
+        kwargs.pop(event_loop_fixture_id, None)
+        gen_obj = func(**_add_kwargs(func, kwargs, event_loop, request))
+    
+        async def setup():
+            res = await gen_obj.__anext__()  # type: ignore[union-attr]
+            return res
+    
+        context = contextvars.copy_context()
+        setup_task = _create_task_in_context(event_loop, setup(), context)
+>       result = event_loop.run_until_complete(setup_task)
+
+.venv\Lib\site-packages\pytest_asyncio\plugin.py:329: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\jkoli\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py:687: in run_until_complete
+    return future.result()
+.venv\Lib\site-packages\pytest_asyncio\plugin.py:324: in setup
+    res = await gen_obj.__anext__()  # type: ignore[union-attr]
+tests\conftest.py:38: in test_db
+    await conn.run_sync(Base.metadata.create_all)
+.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py:886: in run_sync
+    return await greenlet_spawn(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:203: in greenlet_spawn
+    result = context.switch(value)
+.venv\Lib\site-packages\sqlalchemy\sql\schema.py:5868: in create_all
+    bind._run_ddl_visitor(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:2459: in _run_ddl_visitor
+    visitorcallable(self.dialect, self, **kwargs).traverse_single(element)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:664: in traverse_single
+    return meth(obj, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:918: in visit_metadata
+    self.traverse_single(
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:664: in traverse_single
+    return meth(obj, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:956: in visit_table
+    )._invoke_with(self.connection)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:314: in _invoke_with
+    return bind.execute(self)
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1418: in execute
+    return meth(
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:180: in _execute_on_connection
+    return connection._execute_ddl(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1526: in _execute_ddl
+    compiled = ddl.compile(
+.venv\Lib\site-packages\sqlalchemy\sql\elements.py:308: in compile
+    return self._compiler(dialect, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:69: in _compiler
+    return dialect.ddl_compiler(dialect, self, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:870: in __init__
+    self.string = self.process(self.statement, **compile_kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:915: in process
+    return obj._compiler_dispatch(self, **kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:141: in _compiler_dispatch
+    return meth(self, **kw)  # type: ignore  # noqa: E501
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteDDLCompiler object at 0x000001BAF6DF0500>
+create = <sqlalchemy.sql.ddl.CreateTable object at 0x000001BAF6DF04A0>, kw = {}
+table = Table('analysis_results', MetaData(), Column('id', UUID(), table=<analysis_results>, primary_key=True, nullable=False,... nullable=False, default=CallableColumnDefault(<function AnalysisResult.<lambda> at 0x000001BACB876A20>)), schema=None)
+preparer = <sqlalchemy.dialects.sqlite.base.SQLiteIdentifierPreparer object at 0x000001BAF6DF0080>
+text = '\nCREATE TABLE analysis_results (\n\tid UUID NOT NULL, \n\tfs_id UUID NOT NULL, \n\tanalysis_type VARCHAR(64) NOT NULL'
+create_table_suffix = '', separator = ', \n', first_pk = True
+create_column = <sqlalchemy.sql.ddl.CreateColumn object at 0x000001BAF6DF0C80>
+
+    def visit_create_table(self, create, **kw):
+        table = create.element
+        preparer = self.preparer
+    
+        text = "\nCREATE "
+        if table._prefixes:
+            text += " ".join(table._prefixes) + " "
+    
+        text += "TABLE "
+        if create.if_not_exists:
+            text += "IF NOT EXISTS "
+    
+        text += preparer.format_table(table) + " "
+    
+        create_table_suffix = self.create_table_suffix(table)
+        if create_table_suffix:
+            text += create_table_suffix + " "
+    
+        text += "("
+    
+        separator = "\n"
+    
+        # if only one primary key, specify it along with the column
+        first_pk = False
+        for create_column in create.columns:
+            column = create_column.element
+            try:
+                processed = self.process(
+                    create_column, first_pk=column.primary_key and not first_pk
+                )
+                if processed is not None:
+                    text += separator
+                    separator = ", \n"
+                    text += "\t" + processed
+                if column.primary_key:
+                    first_pk = True
+            except exc.CompileError as ce:
+>               raise exc.CompileError(
+                    "(in table '%s', column '%s'): %s"
+                    % (table.description, column.name, ce.args[0])
+                ) from ce
+E               sqlalchemy.exc.CompileError: (in table 'analysis_results', column 'result_json'): Compiler <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF6DF0890> can't render element of type JSONB
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6657: CompileError
+________________ ERROR at setup of test_get_document_not_found ________________
+
+self = JSONB(astext_type=Text())
+visitor = <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75FB3E0>
+kw = {'type_expression': Column('result_json', JSONB(astext_type=Text()), table=<analysis_results>)}
+
+    def _compiler_dispatch(
+        self: Visitable, visitor: Any, **kw: Any
+    ) -> str:
+        """Look for an attribute named "visit_<visit_name>" on the
+        visitor, and call it with the same kw params.
+    
+        """
+        try:
+>           meth = getter(visitor)
+E           AttributeError: 'SQLiteTypeCompiler' object has no attribute 'visit_JSONB'. Did you mean: 'visit_JSON'?
+
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:137: AttributeError
+
+The above exception was the direct cause of the following exception:
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteDDLCompiler object at 0x000001BAF75FB9E0>
+create = <sqlalchemy.sql.ddl.CreateTable object at 0x000001BAF75FBE30>, kw = {}
+table = Table('analysis_results', MetaData(), Column('id', UUID(), table=<analysis_results>, primary_key=True, nullable=False,... nullable=False, default=CallableColumnDefault(<function AnalysisResult.<lambda> at 0x000001BACB876A20>)), schema=None)
+preparer = <sqlalchemy.dialects.sqlite.base.SQLiteIdentifierPreparer object at 0x000001BAF75FB650>
+text = '\nCREATE TABLE analysis_results (\n\tid UUID NOT NULL, \n\tfs_id UUID NOT NULL, \n\tanalysis_type VARCHAR(64) NOT NULL'
+create_table_suffix = '', separator = ', \n', first_pk = True
+create_column = <sqlalchemy.sql.ddl.CreateColumn object at 0x000001BAF75FBAA0>
+
+    def visit_create_table(self, create, **kw):
+        table = create.element
+        preparer = self.preparer
+    
+        text = "\nCREATE "
+        if table._prefixes:
+            text += " ".join(table._prefixes) + " "
+    
+        text += "TABLE "
+        if create.if_not_exists:
+            text += "IF NOT EXISTS "
+    
+        text += preparer.format_table(table) + " "
+    
+        create_table_suffix = self.create_table_suffix(table)
+        if create_table_suffix:
+            text += create_table_suffix + " "
+    
+        text += "("
+    
+        separator = "\n"
+    
+        # if only one primary key, specify it along with the column
+        first_pk = False
+        for create_column in create.columns:
+            column = create_column.element
+            try:
+>               processed = self.process(
+                    create_column, first_pk=column.primary_key and not first_pk
+                )
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6647: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:915: in process
+    return obj._compiler_dispatch(self, **kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:141: in _compiler_dispatch
+    return meth(self, **kw)  # type: ignore  # noqa: E501
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6678: in visit_create_column
+    text = self.get_column_specification(column, first_pk=first_pk)
+.venv\Lib\site-packages\sqlalchemy\dialects\sqlite\base.py:1540: in get_column_specification
+    coltype = self.dialect.type_compiler_instance.process(
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:960: in process
+    return type_._compiler_dispatch(self, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:139: in _compiler_dispatch
+    return visitor.visit_unsupported_compilation(self, err, **kw)  # type: ignore  # noqa: E501
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75FB3E0>
+element = JSONB(astext_type=Text())
+err = AttributeError("'SQLiteTypeCompiler' object has no attribute 'visit_JSONB'")
+kw = {'type_expression': Column('result_json', JSONB(astext_type=Text()), table=<analysis_results>)}
+
+    def visit_unsupported_compilation(
+        self, element: Any, err: Exception, **kw: Any
+    ) -> NoReturn:
+>       raise exc.UnsupportedCompilationError(self, element) from err
+E       sqlalchemy.exc.UnsupportedCompilationError: Compiler <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75FB3E0> can't render element of type JSONB (Background on this error at: https://sqlalche.me/e/20/l7de)
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:965: UnsupportedCompilationError
+
+The above exception was the direct cause of the following exception:
+
+request = <SubRequest 'test_db' for <Coroutine test_get_document_not_found>>
+kwargs = {}, func = <function test_db at 0x000001BAF5CB0400>
+event_loop_fixture_id = 'event_loop'
+setup = <function _wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.setup at 0x000001BAF5D2C5E0>
+setup_task = <Task finished name='Task-11' coro=<_wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.setup() done, d...<sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75FB3E0> can't render element of type JSONB")>
+
+    @functools.wraps(fixture)
+    def _asyncgen_fixture_wrapper(request: FixtureRequest, **kwargs: Any):
+        func = _perhaps_rebind_fixture_func(fixture, request.instance)
+        event_loop_fixture_id = _get_event_loop_fixture_id_for_async_fixture(
+            request, func
+        )
+        event_loop = request.getfixturevalue(event_loop_fixture_id)
+        kwargs.pop(event_loop_fixture_id, None)
+        gen_obj = func(**_add_kwargs(func, kwargs, event_loop, request))
+    
+        async def setup():
+            res = await gen_obj.__anext__()  # type: ignore[union-attr]
+            return res
+    
+        context = contextvars.copy_context()
+        setup_task = _create_task_in_context(event_loop, setup(), context)
+>       result = event_loop.run_until_complete(setup_task)
+
+.venv\Lib\site-packages\pytest_asyncio\plugin.py:329: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\jkoli\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py:687: in run_until_complete
+    return future.result()
+.venv\Lib\site-packages\pytest_asyncio\plugin.py:324: in setup
+    res = await gen_obj.__anext__()  # type: ignore[union-attr]
+tests\conftest.py:38: in test_db
+    await conn.run_sync(Base.metadata.create_all)
+.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py:886: in run_sync
+    return await greenlet_spawn(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:203: in greenlet_spawn
+    result = context.switch(value)
+.venv\Lib\site-packages\sqlalchemy\sql\schema.py:5868: in create_all
+    bind._run_ddl_visitor(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:2459: in _run_ddl_visitor
+    visitorcallable(self.dialect, self, **kwargs).traverse_single(element)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:664: in traverse_single
+    return meth(obj, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:918: in visit_metadata
+    self.traverse_single(
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:664: in traverse_single
+    return meth(obj, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:956: in visit_table
+    )._invoke_with(self.connection)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:314: in _invoke_with
+    return bind.execute(self)
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1418: in execute
+    return meth(
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:180: in _execute_on_connection
+    return connection._execute_ddl(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1526: in _execute_ddl
+    compiled = ddl.compile(
+.venv\Lib\site-packages\sqlalchemy\sql\elements.py:308: in compile
+    return self._compiler(dialect, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:69: in _compiler
+    return dialect.ddl_compiler(dialect, self, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:870: in __init__
+    self.string = self.process(self.statement, **compile_kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:915: in process
+    return obj._compiler_dispatch(self, **kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:141: in _compiler_dispatch
+    return meth(self, **kw)  # type: ignore  # noqa: E501
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteDDLCompiler object at 0x000001BAF75FB9E0>
+create = <sqlalchemy.sql.ddl.CreateTable object at 0x000001BAF75FBE30>, kw = {}
+table = Table('analysis_results', MetaData(), Column('id', UUID(), table=<analysis_results>, primary_key=True, nullable=False,... nullable=False, default=CallableColumnDefault(<function AnalysisResult.<lambda> at 0x000001BACB876A20>)), schema=None)
+preparer = <sqlalchemy.dialects.sqlite.base.SQLiteIdentifierPreparer object at 0x000001BAF75FB650>
+text = '\nCREATE TABLE analysis_results (\n\tid UUID NOT NULL, \n\tfs_id UUID NOT NULL, \n\tanalysis_type VARCHAR(64) NOT NULL'
+create_table_suffix = '', separator = ', \n', first_pk = True
+create_column = <sqlalchemy.sql.ddl.CreateColumn object at 0x000001BAF75FBAA0>
+
+    def visit_create_table(self, create, **kw):
+        table = create.element
+        preparer = self.preparer
+    
+        text = "\nCREATE "
+        if table._prefixes:
+            text += " ".join(table._prefixes) + " "
+    
+        text += "TABLE "
+        if create.if_not_exists:
+            text += "IF NOT EXISTS "
+    
+        text += preparer.format_table(table) + " "
+    
+        create_table_suffix = self.create_table_suffix(table)
+        if create_table_suffix:
+            text += create_table_suffix + " "
+    
+        text += "("
+    
+        separator = "\n"
+    
+        # if only one primary key, specify it along with the column
+        first_pk = False
+        for create_column in create.columns:
+            column = create_column.element
+            try:
+                processed = self.process(
+                    create_column, first_pk=column.primary_key and not first_pk
+                )
+                if processed is not None:
+                    text += separator
+                    separator = ", \n"
+                    text += "\t" + processed
+                if column.primary_key:
+                    first_pk = True
+            except exc.CompileError as ce:
+>               raise exc.CompileError(
+                    "(in table '%s', column '%s'): %s"
+                    % (table.description, column.name, ce.args[0])
+                ) from ce
+E               sqlalchemy.exc.CompileError: (in table 'analysis_results', column 'result_json'): Compiler <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75FB3E0> can't render element of type JSONB
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6657: CompileError
+___________________ ERROR at setup of test_delete_document ____________________
+
+self = JSONB(astext_type=Text())
+visitor = <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75F8C20>
+kw = {'type_expression': Column('result_json', JSONB(astext_type=Text()), table=<analysis_results>)}
+
+    def _compiler_dispatch(
+        self: Visitable, visitor: Any, **kw: Any
+    ) -> str:
+        """Look for an attribute named "visit_<visit_name>" on the
+        visitor, and call it with the same kw params.
+    
+        """
+        try:
+>           meth = getter(visitor)
+E           AttributeError: 'SQLiteTypeCompiler' object has no attribute 'visit_JSONB'. Did you mean: 'visit_JSON'?
+
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:137: AttributeError
+
+The above exception was the direct cause of the following exception:
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteDDLCompiler object at 0x000001BAF5D28950>
+create = <sqlalchemy.sql.ddl.CreateTable object at 0x000001BAF5D28B60>, kw = {}
+table = Table('analysis_results', MetaData(), Column('id', UUID(), table=<analysis_results>, primary_key=True, nullable=False,... nullable=False, default=CallableColumnDefault(<function AnalysisResult.<lambda> at 0x000001BACB876A20>)), schema=None)
+preparer = <sqlalchemy.dialects.sqlite.base.SQLiteIdentifierPreparer object at 0x000001BAF75F8EC0>
+text = '\nCREATE TABLE analysis_results (\n\tid UUID NOT NULL, \n\tfs_id UUID NOT NULL, \n\tanalysis_type VARCHAR(64) NOT NULL'
+create_table_suffix = '', separator = ', \n', first_pk = True
+create_column = <sqlalchemy.sql.ddl.CreateColumn object at 0x000001BAF5D288F0>
+
+    def visit_create_table(self, create, **kw):
+        table = create.element
+        preparer = self.preparer
+    
+        text = "\nCREATE "
+        if table._prefixes:
+            text += " ".join(table._prefixes) + " "
+    
+        text += "TABLE "
+        if create.if_not_exists:
+            text += "IF NOT EXISTS "
+    
+        text += preparer.format_table(table) + " "
+    
+        create_table_suffix = self.create_table_suffix(table)
+        if create_table_suffix:
+            text += create_table_suffix + " "
+    
+        text += "("
+    
+        separator = "\n"
+    
+        # if only one primary key, specify it along with the column
+        first_pk = False
+        for create_column in create.columns:
+            column = create_column.element
+            try:
+>               processed = self.process(
+                    create_column, first_pk=column.primary_key and not first_pk
+                )
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6647: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:915: in process
+    return obj._compiler_dispatch(self, **kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:141: in _compiler_dispatch
+    return meth(self, **kw)  # type: ignore  # noqa: E501
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6678: in visit_create_column
+    text = self.get_column_specification(column, first_pk=first_pk)
+.venv\Lib\site-packages\sqlalchemy\dialects\sqlite\base.py:1540: in get_column_specification
+    coltype = self.dialect.type_compiler_instance.process(
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:960: in process
+    return type_._compiler_dispatch(self, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:139: in _compiler_dispatch
+    return visitor.visit_unsupported_compilation(self, err, **kw)  # type: ignore  # noqa: E501
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75F8C20>
+element = JSONB(astext_type=Text())
+err = AttributeError("'SQLiteTypeCompiler' object has no attribute 'visit_JSONB'")
+kw = {'type_expression': Column('result_json', JSONB(astext_type=Text()), table=<analysis_results>)}
+
+    def visit_unsupported_compilation(
+        self, element: Any, err: Exception, **kw: Any
+    ) -> NoReturn:
+>       raise exc.UnsupportedCompilationError(self, element) from err
+E       sqlalchemy.exc.UnsupportedCompilationError: Compiler <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75F8C20> can't render element of type JSONB (Background on this error at: https://sqlalche.me/e/20/l7de)
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:965: UnsupportedCompilationError
+
+The above exception was the direct cause of the following exception:
+
+request = <SubRequest 'test_db' for <Coroutine test_delete_document>>
+kwargs = {}, func = <function test_db at 0x000001BAF5CB0400>
+event_loop_fixture_id = 'event_loop'
+setup = <function _wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.setup at 0x000001BAF5DFEE80>
+setup_task = <Task finished name='Task-13' coro=<_wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.setup() done, d...<sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75F8C20> can't render element of type JSONB")>
+
+    @functools.wraps(fixture)
+    def _asyncgen_fixture_wrapper(request: FixtureRequest, **kwargs: Any):
+        func = _perhaps_rebind_fixture_func(fixture, request.instance)
+        event_loop_fixture_id = _get_event_loop_fixture_id_for_async_fixture(
+            request, func
+        )
+        event_loop = request.getfixturevalue(event_loop_fixture_id)
+        kwargs.pop(event_loop_fixture_id, None)
+        gen_obj = func(**_add_kwargs(func, kwargs, event_loop, request))
+    
+        async def setup():
+            res = await gen_obj.__anext__()  # type: ignore[union-attr]
+            return res
+    
+        context = contextvars.copy_context()
+        setup_task = _create_task_in_context(event_loop, setup(), context)
+>       result = event_loop.run_until_complete(setup_task)
+
+.venv\Lib\site-packages\pytest_asyncio\plugin.py:329: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\jkoli\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py:687: in run_until_complete
+    return future.result()
+.venv\Lib\site-packages\pytest_asyncio\plugin.py:324: in setup
+    res = await gen_obj.__anext__()  # type: ignore[union-attr]
+tests\conftest.py:38: in test_db
+    await conn.run_sync(Base.metadata.create_all)
+.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py:886: in run_sync
+    return await greenlet_spawn(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:203: in greenlet_spawn
+    result = context.switch(value)
+.venv\Lib\site-packages\sqlalchemy\sql\schema.py:5868: in create_all
+    bind._run_ddl_visitor(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:2459: in _run_ddl_visitor
+    visitorcallable(self.dialect, self, **kwargs).traverse_single(element)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:664: in traverse_single
+    return meth(obj, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:918: in visit_metadata
+    self.traverse_single(
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:664: in traverse_single
+    return meth(obj, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:956: in visit_table
+    )._invoke_with(self.connection)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:314: in _invoke_with
+    return bind.execute(self)
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1418: in execute
+    return meth(
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:180: in _execute_on_connection
+    return connection._execute_ddl(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1526: in _execute_ddl
+    compiled = ddl.compile(
+.venv\Lib\site-packages\sqlalchemy\sql\elements.py:308: in compile
+    return self._compiler(dialect, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:69: in _compiler
+    return dialect.ddl_compiler(dialect, self, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:870: in __init__
+    self.string = self.process(self.statement, **compile_kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:915: in process
+    return obj._compiler_dispatch(self, **kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:141: in _compiler_dispatch
+    return meth(self, **kw)  # type: ignore  # noqa: E501
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteDDLCompiler object at 0x000001BAF5D28950>
+create = <sqlalchemy.sql.ddl.CreateTable object at 0x000001BAF5D28B60>, kw = {}
+table = Table('analysis_results', MetaData(), Column('id', UUID(), table=<analysis_results>, primary_key=True, nullable=False,... nullable=False, default=CallableColumnDefault(<function AnalysisResult.<lambda> at 0x000001BACB876A20>)), schema=None)
+preparer = <sqlalchemy.dialects.sqlite.base.SQLiteIdentifierPreparer object at 0x000001BAF75F8EC0>
+text = '\nCREATE TABLE analysis_results (\n\tid UUID NOT NULL, \n\tfs_id UUID NOT NULL, \n\tanalysis_type VARCHAR(64) NOT NULL'
+create_table_suffix = '', separator = ', \n', first_pk = True
+create_column = <sqlalchemy.sql.ddl.CreateColumn object at 0x000001BAF5D288F0>
+
+    def visit_create_table(self, create, **kw):
+        table = create.element
+        preparer = self.preparer
+    
+        text = "\nCREATE "
+        if table._prefixes:
+            text += " ".join(table._prefixes) + " "
+    
+        text += "TABLE "
+        if create.if_not_exists:
+            text += "IF NOT EXISTS "
+    
+        text += preparer.format_table(table) + " "
+    
+        create_table_suffix = self.create_table_suffix(table)
+        if create_table_suffix:
+            text += create_table_suffix + " "
+    
+        text += "("
+    
+        separator = "\n"
+    
+        # if only one primary key, specify it along with the column
+        first_pk = False
+        for create_column in create.columns:
+            column = create_column.element
+            try:
+                processed = self.process(
+                    create_column, first_pk=column.primary_key and not first_pk
+                )
+                if processed is not None:
+                    text += separator
+                    separator = ", \n"
+                    text += "\t" + processed
+                if column.primary_key:
+                    first_pk = True
+            except exc.CompileError as ce:
+>               raise exc.CompileError(
+                    "(in table '%s', column '%s'): %s"
+                    % (table.description, column.name, ce.args[0])
+                ) from ce
+E               sqlalchemy.exc.CompileError: (in table 'analysis_results', column 'result_json'): Compiler <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF75F8C20> can't render element of type JSONB
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6657: CompileError
+_________________ ERROR at setup of test_get_document_status __________________
+
+self = JSONB(astext_type=Text())
+visitor = <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF6D13D40>
+kw = {'type_expression': Column('result_json', JSONB(astext_type=Text()), table=<analysis_results>)}
+
+    def _compiler_dispatch(
+        self: Visitable, visitor: Any, **kw: Any
+    ) -> str:
+        """Look for an attribute named "visit_<visit_name>" on the
+        visitor, and call it with the same kw params.
+    
+        """
+        try:
+>           meth = getter(visitor)
+E           AttributeError: 'SQLiteTypeCompiler' object has no attribute 'visit_JSONB'. Did you mean: 'visit_JSON'?
+
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:137: AttributeError
+
+The above exception was the direct cause of the following exception:
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteDDLCompiler object at 0x000001BAF6D10680>
+create = <sqlalchemy.sql.ddl.CreateTable object at 0x000001BAF6D10E90>, kw = {}
+table = Table('analysis_results', MetaData(), Column('id', UUID(), table=<analysis_results>, primary_key=True, nullable=False,... nullable=False, default=CallableColumnDefault(<function AnalysisResult.<lambda> at 0x000001BACB876A20>)), schema=None)
+preparer = <sqlalchemy.dialects.sqlite.base.SQLiteIdentifierPreparer object at 0x000001BAF6D100B0>
+text = '\nCREATE TABLE analysis_results (\n\tid UUID NOT NULL, \n\tfs_id UUID NOT NULL, \n\tanalysis_type VARCHAR(64) NOT NULL'
+create_table_suffix = '', separator = ', \n', first_pk = True
+create_column = <sqlalchemy.sql.ddl.CreateColumn object at 0x000001BAF6D10710>
+
+    def visit_create_table(self, create, **kw):
+        table = create.element
+        preparer = self.preparer
+    
+        text = "\nCREATE "
+        if table._prefixes:
+            text += " ".join(table._prefixes) + " "
+    
+        text += "TABLE "
+        if create.if_not_exists:
+            text += "IF NOT EXISTS "
+    
+        text += preparer.format_table(table) + " "
+    
+        create_table_suffix = self.create_table_suffix(table)
+        if create_table_suffix:
+            text += create_table_suffix + " "
+    
+        text += "("
+    
+        separator = "\n"
+    
+        # if only one primary key, specify it along with the column
+        first_pk = False
+        for create_column in create.columns:
+            column = create_column.element
+            try:
+>               processed = self.process(
+                    create_column, first_pk=column.primary_key and not first_pk
+                )
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6647: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:915: in process
+    return obj._compiler_dispatch(self, **kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:141: in _compiler_dispatch
+    return meth(self, **kw)  # type: ignore  # noqa: E501
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6678: in visit_create_column
+    text = self.get_column_specification(column, first_pk=first_pk)
+.venv\Lib\site-packages\sqlalchemy\dialects\sqlite\base.py:1540: in get_column_specification
+    coltype = self.dialect.type_compiler_instance.process(
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:960: in process
+    return type_._compiler_dispatch(self, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:139: in _compiler_dispatch
+    return visitor.visit_unsupported_compilation(self, err, **kw)  # type: ignore  # noqa: E501
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF6D13D40>
+element = JSONB(astext_type=Text())
+err = AttributeError("'SQLiteTypeCompiler' object has no attribute 'visit_JSONB'")
+kw = {'type_expression': Column('result_json', JSONB(astext_type=Text()), table=<analysis_results>)}
+
+    def visit_unsupported_compilation(
+        self, element: Any, err: Exception, **kw: Any
+    ) -> NoReturn:
+>       raise exc.UnsupportedCompilationError(self, element) from err
+E       sqlalchemy.exc.UnsupportedCompilationError: Compiler <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF6D13D40> can't render element of type JSONB (Background on this error at: https://sqlalche.me/e/20/l7de)
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:965: UnsupportedCompilationError
+
+The above exception was the direct cause of the following exception:
+
+request = <SubRequest 'test_db' for <Coroutine test_get_document_status>>
+kwargs = {}, func = <function test_db at 0x000001BAF5CB0400>
+event_loop_fixture_id = 'event_loop'
+setup = <function _wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.setup at 0x000001BAF5D854E0>
+setup_task = <Task finished name='Task-15' coro=<_wrap_asyncgen_fixture.<locals>._asyncgen_fixture_wrapper.<locals>.setup() done, d...<sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF6D13D40> can't render element of type JSONB")>
+
+    @functools.wraps(fixture)
+    def _asyncgen_fixture_wrapper(request: FixtureRequest, **kwargs: Any):
+        func = _perhaps_rebind_fixture_func(fixture, request.instance)
+        event_loop_fixture_id = _get_event_loop_fixture_id_for_async_fixture(
+            request, func
+        )
+        event_loop = request.getfixturevalue(event_loop_fixture_id)
+        kwargs.pop(event_loop_fixture_id, None)
+        gen_obj = func(**_add_kwargs(func, kwargs, event_loop, request))
+    
+        async def setup():
+            res = await gen_obj.__anext__()  # type: ignore[union-attr]
+            return res
+    
+        context = contextvars.copy_context()
+        setup_task = _create_task_in_context(event_loop, setup(), context)
+>       result = event_loop.run_until_complete(setup_task)
+
+.venv\Lib\site-packages\pytest_asyncio\plugin.py:329: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\jkoli\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py:687: in run_until_complete
+    return future.result()
+.venv\Lib\site-packages\pytest_asyncio\plugin.py:324: in setup
+    res = await gen_obj.__anext__()  # type: ignore[union-attr]
+tests\conftest.py:38: in test_db
+    await conn.run_sync(Base.metadata.create_all)
+.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py:886: in run_sync
+    return await greenlet_spawn(
+.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py:203: in greenlet_spawn
+    result = context.switch(value)
+.venv\Lib\site-packages\sqlalchemy\sql\schema.py:5868: in create_all
+    bind._run_ddl_visitor(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:2459: in _run_ddl_visitor
+    visitorcallable(self.dialect, self, **kwargs).traverse_single(element)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:664: in traverse_single
+    return meth(obj, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:918: in visit_metadata
+    self.traverse_single(
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:664: in traverse_single
+    return meth(obj, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:956: in visit_table
+    )._invoke_with(self.connection)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:314: in _invoke_with
+    return bind.execute(self)
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1418: in execute
+    return meth(
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:180: in _execute_on_connection
+    return connection._execute_ddl(
+.venv\Lib\site-packages\sqlalchemy\engine\base.py:1526: in _execute_ddl
+    compiled = ddl.compile(
+.venv\Lib\site-packages\sqlalchemy\sql\elements.py:308: in compile
+    return self._compiler(dialect, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\ddl.py:69: in _compiler
+    return dialect.ddl_compiler(dialect, self, **kw)
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:870: in __init__
+    self.string = self.process(self.statement, **compile_kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:915: in process
+    return obj._compiler_dispatch(self, **kwargs)
+.venv\Lib\site-packages\sqlalchemy\sql\visitors.py:141: in _compiler_dispatch
+    return meth(self, **kw)  # type: ignore  # noqa: E501
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.base.SQLiteDDLCompiler object at 0x000001BAF6D10680>
+create = <sqlalchemy.sql.ddl.CreateTable object at 0x000001BAF6D10E90>, kw = {}
+table = Table('analysis_results', MetaData(), Column('id', UUID(), table=<analysis_results>, primary_key=True, nullable=False,... nullable=False, default=CallableColumnDefault(<function AnalysisResult.<lambda> at 0x000001BACB876A20>)), schema=None)
+preparer = <sqlalchemy.dialects.sqlite.base.SQLiteIdentifierPreparer object at 0x000001BAF6D100B0>
+text = '\nCREATE TABLE analysis_results (\n\tid UUID NOT NULL, \n\tfs_id UUID NOT NULL, \n\tanalysis_type VARCHAR(64) NOT NULL'
+create_table_suffix = '', separator = ', \n', first_pk = True
+create_column = <sqlalchemy.sql.ddl.CreateColumn object at 0x000001BAF6D10710>
+
+    def visit_create_table(self, create, **kw):
+        table = create.element
+        preparer = self.preparer
+    
+        text = "\nCREATE "
+        if table._prefixes:
+            text += " ".join(table._prefixes) + " "
+    
+        text += "TABLE "
+        if create.if_not_exists:
+            text += "IF NOT EXISTS "
+    
+        text += preparer.format_table(table) + " "
+    
+        create_table_suffix = self.create_table_suffix(table)
+        if create_table_suffix:
+            text += create_table_suffix + " "
+    
+        text += "("
+    
+        separator = "\n"
+    
+        # if only one primary key, specify it along with the column
+        first_pk = False
+        for create_column in create.columns:
+            column = create_column.element
+            try:
+                processed = self.process(
+                    create_column, first_pk=column.primary_key and not first_pk
+                )
+                if processed is not None:
+                    text += separator
+                    separator = ", \n"
+                    text += "\t" + processed
+                if column.primary_key:
+                    first_pk = True
+            except exc.CompileError as ce:
+>               raise exc.CompileError(
+                    "(in table '%s', column '%s'): %s"
+                    % (table.description, column.name, ce.args[0])
+                ) from ce
+E               sqlalchemy.exc.CompileError: (in table 'analysis_results', column 'result_json'): Compiler <sqlalchemy.dialects.sqlite.base.SQLiteTypeCompiler object at 0x000001BAF6D13D40> can't render element of type JSONB
+
+.venv\Lib\site-packages\sqlalchemy\sql\compiler.py:6657: CompileError
+============================== warnings summary ===============================
+tests/test_upload.py::test_root
+  C:\Learnings\Projects\fs_intelligence_platform\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:854: DeprecationWarning: The event_loop fixture provided by pytest-asyncio has been redefined in
+  C:\Learnings\Projects\fs_intelligence_platform\backend\tests\conftest.py:24
+  Replacing the event_loop fixture with a custom implementation is deprecated
+  and will lead to errors in the future.
+  If you want to request an asyncio event loop with a scope other than function
+  scope, use the "scope" argument to the asyncio mark when marking the tests.
+  If you want to return different types of event loops, use the event_loop_policy
+  fixture.
+  
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+ERROR tests/test_upload.py::test_root - sqlalchemy.exc.CompileError: (in tabl...
+ERROR tests/test_upload.py::test_upload_txt_file - sqlalchemy.exc.CompileErro...
+ERROR tests/test_upload.py::test_upload_invalid_extension - sqlalchemy.exc.Co...
+ERROR tests/test_upload.py::test_list_documents - sqlalchemy.exc.CompileError...
+ERROR tests/test_upload.py::test_get_document - sqlalchemy.exc.CompileError: ...
+ERROR tests/test_upload.py::test_get_document_not_found - sqlalchemy.exc.Comp...
+ERROR tests/test_upload.py::test_delete_document - sqlalchemy.exc.CompileErro...
+ERROR tests/test_upload.py::test_get_document_status - sqlalchemy.exc.Compile...
+======================== 1 warning, 8 errors in 2.86s =========================

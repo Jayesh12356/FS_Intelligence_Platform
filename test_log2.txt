@@ -1,0 +1,79 @@
+﻿python : C:\Learnings\Proj
+ects\fs_intelligence_platf
+orm\backend\.venv\Lib\site
+-packages\pytest_asyncio\p
+lugin.py:207: 
+PytestDeprecationWarning: 
+The configuration option "
+asyncio_default_fixture_lo
+op_scope" is unset.
+At line:1 char:31
++ .\.venv\Scripts\Activate
+.ps1; python -m pytest 
+tests/ -v 2>&1 | Out-F ...
++                         
+      ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~
+    + CategoryInfo        
+      : NotSpecified: (C  
+  :\Learnings\Pr...cope   
+ " is unset.:String) [    
+], RemoteException
+    + FullyQualifiedError 
+   Id : NativeCommandErr  
+  or
+ 
+The event loop scope for 
+asynchronous fixtures 
+will default to the 
+fixture caching scope. 
+Future versions of 
+pytest-asyncio will 
+default the loop scope 
+for asynchronous fixtures 
+to function scope. Set 
+the default fixture loop 
+scope explicitly in order 
+to avoid unexpected 
+behavior in the future. 
+Valid fixture loop scopes 
+are: "function", "class", 
+"module", "package", 
+"session"
+
+  warnings.warn(PytestDepr
+ecationWarning(_DEFAULT_FI
+XTURE_LOOP_SCOPE_UNSET))
+============================= test session starts =============================
+platform win32 -- Python 3.12.7, pytest-8.3.4, pluggy-1.6.0 -- C:\Learnings\Projects\fs_intelligence_platform\backend\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Learnings\Projects\fs_intelligence_platform\backend
+configfile: pyproject.toml
+plugins: anyio-4.13.0, asyncio-0.25.0
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=None
+collecting ... collected 8 items
+
+tests/test_upload.py::test_root PASSED                                   [ 12%]
+tests/test_upload.py::test_upload_txt_file PASSED                        [ 25%]
+tests/test_upload.py::test_upload_invalid_extension PASSED               [ 37%]
+tests/test_upload.py::test_list_documents PASSED                         [ 50%]
+tests/test_upload.py::test_get_document PASSED                           [ 62%]
+tests/test_upload.py::test_get_document_not_found PASSED                 [ 75%]
+tests/test_upload.py::test_delete_document PASSED                        [ 87%]
+tests/test_upload.py::test_get_document_status PASSED                    [100%]
+
+============================== warnings summary ===============================
+tests/test_upload.py::test_root
+  C:\Learnings\Projects\fs_intelligence_platform\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:854: DeprecationWarning: The event_loop fixture provided by pytest-asyncio has been redefined in
+  C:\Learnings\Projects\fs_intelligence_platform\backend\tests\conftest.py:24
+  Replacing the event_loop fixture with a custom implementation is deprecated
+  and will lead to errors in the future.
+  If you want to request an asyncio event loop with a scope other than function
+  scope, use the "scope" argument to the asyncio mark when marking the tests.
+  If you want to return different types of event loops, use the event_loop_policy
+  fixture.
+  
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 8 passed, 1 warning in 0.32s =========================

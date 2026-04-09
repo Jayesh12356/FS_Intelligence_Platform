@@ -1,0 +1,53 @@
+"""Analysis MCP tools."""
+
+from __future__ import annotations
+
+from fastmcp import FastMCP
+
+from tools._http import request_json
+
+
+def register(mcp: FastMCP) -> None:
+    @mcp.tool()
+    async def get_ambiguities(document_id: str) -> dict:
+        """Use before implementation to identify unresolved ambiguous requirements."""
+        return await request_json("GET", f"/api/fs/{document_id}/ambiguities")
+
+    @mcp.tool()
+    async def resolve_ambiguity(document_id: str, flag_id: str, resolution: str) -> dict:
+        """Use after deciding a concrete resolution for one ambiguity flag."""
+        # Backend currently marks as resolved directly; resolution text is returned for agent log symmetry.
+        result = await request_json("PATCH", f"/api/fs/{document_id}/ambiguities/{flag_id}")
+        if "error" in result:
+            return result
+        return {"data": {"resolution": resolution, "backend_result": result.get("data", result)}}
+
+    @mcp.tool()
+    async def get_contradictions(document_id: str) -> dict:
+        """Use to detect requirement conflicts that block reliable implementation."""
+        return await request_json("GET", f"/api/fs/{document_id}/contradictions")
+
+    @mcp.tool()
+    async def get_edge_cases(document_id: str) -> dict:
+        """Use to identify missing negative/error-path requirements."""
+        return await request_json("GET", f"/api/fs/{document_id}/edge-cases")
+
+    @mcp.tool()
+    async def get_quality_score(document_id: str) -> dict:
+        """Use to track quality dashboard and verify readiness threshold."""
+        return await request_json("GET", f"/api/fs/{document_id}/quality-score")
+
+    @mcp.tool()
+    async def get_compliance_tags(document_id: str) -> dict:
+        """Use to review compliance-sensitive sections before coding/exports."""
+        dashboard = await request_json("GET", f"/api/fs/{document_id}/quality-score")
+        if "error" in dashboard:
+            return dashboard
+        tags = ((dashboard.get("data") or {}).get("compliance_tags")) or []
+        return {"data": {"compliance_tags": tags, "total": len(tags)}}
+
+    @mcp.tool()
+    async def get_debate_results(document_id: str) -> dict:
+        """Use for HIGH-severity ambiguity adjudication context before resolving."""
+        return await request_json("GET", f"/api/fs/{document_id}/debate-results")
+

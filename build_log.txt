@@ -1,0 +1,131 @@
+﻿docker-compose : time="202
+6-04-07T18:08:19+05:30" 
+level=warning msg="C:\\Lea
+rnings\\Projects\\fs_intel
+ligence_platform\\docker-c
+ompose.yml: the attribute 
+`version` is obsolete, it 
+will be ignored, please 
+remove it to avoid 
+potential confusion"
+At line:1 char:1
++ docker-compose build 
+2>&1 | Out-File -FilePath 
+"C:\Learnings\Projects ...
++ 
+~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo        
+      : NotSpecified: (t  
+  ime="2026-04-0...tial   
+  confusion":String) [    
+], RemoteException
+    + FullyQualifiedError 
+   Id : NativeCommandErr  
+  or
+ 
+ Service backend  Building
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [backend internal] load build definition from Dockerfile
+#1 transferring dockerfile: 483B done
+#1 DONE 0.0s
+
+#2 [backend internal] load metadata for docker.io/library/python:3.11-slim
+#2 DONE 0.4s
+
+#3 [backend internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.1s
+
+#4 [backend internal] load build context
+#4 DONE 0.0s
+
+#5 [backend 1/7] FROM docker.io/library/python:3.11-slim@sha256:b1b81d67b8df73bf6067191790c233ef9e598b863fc1ccf447956138ca466d99
+#5 resolve docker.io/library/python:3.11-slim@sha256:b1b81d67b8df73bf6067191790c233ef9e598b863fc1ccf447956138ca466d99 0.1s done
+#5 DONE 0.1s
+
+#4 [backend internal] load build context
+#4 transferring context: 1.01kB 0.0s done
+#4 DONE 0.0s
+
+#6 [backend 2/7] WORKDIR /app
+#6 CACHED
+
+#7 [backend 3/7] RUN apt-get update &&     apt-get install -y --no-install-recommends gcc libpq-dev curl &&     rm -rf /var/lib/apt/lists/*
+#7 CACHED
+
+#8 [backend 4/7] COPY requirements.txt .
+#8 CACHED
+
+#9 [backend 5/7] RUN pip install --no-cache-dir -r requirements.txt
+#9 CACHED
+
+#10 [backend 6/7] COPY . .
+#10 CACHED
+
+#11 [backend 7/7] RUN mkdir -p /app/uploads
+#11 CACHED
+
+#12 [backend] exporting to image
+#12 exporting layers done
+#12 exporting manifest sha256:bd3855523f47194441a15b442fa558158c3ea68a68c9c0c0983b7e0edfc5f6d7 done
+#12 exporting config sha256:bfaa8b572eae7ab876c3b4af77766ea38687bd424008ed27638164c51e06ef8f 0.0s done
+#12 exporting attestation manifest sha256:58f53dd5ff388b56e9c232633807c781feead4e59c76214c526613daee7d4315
+#12 exporting attestation manifest sha256:58f53dd5ff388b56e9c232633807c781feead4e59c76214c526613daee7d4315 0.1s done
+#12 exporting manifest list sha256:184aaca2b25957f638fe73fa2c2337d15589d93ca3982e8533a9db900313f82b 0.0s done
+#12 naming to docker.io/library/fs_intelligence_platform-backend:latest
+#12 naming to docker.io/library/fs_intelligence_platform-backend:latest done
+#12 unpacking to docker.io/library/fs_intelligence_platform-backend:latest 0.0s done
+#12 DONE 0.2s
+
+#13 [backend] resolving provenance for metadata file
+ Service backend  Built
+ Service frontend  
+Building
+#13 DONE 0.0s
+
+#14 [frontend internal] load build definition from Dockerfile
+#14 transferring dockerfile: 174B done
+#14 DONE 0.0s
+
+#15 [frontend internal] load metadata for docker.io/library/node:20-alpine
+#15 DONE 0.5s
+
+#16 [frontend internal] load .dockerignore
+#16 transferring context: 2B done
+#16 DONE 0.0s
+
+#17 [frontend 1/5] FROM docker.io/library/node:20-alpine@sha256:f598378b5240225e6beab68fa9f356db1fb8efe55173e6d4d8153113bb8f333c
+#17 resolve docker.io/library/node:20-alpine@sha256:f598378b5240225e6beab68fa9f356db1fb8efe55173e6d4d8153113bb8f333c 0.0s done
+#17 DONE 0.1s
+
+#18 [frontend internal] load build context
+#18 transferring context: 1.45MB 0.6s done
+#18 DONE 0.6s
+
+#19 [frontend 3/5] COPY package.json package-lock.json ./
+#19 CACHED
+
+#20 [frontend 4/5] RUN npm ci
+#20 CACHED
+
+#21 [frontend 2/5] WORKDIR /app
+#21 CACHED
+
+#22 [frontend 5/5] COPY . .
+#22 CACHED
+
+#23 [frontend] exporting to image
+#23 exporting layers done
+#23 exporting manifest sha256:6518392890f89687afeec3dfb128d0c6700eb35c4b35c043e473a46e413f9407 done
+#23 exporting config sha256:4127258bd5a1cac9be7c4e2188b9743667afb78c78bdb5f84eaf87416919d87e done
+#23 exporting attestation manifest sha256:3d20000bf7c4d2c7b9ccc8f4d7a22c89bf3b4bddf1ac40dc0dfa546bc48f1ec3 0.1s done
+#23 exporting manifest list sha256:64d1e4214f566e8a6d63ba998338b56257e6a88903671abf7020ee5dae8e1f36
+#23 exporting manifest list sha256:64d1e4214f566e8a6d63ba998338b56257e6a88903671abf7020ee5dae8e1f36 0.0s done
+#23 naming to docker.io/library/fs_intelligence_platform-frontend:latest done
+#23 unpacking to docker.io/library/fs_intelligence_platform-frontend:latest 0.0s done
+#23 DONE 0.2s
+
+#24 [frontend] resolving provenance for metadata file
+ Service frontend  Built
+#24 DONE 0.0s
