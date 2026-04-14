@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
+import httpx
 from fastmcp import FastMCP
 
+from config import BACKEND_URL
 from tools._http import request_json
 
 
@@ -35,8 +38,42 @@ def register(mcp: FastMCP) -> None:
 
     @mcp.tool()
     async def trigger_analysis(document_id: str) -> dict:
-        """Use after parse/ingest to run the full analysis pipeline."""
-        return await request_json("POST", f"/api/fs/{document_id}/analyze")
+        """
+        Triggers the full 11-node LangGraph analysis pipeline.
+        If analysis is already running, waits for completion.
+        Automatically retries up to 3 times on 503 errors.
+        Returns final analysis state when complete.
+        Use this to start analysis or get fresh results after
+        uploading a new version or resolving contradictions.
+        Always call get_quality_score immediately after this.
+        If score < 90, the build loop will auto-refine before
+        starting any code generation.
+        """
+        async with httpx.AsyncClient(timeout=150.0) as client:
+            for attempt in range(3):
+                try:
+                    r = await client.post(f"{BACKEND_URL}/api/fs/{document_id}/analyze")
+                    if r.status_code == 200:
+                        return r.json()
+                    if r.status_code == 503:
+                        if attempt < 2:
+                            await asyncio.sleep(5)
+                            continue
+                        return {
+                            "error": "Backend unavailable after 3 retries",
+                            "status_code": 503,
+                            "suggestion": "Check backend logs and restart",
+                        }
+                    return {
+                        "error": r.text,
+                        "status_code": r.status_code,
+                    }
+                except httpx.TimeoutException:
+                    if attempt < 2:
+                        await asyncio.sleep(5)
+                        continue
+                    return {"error": "Request timed out after 150s"}
+            return {"error": "All retry attempts failed"}
 
     @mcp.tool()
     async def get_document_status(document_id: str) -> dict:

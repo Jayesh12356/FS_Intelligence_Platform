@@ -1,17 +1,38 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
-  uploadCodebase,
-  listCodeUploads,
+  uploadCodeZip,
+  getReverseStatus,
+  listReverseUploads,
   generateFS,
-  getGeneratedFS,
+  type ReverseUploadItem,
+  type GeneratedFSData,
 } from "@/lib/api";
-import type {
-  CodeUploadItem,
-  GeneratedFSData,
-} from "@/lib/api";
+import {
+  PageShell,
+  KpiCard,
+  FadeIn,
+  StaggerList,
+  StaggerItem,
+  EmptyState,
+} from "@/components/index";
+import QualityGauge from "@/components/QualityGauge";
+import Badge from "@/components/Badge";
+import CopyButton from "@/components/CopyButton";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  RotateCcw,
+  Upload,
+  FileText,
+  CheckCircle2,
+  Clock,
+  ChevronDown,
+  Download,
+  Layers,
+  BarChart3,
+} from "lucide-react";
 
 function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-US", {
@@ -30,17 +51,31 @@ function formatBytes(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  UPLOADED: "#6b7280",
-  PARSING: "#f59e0b",
-  PARSED: "#3b82f6",
-  GENERATING: "#a855f7",
-  GENERATED: "#22c55e",
-  ERROR: "#ef4444",
-};
+function uploadStatusBadgeVariant(
+  status: string
+): "success" | "warning" | "error" | "info" | "neutral" | "accent" {
+  switch (status) {
+    case "GENERATED":
+      return "success";
+    case "GENERATING":
+    case "PARSING":
+      return "accent";
+    case "PARSED":
+      return "info";
+    case "ERROR":
+      return "error";
+    case "UPLOADED":
+    default:
+      return "neutral";
+  }
+}
+
+function compositeQualityScore(report: NonNullable<GeneratedFSData["report"]>): number {
+  return Math.round((report.coverage * 0.5 + report.confidence * 0.5) * 100);
+}
 
 export default function ReverseFSPage() {
-  const [uploads, setUploads] = useState<CodeUploadItem[]>([]);
+  const [uploads, setUploads] = useState<ReverseUploadItem[]>([]);
   const [selectedUpload, setSelectedUpload] = useState<string | null>(null);
   const [generatedFS, setGeneratedFS] = useState<GeneratedFSData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,12 +84,13 @@ export default function ReverseFSPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set());
+  const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchUploads = useCallback(async () => {
     try {
       setLoading(true);
-      const result = await listCodeUploads();
+      const result = await listReverseUploads();
       setUploads(result.data.uploads || []);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load uploads");
@@ -63,41 +99,75 @@ export default function ReverseFSPage() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchUploads();
-  }, [fetchUploads]);
-
-  useEffect(() => {
-    if (selectedUpload) {
-      fetchGeneratedFS(selectedUpload);
-    }
-  }, [selectedUpload]);
-
-  const fetchGeneratedFS = async (uploadId: string) => {
+  const fetchGeneratedFS = useCallback(async (uploadId: string) => {
     try {
-      const result = await getGeneratedFS(uploadId);
+      const result = await getReverseStatus(uploadId);
       setGeneratedFS(result.data);
     } catch {
       setGeneratedFS(null);
     }
+  }, []);
+
+  useEffect(() => {
+    void fetchUploads();
+  }, [fetchUploads]);
+
+  useEffect(() => {
+    if (selectedUpload) {
+      void fetchGeneratedFS(selectedUpload);
+    }
+  }, [selectedUpload, fetchGeneratedFS]);
+
+  const processZipFile = useCallback(
+    async (file: File) => {
+      if (!file.name.toLowerCase().endsWith(".zip")) {
+        setUploadError("Please upload a .zip archive.");
+        return;
+      }
+      setUploading(true);
+      setUploadError(null);
+      try {
+        const result = await uploadCodeZip(file);
+        await fetchUploads();
+        setSelectedUpload(result.data.id);
+      } catch (err: unknown) {
+        setUploadError(err instanceof Error ? err.message : "Upload failed");
+      } finally {
+        setUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    },
+    [fetchUploads]
+  );
+
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOver(false);
+      const file = e.dataTransfer.files[0];
+      if (file) void processZipFile(file);
+    },
+    [processZipFile]
+  );
+
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(true);
   };
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onDragLeave = () => setDragOver(false);
+
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (file) void processZipFile(file);
+  };
 
-    setUploading(true);
-    setUploadError(null);
+  const openFilePicker = () => fileInputRef.current?.click();
 
-    try {
-      const result = await uploadCodebase(file);
-      await fetchUploads();
-      setSelectedUpload(result.data.id);
-    } catch (err: unknown) {
-      setUploadError(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+  const onZoneKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openFilePicker();
     }
   };
 
@@ -130,410 +200,443 @@ export default function ReverseFSPage() {
 
   if (loading) {
     return (
-      <div className="page-loading">
-        <div className="spinner" />
-        Loading...
-      </div>
+      <PageShell title="Reverse FS Engineering" subtitle="Upload your codebase to generate a Functional Specification">
+        <div className="page-loading" style={{ minHeight: "40vh" }}>
+          <div className="spinner" aria-hidden />
+          <p style={{ color: "var(--text-secondary)", marginTop: "0.75rem" }}>Loading uploads…</p>
+        </div>
+      </PageShell>
     );
   }
 
   return (
-    <div style={{ maxWidth: "960px" }}>
-      <Link href="/" className="back-link">
-        ← Home
-      </Link>
+    <PageShell title="Reverse FS Engineering" subtitle="Upload your codebase to generate a Functional Specification">
+      <AnimatePresence>
+        {error && !selectedUploadData && (
+          <motion.div
+            key="global-error"
+            role="alert"
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            className="upload-status error"
+            style={{ marginBottom: "1.25rem" }}
+          >
+            {error}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      <div style={{ marginBottom: "2rem" }}>
-        <h1 style={{ fontSize: "1.8rem", fontWeight: 700, marginBottom: "0.5rem" }}>
-          🔄 Legacy Code → FS Generator
-        </h1>
-        <p style={{ color: "var(--text-secondary)", fontSize: "0.95rem" }}>
-          Upload a codebase zip to automatically generate a Functional Specification document
-        </p>
-      </div>
-
-      {/* Upload Section */}
-      <div
-        style={{
-          background: "var(--bg-card)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-lg)",
-          padding: "1.5rem",
-          marginBottom: "1.5rem",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
-          <div>
-            <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.25rem" }}>
-              Upload Codebase
+      <FadeIn>
+        <div className="upload-container" style={{ maxWidth: "min(560px, 100%)", paddingTop: 0 }}>
+          <motion.div
+            className={`upload-zone ${dragOver ? "drag-over" : ""} ${uploading ? "drag-over" : ""}`}
+            onDrop={uploading ? undefined : onDrop}
+            onDragOver={uploading ? undefined : onDragOver}
+            onDragLeave={uploading ? undefined : onDragLeave}
+            onClick={uploading ? undefined : openFilePicker}
+            onKeyDown={uploading ? undefined : onZoneKeyDown}
+            role="button"
+            tabIndex={uploading ? -1 : 0}
+            aria-disabled={uploading}
+            aria-label="Upload codebase zip"
+            animate={{ scale: dragOver && !uploading ? 1.02 : 1 }}
+            transition={{ type: "spring", stiffness: 400, damping: 25 }}
+          >
+            <div className="upload-icon">
+              {uploading ? (
+                <Clock size={40} strokeWidth={1.5} aria-hidden />
+              ) : dragOver ? (
+                <Upload size={40} strokeWidth={1.5} aria-hidden />
+              ) : (
+                <Upload size={40} strokeWidth={1.5} aria-hidden />
+              )}
+            </div>
+            <h3>
+              {uploading
+                ? "Uploading and parsing…"
+                : "Drop your codebase .zip here or click to browse"}
             </h3>
-            <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
-              Upload a .zip archive of your codebase (.py, .js, .ts, .java, .go supported)
-            </p>
-          </div>
-          <div>
+            <p>Python, JavaScript, TypeScript, Java, Go sources supported inside the archive</p>
+            <div className="file-types">
+              <span className="file-type-badge">.ZIP</span>
+            </div>
             <input
               ref={fileInputRef}
               type="file"
               accept=".zip"
-              onChange={handleUpload}
+              onChange={handleFileInput}
               style={{ display: "none" }}
-              id="code-upload"
-            />
-            <button
-              className="btn btn-primary"
-              onClick={() => fileInputRef.current?.click()}
+              id="code-upload-zip"
               disabled={uploading}
-              style={{ padding: "10px 24px", fontSize: "0.9rem" }}
-            >
-              {uploading ? (
-                <>
-                  <span className="spinner" style={{ width: "14px", height: "14px" }} />
-                  Uploading & Parsing…
-                </>
-              ) : (
-                <>📤 Upload .zip</>
-              )}
-            </button>
-          </div>
+            />
+          </motion.div>
         </div>
+      </FadeIn>
+
+      <AnimatePresence mode="wait">
         {uploadError && (
-          <p style={{ color: "var(--error)", marginTop: "0.75rem", fontSize: "0.85rem" }}>
-            ❌ {uploadError}
-          </p>
+          <motion.div
+            key="upload-err"
+            role="alert"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 6 }}
+            className="upload-status error"
+            style={{ marginTop: "1rem" }}
+          >
+            {uploadError}
+          </motion.div>
         )}
-      </div>
+      </AnimatePresence>
 
-      {/* Previous Uploads */}
       {uploads.length > 0 && (
-        <div
-          style={{
-            background: "var(--bg-card)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius-lg)",
-            padding: "1.5rem",
-            marginBottom: "1.5rem",
-          }}
-        >
-          <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "1rem" }}>
-            📁 Uploaded Codebases ({uploads.length})
-          </h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-            {uploads.map((u) => {
-              const statusColor = STATUS_COLORS[u.status] || "#6b7280";
-              return (
-                <button
-                  key={u.id}
-                  onClick={() => setSelectedUpload(u.id)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "12px 16px",
-                    borderRadius: "var(--radius-md)",
-                    border: selectedUpload === u.id
-                      ? "2px solid var(--accent-primary)"
-                      : "1px solid var(--border-subtle)",
-                    background: selectedUpload === u.id
-                      ? "rgba(108, 92, 231, 0.08)"
-                      : "var(--bg-secondary)",
-                    cursor: "pointer",
-                    color: "var(--text-primary)",
-                    fontSize: "0.9rem",
-                    fontWeight: selectedUpload === u.id ? 600 : 400,
-                    textAlign: "left",
-                    transition: "all 0.2s ease",
-                    width: "100%",
-                  }}
-                >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, marginBottom: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {u.filename}
-                    </div>
-                    <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                      {formatDate(u.created_at)} · {formatBytes(u.file_size)}
-                    </div>
-                  </div>
-                  <span
-                    style={{
-                      padding: "3px 10px",
-                      borderRadius: "4px",
-                      fontSize: "0.7rem",
-                      fontWeight: 700,
-                      background: `${statusColor}22`,
-                      color: statusColor,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.04em",
-                      whiteSpace: "nowrap",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {u.status}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* No uploads hint */}
-      {uploads.length === 0 && (
-        <div className="empty-state">
-          <div className="empty-state-icon">📦</div>
-          <h3>No Codebases Uploaded</h3>
-          <p>Upload a zip archive of your codebase to generate a Functional Specification.</p>
-        </div>
-      )}
-
-      {/* Selected Upload Actions */}
-      {selectedUpload && selectedUploadData && (
-        <div
-          style={{
-            background: "var(--bg-card)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius-lg)",
-            padding: "1.5rem",
-            marginBottom: "1.5rem",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
-            <div>
-              <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.25rem" }}>
-                {selectedUploadData.filename}
-              </h3>
-              <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
-                Status: {selectedUploadData.status}
-              </p>
-            </div>
-            {(selectedUploadData.status === "PARSED" || selectedUploadData.status === "GENERATED") && (
-              <button
-                className="btn btn-primary"
-                onClick={handleGenerate}
-                disabled={generating}
-                style={{ padding: "10px 24px", fontSize: "0.9rem" }}
-              >
-                {generating ? (
-                  <>
-                    <span className="spinner" style={{ width: "14px", height: "14px" }} />
-                    Generating FS…
-                  </>
-                ) : selectedUploadData.status === "GENERATED" ? (
-                  <>🔄 Regenerate FS</>
-                ) : (
-                  <>⚡ Generate FS Document</>
-                )}
-              </button>
-            )}
-          </div>
-          {error && (
-            <p style={{ color: "var(--error)", marginTop: "0.75rem", fontSize: "0.85rem" }}>
-              ❌ {error}
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Generated FS Results */}
-      {generatedFS && generatedFS.status === "GENERATED" && (
-        <>
-          {/* Quality Report Card */}
-          {report && (
-            <div
-              style={{
-                background: "linear-gradient(135deg, rgba(108, 92, 231, 0.1), rgba(168, 85, 247, 0.05))",
-                border: "1px solid rgba(108, 92, 231, 0.25)",
-                borderRadius: "var(--radius-lg)",
-                padding: "1.5rem",
-                marginBottom: "1.5rem",
-              }}
-            >
-              <h3 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "1rem" }}>
-                📊 Quality Report
-              </h3>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "1rem", marginBottom: "1rem" }}>
-                <div style={{ textAlign: "center", padding: "1rem", background: "rgba(34, 197, 94, 0.1)", borderRadius: "var(--radius-md)", border: "1px solid rgba(34, 197, 94, 0.2)" }}>
-                  <div style={{ fontSize: "2rem", fontWeight: 800, color: "#22c55e" }}>{Math.round(report.coverage * 100)}%</div>
-                  <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Coverage</div>
-                </div>
-                <div style={{ textAlign: "center", padding: "1rem", background: "rgba(108, 92, 231, 0.1)", borderRadius: "var(--radius-md)", border: "1px solid rgba(108, 92, 231, 0.2)" }}>
-                  <div style={{ fontSize: "2rem", fontWeight: 800, color: "var(--accent-primary)" }}>{Math.round(report.confidence * 100)}%</div>
-                  <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Confidence</div>
-                </div>
-                <div style={{ textAlign: "center", padding: "1rem", background: "rgba(245, 158, 11, 0.1)", borderRadius: "var(--radius-md)", border: "1px solid rgba(245, 158, 11, 0.2)" }}>
-                  <div style={{ fontSize: "2rem", fontWeight: 800, color: "#f59e0b" }}>{report.gaps.length}</div>
-                  <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Gaps</div>
-                </div>
-                <div style={{ textAlign: "center", padding: "1rem", background: "rgba(59, 130, 246, 0.1)", borderRadius: "var(--radius-md)", border: "1px solid rgba(59, 130, 246, 0.2)" }}>
-                  <div style={{ fontSize: "2rem", fontWeight: 800, color: "#3b82f6" }}>{generatedFS.sections.length}</div>
-                  <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Sections</div>
-                </div>
-              </div>
-
-              {/* Gaps List */}
-              {report.gaps.length > 0 && (
-                <div style={{ marginTop: "1rem" }}>
-                  <h4 style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.5rem", color: "#f59e0b" }}>
-                    ⚠️ Knowledge Gaps ({report.gaps.length})
-                  </h4>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                    {report.gaps.slice(0, 10).map((gap, idx) => (
-                      <div
-                        key={idx}
-                        style={{
-                          padding: "6px 12px",
-                          background: "rgba(245, 158, 11, 0.08)",
-                          border: "1px solid rgba(245, 158, 11, 0.15)",
-                          borderRadius: "var(--radius-sm)",
-                          fontSize: "0.82rem",
-                          color: "var(--text-secondary)",
-                        }}
-                      >
-                        <span style={{ color: "#f59e0b", marginRight: "6px", fontSize: "0.7rem", fontWeight: 700, padding: "1px 6px", background: "rgba(245, 158, 11, 0.2)", borderRadius: "3px" }}>
-                          LOW CONF
-                        </span>
-                        {gap}
-                      </div>
-                    ))}
-                    {report.gaps.length > 10 && (
-                      <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", padding: "4px" }}>
-                        ...and {report.gaps.length - 10} more gaps
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Run Full Analysis Button */}
-          {generatedFS.generated_fs_id && (
-            <div
-              style={{
-                background: "var(--bg-card)",
-                border: "1px solid var(--border-subtle)",
-                borderRadius: "var(--radius-lg)",
-                padding: "1.25rem",
-                marginBottom: "1.5rem",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                flexWrap: "wrap",
-                gap: "1rem",
-              }}
-            >
-              <div>
-                <h4 style={{ fontSize: "0.95rem", fontWeight: 600, marginBottom: "0.2rem" }}>
-                  Run Full Analysis Pipeline
-                </h4>
-                <p style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>
-                  Feed the generated FS into the forward pipeline (ambiguity detection, task decomposition, etc.)
-                </p>
-              </div>
-              <Link
-                href={`/documents/${generatedFS.generated_fs_id}`}
-                className="btn btn-primary"
-                style={{ padding: "10px 24px", fontSize: "0.9rem" }}
-              >
-                🚀 Analyze Generated FS
-              </Link>
-            </div>
-          )}
-
-          {/* Generated Sections */}
-          {generatedFS.sections.length > 0 && (
-            <div
-              style={{
-                background: "var(--bg-card)",
-                border: "1px solid var(--border-subtle)",
-                borderRadius: "var(--radius-lg)",
-                padding: "1.5rem",
-                marginBottom: "1.5rem",
-              }}
-            >
-              <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "1rem" }}>
-                📄 Generated FS Sections ({generatedFS.sections.length})
-              </h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                {generatedFS.sections.map((section, idx) => {
-                  const isExpanded = expandedSections.has(idx);
-                  return (
-                    <div
-                      key={idx}
+        <FadeIn>
+          <div style={{ marginTop: "2rem" }}>
+            <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.75rem" }}>
+              Previous uploads
+            </h2>
+            <StaggerList style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              {uploads.map((u) => {
+                const selected = selectedUpload === u.id;
+                return (
+                  <StaggerItem key={u.id}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedUpload(u.id)}
+                      className="card"
                       style={{
-                        border: "1px solid var(--border-subtle)",
-                        borderRadius: "var(--radius-md)",
-                        overflow: "hidden",
-                        transition: "all 0.2s ease",
+                        width: "100%",
+                        textAlign: "left",
+                        cursor: "pointer",
+                        padding: "1rem 1.15rem",
+                        borderRadius: "var(--radius-lg)",
+                        border: selected
+                          ? "2px solid var(--accent-primary)"
+                          : "1px solid var(--border-subtle)",
+                        background: selected ? "rgba(108, 92, 231, 0.06)" : "var(--bg-card)",
+                        boxShadow: selected ? "0 0 0 1px rgba(108, 92, 231, 0.12)" : undefined,
+                        transition: "border-color 0.2s ease, background 0.2s ease",
+                        color: "var(--text-primary)",
                       }}
                     >
-                      <button
-                        onClick={() => toggleSection(idx)}
-                        style={{
-                          width: "100%",
-                          padding: "12px 16px",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "10px",
-                          background: "var(--bg-secondary)",
-                          border: "none",
-                          cursor: "pointer",
-                          color: "var(--text-primary)",
-                          fontSize: "0.9rem",
-                          fontWeight: 600,
-                          textAlign: "left",
-                        }}
-                      >
-                        <span style={{ fontSize: "0.75rem", color: "var(--accent-primary)", fontWeight: 700, flexShrink: 0 }}>
-                          §{idx + 1}
-                        </span>
-                        <span style={{ flex: 1 }}>{section.heading}</span>
-                        <span
-                          style={{
-                            transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)",
-                            transition: "transform 0.2s ease",
-                            opacity: 0.4,
-                            fontSize: "0.75rem",
-                          }}
-                        >
-                          ▼
-                        </span>
-                      </button>
-                      {isExpanded && (
-                        <div
-                          style={{
-                            padding: "1rem 16px",
-                            borderTop: "1px solid var(--border-subtle)",
-                            fontSize: "0.88rem",
-                            lineHeight: 1.7,
-                            color: "var(--text-secondary)",
-                            whiteSpace: "pre-wrap",
-                          }}
-                        >
-                          {section.content}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem" }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontWeight: 600,
+                              fontSize: "0.9rem",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {u.filename}
+                          </div>
+                          <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.2rem" }}>
+                            {formatDate(u.created_at)} · {formatBytes(u.file_size)}
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </>
+                        <Badge variant={uploadStatusBadgeVariant(u.status)}>{u.status}</Badge>
+                      </div>
+                    </button>
+                  </StaggerItem>
+                );
+              })}
+            </StaggerList>
+          </div>
+        </FadeIn>
       )}
 
-      {/* Generating state */}
-      {generating && (
-        <div className="page-loading">
-          <div className="spinner" />
-          <div style={{ textAlign: "center" }}>
-            <p style={{ fontWeight: 600, marginBottom: "0.5rem" }}>Generating Functional Specification…</p>
-            <p style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>
-              Parsing code → Analysing modules → Generating FS → Quality check
-            </p>
-          </div>
-        </div>
+      {uploads.length === 0 && !error && (
+        <EmptyState
+          icon={<Layers size={36} strokeWidth={1.25} aria-hidden />}
+          title="No codebases yet"
+          description="Upload a zip archive of your codebase to generate a Functional Specification."
+        />
       )}
-    </div>
+
+      {selectedUpload && selectedUploadData && (
+        <FadeIn>
+          <div
+            className="card"
+            style={{
+              marginTop: "1.5rem",
+              padding: "1.25rem 1.35rem",
+              borderRadius: "var(--radius-lg)",
+              border: "1px solid var(--border-subtle)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
+              <div style={{ minWidth: 0 }}>
+                <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.35rem" }}>{selectedUploadData.filename}</h2>
+                <p style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                  Status: <Badge variant={uploadStatusBadgeVariant(selectedUploadData.status)}>{selectedUploadData.status}</Badge>
+                </p>
+              </div>
+              {(selectedUploadData.status === "PARSED" || selectedUploadData.status === "GENERATED") && (
+                <button type="button" className="btn btn-primary" onClick={handleGenerate} disabled={generating}>
+                  {generating ? (
+                    <>
+                      <span className="spinner" style={{ width: 14, height: 14 }} aria-hidden />
+                      Generating FS…
+                    </>
+                  ) : selectedUploadData.status === "GENERATED" ? (
+                    <>
+                      <RotateCcw size={16} aria-hidden style={{ marginRight: 6 }} />
+                      Regenerate FS
+                    </>
+                  ) : (
+                    <>
+                      <FileText size={16} aria-hidden style={{ marginRight: 6 }} />
+                      Generate FS document
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+            {error && (
+              <p role="alert" style={{ color: "var(--error)", marginTop: "0.85rem", fontSize: "0.85rem" }}>
+                {error}
+              </p>
+            )}
+          </div>
+        </FadeIn>
+      )}
+
+      {generatedFS && generatedFS.status === "GENERATED" && (
+        <FadeIn>
+          <div style={{ marginTop: "1.5rem", display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+            {report && (
+              <div
+                className="card"
+                style={{
+                  padding: "1.35rem",
+                  borderRadius: "var(--radius-lg)",
+                  border: "1px solid var(--border-subtle)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem" }}>
+                  <BarChart3 size={20} strokeWidth={1.75} aria-hidden />
+                  <h3 style={{ fontSize: "1rem", fontWeight: 600 }}>Quality report</h3>
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+                    gap: "0.75rem",
+                    marginBottom: "1.25rem",
+                  }}
+                >
+                  <KpiCard
+                    label="Coverage"
+                    value={Math.round(report.coverage * 100)}
+                    suffix="%"
+                    icon={<CheckCircle2 size={18} aria-hidden />}
+                    iconBg="rgba(34, 197, 94, 0.15)"
+                    delay={0}
+                  />
+                  <KpiCard
+                    label="Confidence"
+                    value={Math.round(report.confidence * 100)}
+                    suffix="%"
+                    icon={<BarChart3 size={18} aria-hidden />}
+                    iconBg="rgba(108, 92, 231, 0.15)"
+                    delay={0.05}
+                  />
+                  <KpiCard
+                    label="Gaps"
+                    value={report.gaps.length}
+                    icon={<Clock size={18} aria-hidden />}
+                    iconBg="rgba(245, 158, 11, 0.15)"
+                    delay={0.1}
+                  />
+                  <KpiCard
+                    label="Sections"
+                    value={generatedFS.sections.length}
+                    icon={<Layers size={18} aria-hidden />}
+                    iconBg="rgba(59, 130, 246, 0.15)"
+                    delay={0.15}
+                  />
+                </div>
+
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "1rem", justifyContent: "center" }}>
+                  <QualityGauge score={compositeQualityScore(report)} label="FS quality" size={152} strokeWidth={10} />
+                  {generatedFS.raw_text ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <Download size={20} strokeWidth={1.5} aria-hidden style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                      <CopyButton text={generatedFS.raw_text} label="Copy full FS" />
+                    </div>
+                  ) : null}
+                </div>
+
+                {report.gaps.length > 0 && (
+                  <div style={{ marginTop: "1.25rem" }}>
+                    <h4 style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.5rem", color: "var(--warning)" }}>
+                      Knowledge gaps ({report.gaps.length})
+                    </h4>
+                    <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                      {report.gaps.slice(0, 10).map((gap, idx) => (
+                        <li
+                          key={idx}
+                          style={{
+                            padding: "0.5rem 0.75rem",
+                            background: "rgba(245, 158, 11, 0.08)",
+                            border: "1px solid rgba(245, 158, 11, 0.15)",
+                            borderRadius: "var(--radius-sm)",
+                            fontSize: "0.82rem",
+                            color: "var(--text-secondary)",
+                          }}
+                        >
+                          <Badge variant="warning" style={{ marginRight: "0.5rem", fontSize: "0.65rem" }}>
+                            Low conf
+                          </Badge>
+                          {gap}
+                        </li>
+                      ))}
+                    </ul>
+                    {report.gaps.length > 10 && (
+                      <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: "0.35rem" }}>
+                        …and {report.gaps.length - 10} more
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {generatedFS.generated_fs_id && (
+              <div
+                className="card"
+                style={{
+                  padding: "1.15rem 1.35rem",
+                  borderRadius: "var(--radius-lg)",
+                  border: "1px solid var(--border-subtle)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: "1rem",
+                }}
+              >
+                <div>
+                  <h4 style={{ fontSize: "0.95rem", fontWeight: 600, marginBottom: "0.2rem" }}>Run full analysis pipeline</h4>
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                    Feed the generated FS into the forward pipeline (ambiguity detection, task decomposition, and more).
+                  </p>
+                </div>
+                <Link href={`/documents/${generatedFS.generated_fs_id}`} className="btn btn-primary">
+                  <Layers size={16} aria-hidden style={{ marginRight: 6, verticalAlign: "middle" }} />
+                  Analyze generated FS
+                </Link>
+              </div>
+            )}
+
+            {generatedFS.sections.length > 0 && (
+              <div
+                className="card"
+                style={{
+                  padding: "1.25rem",
+                  borderRadius: "var(--radius-lg)",
+                  border: "1px solid var(--border-subtle)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem" }}>
+                  <FileText size={20} strokeWidth={1.75} aria-hidden />
+                  <h3 style={{ fontSize: "1rem", fontWeight: 600 }}>Generated FS sections ({generatedFS.sections.length})</h3>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {generatedFS.sections.map((section, idx) => {
+                    const isExpanded = expandedSections.has(idx);
+                    return (
+                      <div key={idx} className="accordion-item">
+                        <button
+                          type="button"
+                          className="accordion-trigger"
+                          onClick={() => toggleSection(idx)}
+                          aria-expanded={isExpanded}
+                        >
+                          <span style={{ display: "flex", alignItems: "center", gap: "0.65rem", minWidth: 0 }}>
+                            <span className="badge badge-accent" style={{ flexShrink: 0 }}>
+                              {section.section_index + 1}
+                            </span>
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{section.heading}</span>
+                          </span>
+                          <ChevronDown
+                            size={18}
+                            className={`accordion-chevron${isExpanded ? " open" : ""}`}
+                            aria-hidden
+                          />
+                        </button>
+                        <AnimatePresence initial={false}>
+                          {isExpanded && (
+                            <motion.div
+                              key="content"
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
+                              transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
+                              style={{ overflow: "hidden" }}
+                            >
+                              <div
+                                className="accordion-content"
+                                style={{
+                                  fontSize: "0.875rem",
+                                  lineHeight: 1.65,
+                                  color: "var(--text-secondary)",
+                                  whiteSpace: "pre-wrap",
+                                  paddingLeft: "0.25rem",
+                                  borderTop: "1px solid var(--border-subtle)",
+                                  paddingTop: "0.75rem",
+                                }}
+                              >
+                                <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.5rem" }}>
+                                  <CopyButton text={section.content} label="Copy section" />
+                                </div>
+                                {section.content}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </FadeIn>
+      )}
+
+      <AnimatePresence>
+        {generating && (
+          <motion.div
+            key="generating"
+            className="page-loading"
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.45)",
+              zIndex: 50,
+              flexDirection: "column",
+              gap: "0.75rem",
+              padding: "2rem",
+            }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <div className="card" style={{ padding: "1.5rem 2rem", maxWidth: 400, textAlign: "center" }}>
+              <div className="spinner" style={{ margin: "0 auto 0.75rem" }} aria-hidden />
+              <p style={{ fontWeight: 600, marginBottom: "0.35rem" }}>Generating Functional Specification…</p>
+              <p style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                Parsing code, analyzing modules, generating FS, running quality checks
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </PageShell>
   );
 }

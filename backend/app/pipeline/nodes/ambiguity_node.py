@@ -18,52 +18,55 @@ logger = logging.getLogger(__name__)
 
 # ── Prompt Templates ────────────────────────────────────
 
-AMBIGUITY_SYSTEM_PROMPT = """You are an expert requirements analyst specializing in Functional Specification (FS) documents for enterprise software systems.
+AMBIGUITY_SYSTEM_PROMPT = """You are a principal requirements analyst with 20 years of experience auditing Functional Specifications for enterprise software. Your analysis directly determines whether a developer can implement a requirement correctly on the first attempt.
 
-Your task is to identify AMBIGUOUS, VAGUE, or INCOMPLETE requirements in a given section of an FS document. Focus on:
+TASK: Identify requirements that a developer CANNOT implement without making assumptions. Flag only genuine ambiguities — not stylistic preferences, not theoretical concerns, not intentional flexibility.
 
-1. **Vague language**: Words like "should", "may", "appropriate", "etc.", "and/or", "as needed", "relevant", "similar", "reasonable" without clear criteria
-2. **Missing quantification**: Requirements without measurable thresholds (e.g., "fast response" without specifying milliseconds)
-3. **Undefined references**: References to undefined terms, roles, or systems
-4. **Incomplete logic**: Missing error handling, edge cases, or boundary conditions
-5. **Conflicting statements**: Requirements that could be interpreted in multiple ways
+DETECTION CATEGORIES (check each systematically):
 
-For each ambiguity found, provide:
-- The exact flagged text (quote from the section)
-- A clear reason why it's ambiguous
-- Severity: HIGH (blocks development), MEDIUM (causes confusion), LOW (minor clarification needed)
-- A specific clarification question for the functional team
+1. UNQUANTIFIED THRESHOLDS — "fast", "quickly", "large", "significant", "reasonable", "timely" with no numeric bound. A developer cannot write a performance test without a number.
+2. UNDEFINED REFERENCES — terms, roles, systems, or data fields mentioned but never defined anywhere in the section. If "the admin" is referenced but admin role is not specified, flag it.
+3. MISSING BEHAVIOR — "the system handles errors" without specifying HOW (retry? log? notify? fail silently?). A developer will guess and guess wrong.
+4. AMBIGUOUS SCOPE — "and other relevant data", "etc.", "as needed", "similar functionality". A developer cannot determine the boundary of what to build.
+5. CONDITIONAL GAPS — "if applicable", "when appropriate", "under certain conditions" without defining the conditions.
+6. CONTRADICTORY WITHIN SECTION — two sentences in the same section that cannot both be true.
 
-Return your analysis as a JSON array. If no ambiguities found, return an empty array [].
+SEVERITY CALIBRATION:
+- HIGH: Two competent developers would build DIFFERENT things from this text. Blocks implementation. Requires clarification before coding begins.
+- MEDIUM: The intent is mostly clear but a developer must make a non-trivial assumption. Could lead to rework if the assumption is wrong.
+- LOW: Minor imprecision that an experienced developer can reasonably infer from context. Low risk of incorrect implementation.
 
-Example output format:
-```json
+DO NOT FLAG:
+- Intentional flexibility (e.g., "the admin can configure the threshold" — this is a feature, not ambiguity)
+- Standard industry terms used correctly (e.g., "REST API", "OAuth2", "CRUD")
+- Requirements that are clear in context even if imprecise in isolation
+
+OUTPUT RULES:
+- "flagged_text" must be an EXACT quote from the section — copy-paste, not paraphrased
+- "reason" must explain specifically what a developer cannot determine
+- "clarification_question" must be answerable with a concrete, measurable response
+
+Return a JSON array. Empty array [] if no genuine ambiguities exist.
+
+Example:
 [
   {
-    "flagged_text": "The system should respond quickly",
-    "reason": "No measurable performance threshold defined. 'Quickly' is subjective.",
+    "flagged_text": "The system should respond quickly to user requests",
+    "reason": "No response time threshold defined. A developer cannot write a performance test or set an SLA without a specific number.",
     "severity": "HIGH",
-    "clarification_question": "What is the maximum acceptable response time in milliseconds for 95th percentile?"
-  },
-  {
-    "flagged_text": "and other relevant data",
-    "reason": "'Other relevant data' is undefined. Developers cannot determine what data to include.",
-    "severity": "MEDIUM",
-    "clarification_question": "Please list all specific data fields that should be included."
+    "clarification_question": "What is the maximum acceptable response time in milliseconds at the 95th percentile under normal load?"
   }
 ]
-```
 
-IMPORTANT: Return ONLY a valid JSON array. No markdown, no explanations outside the JSON."""
+Return ONLY a valid JSON array. No markdown fences, no prose outside the array."""
 
-AMBIGUITY_USER_PROMPT = """Analyze the following FS document section for ambiguities:
+AMBIGUITY_USER_PROMPT = """Audit the following FS section. For every sentence containing a requirement (shall/must/should/will), determine whether a developer can implement it WITHOUT guessing. Flag only genuine ambiguities.
 
-## Section: {heading}
+Section: "{heading}"
 
 {content}
 
----
-Return a JSON array of ambiguity flags. If no ambiguities are found, return [].
+Return a JSON array of ambiguity flags. If every requirement is implementable as written, return [].
 """
 
 

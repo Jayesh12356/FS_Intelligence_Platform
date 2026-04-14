@@ -61,11 +61,35 @@ class LLMClient:
         self._default_model = settings.PRIMARY_MODEL or _DEFAULT_MODELS.get(self._provider, "")
         self._client = None
 
+        self._role_models: dict[str, str] = {}
+        if self._provider == PROVIDER_OPENROUTER:
+            for role, attr in (
+                ("reasoning", "REASONING_MODEL"),
+                ("build", "BUILD_MODEL"),
+                ("longcontext", "LONGCONTEXT_MODEL"),
+                ("fallback", "FALLBACK_MODEL"),
+            ):
+                val = getattr(settings, attr, "").strip()
+                if val:
+                    self._role_models[role] = val
+
         if self._provider not in (PROVIDER_ANTHROPIC, PROVIDER_OPENAI, PROVIDER_GROQ, PROVIDER_OPENROUTER):
             logger.warning(
                 "Unknown LLM_PROVIDER '%s' — falling back to anthropic", self._provider
             )
             self._provider = PROVIDER_ANTHROPIC
+
+    def get_model_for_role(self, role: str = "primary") -> str:
+        """Return the model name for a given role.
+
+        When provider is openrouter and a role-specific model is configured,
+        that model is returned. Otherwise falls back to PRIMARY_MODEL.
+
+        Supported roles: primary, reasoning, build, longcontext, fallback.
+        """
+        if role == "primary" or not self._role_models:
+            return self._default_model
+        return self._role_models.get(role, self._default_model)
 
     @property
     def provider(self) -> str:
@@ -120,15 +144,17 @@ class LLMClient:
         model: Optional[str] = None,
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        role: str = "primary",
     ) -> str:
         """Send a prompt to the LLM and return the text response.
 
         Args:
             prompt: The user message.
             system: Optional system prompt.
-            model: Override the default model.
+            model: Override the default model (takes precedence over role).
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
+            role: Model role for automatic routing (primary/reasoning/build/longcontext/fallback).
 
         Returns:
             The LLM's text response.
@@ -136,7 +162,7 @@ class LLMClient:
         Raises:
             LLMError: If the API call fails.
         """
-        use_model = model or self._default_model
+        use_model = model or self.get_model_for_role(role)
         client = self._get_client()
 
         logger.info("LLM call → provider=%s, model=%s, prompt_len=%d", self._provider, use_model, len(prompt))
@@ -170,7 +196,7 @@ class LLMClient:
             temperature=temperature,
         )
 
-        text = response.choices[0].message.content
+        text = response.choices[0].message.content or ""
         usage = response.usage
         if usage:
             logger.info(
@@ -178,6 +204,12 @@ class LLMClient:
                 self._provider, model,
                 usage.prompt_tokens or 0,
                 usage.completion_tokens or 0,
+            )
+        if not text.strip():
+            raise LLMError(
+                f"LLM returned empty response (model={model})",
+                provider=self._provider,
+                model=model,
             )
         return text
 
@@ -209,6 +241,7 @@ class LLMClient:
         model: Optional[str] = None,
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        role: str = "primary",
     ) -> dict:
         """Call LLM and parse the response as JSON.
 
@@ -221,7 +254,7 @@ class LLMClient:
         Raises:
             LLMError: If the call fails or JSON parsing fails.
         """
-        text = await self.call_llm(prompt, system, model, max_tokens, temperature)
+        text = await self.call_llm(prompt, system, model, max_tokens, temperature, role=role)
 
         # Strip markdown code block wrappers if present
         cleaned = text.strip()
@@ -270,7 +303,7 @@ class LLMClient:
         raise LLMError(
             "LLM returned invalid JSON (could not extract a valid JSON object/array).",
             provider=self._provider,
-            model=model or self._default_model,
+            model=model or self.get_model_for_role(role),
         )
 
     async def check_health(self) -> bool:

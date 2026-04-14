@@ -1,9 +1,14 @@
 """Analysis API — trigger analysis, list/resolve ambiguities, L4+L5 endpoints."""
 
+import asyncio
+import asyncio as _asyncio
+import hashlib
 import logging
 import uuid
+from uuid import UUID as _UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +26,7 @@ from app.db.models import (
     EffortLevel,
     FSDocument,
     FSDocumentStatus,
+    FSVersion,
     FSTaskDB,
     TestCaseDB,
     TestType,
@@ -35,18 +41,232 @@ from app.models.schemas import (
     DebateResultSchema,
     DebateResultsResponse,
     EdgeCaseGapSchema,
+    AcceptRefinementRequest,
     QualityDashboardResponse,
     QualityScoreSchema,
+    RefinementDiffLineSchema,
+    RefinementResponse,
+    RefinementSuggestionSchema,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/fs", tags=["analysis"])
 
+_cancel_events: dict[_UUID, _asyncio.Event] = {}
+
+
+@router.get("/{doc_id}/analysis-progress")
+async def get_analysis_progress_endpoint(
+    doc_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.pipeline.graph import get_analysis_progress, ANALYSIS_NODE_ORDER, ANALYSIS_NODE_LABELS
+
+    result = await db.execute(
+        select(FSDocument.status).where(FSDocument.id == doc_id)
+    )
+    status_val = result.scalar_one_or_none()
+    if status_val is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    doc_status = status_val.value if hasattr(status_val, "value") else str(status_val)
+
+    progress = get_analysis_progress(str(doc_id))
+    if progress:
+        return {
+            "data": {
+                "status": doc_status,
+                "current_node": progress.get("current_node"),
+                "completed_nodes": progress.get("completed_nodes", []),
+                "total_nodes": progress.get("total_nodes", len(ANALYSIS_NODE_ORDER)),
+                "node_labels": ANALYSIS_NODE_LABELS,
+                "logs": progress.get("logs", [])[-40:],
+            }
+        }
+
+    return {
+        "data": {
+            "status": doc_status,
+            "current_node": None,
+            "completed_nodes": ANALYSIS_NODE_ORDER if doc_status == "COMPLETE" else [],
+            "total_nodes": len(ANALYSIS_NODE_ORDER),
+            "node_labels": ANALYSIS_NODE_LABELS,
+            "logs": [],
+        }
+    }
+
+
+async def _refresh_quality_score_internal(doc_id: uuid.UUID, db: AsyncSession) -> dict:
+    ambiguities_result = await db.execute(select(AmbiguityFlagDB).where(AmbiguityFlagDB.fs_id == doc_id))
+    ambiguities = ambiguities_result.scalars().all()
+
+    contradictions_result = await db.execute(select(ContradictionDB).where(ContradictionDB.fs_id == doc_id))
+    contradictions = contradictions_result.scalars().all()
+
+    edge_cases_result = await db.execute(select(EdgeCaseGapDB).where(EdgeCaseGapDB.fs_id == doc_id))
+    edge_cases = edge_cases_result.scalars().all()
+
+    from app.parsers.router import parse_document as do_parse
+    from app.pipeline.nodes.quality_node import compute_quality_score
+
+    try:
+        parsed = await do_parse(str(doc_id), db)
+        total_sections = len(parsed.sections)
+    except Exception:
+        total_sections = 1
+
+    open_ambiguities = [a for a in ambiguities if not a.resolved]
+    open_contradictions = [c for c in contradictions if not c.resolved]
+    open_edge_cases = [e for e in edge_cases if not e.resolved]
+
+    score = compute_quality_score(
+        total_sections=total_sections,
+        ambiguities=[{"section_index": a.section_index} for a in open_ambiguities],
+        contradictions=[{"section_a_index": c.section_a_index} for c in open_contradictions],
+        edge_cases=[{"section_index": e.section_index} for e in open_edge_cases],
+    )
+
+    return {
+        "overall": score.overall,
+        "completeness": score.completeness,
+        "clarity": score.clarity,
+        "consistency": score.consistency,
+        "open_ambiguities": len(open_ambiguities),
+        "open_contradictions": len(open_contradictions),
+        "open_edge_cases": len(open_edge_cases),
+    }
+
+
+async def _build_analysis_response_from_db(
+    doc_id: uuid.UUID,
+    doc: FSDocument,
+    db: AsyncSession,
+) -> AnalysisResponse:
+    flags_result = await db.execute(select(AmbiguityFlagDB).where(AmbiguityFlagDB.fs_id == doc_id))
+    flags = flags_result.scalars().all()
+
+    contradictions_result = await db.execute(select(ContradictionDB).where(ContradictionDB.fs_id == doc_id))
+    contradictions = contradictions_result.scalars().all()
+
+    edge_cases_result = await db.execute(select(EdgeCaseGapDB).where(EdgeCaseGapDB.fs_id == doc_id))
+    edge_cases = edge_cases_result.scalars().all()
+
+    tasks_result = await db.execute(select(FSTaskDB).where(FSTaskDB.fs_id == doc_id))
+    tasks = tasks_result.scalars().all()
+
+    from app.pipeline.nodes.quality_node import compute_quality_score
+    from app.parsers.router import parse_document as do_parse
+
+    try:
+        parsed = await do_parse(str(doc.id), db)
+        total_sections = len(parsed.sections)
+    except Exception:
+        all_indices = set()
+        for a in flags:
+            all_indices.add(a.section_index)
+        for e in edge_cases:
+            all_indices.add(e.section_index)
+        total_sections = max(len(all_indices), 1)
+
+    quality = compute_quality_score(
+        total_sections=total_sections,
+        ambiguities=[{"section_index": a.section_index} for a in flags if not a.resolved],
+        contradictions=[{"section_a_index": c.section_a_index} for c in contradictions if not c.resolved],
+        edge_cases=[{"section_index": e.section_index} for e in edge_cases if not e.resolved],
+    )
+
+    flag_schemas = [
+        AmbiguityFlagSchema(
+            id=f.id,
+            section_index=f.section_index,
+            section_heading=f.section_heading,
+            flagged_text=f.flagged_text,
+            reason=f.reason,
+            severity=f.severity.value,
+            clarification_question=f.clarification_question,
+            resolved=f.resolved,
+        )
+        for f in flags
+    ]
+
+    high_count = sum(1 for f in flags if (f.severity == AmbiguitySeverity.HIGH and not f.resolved))
+    medium_count = sum(1 for f in flags if (f.severity == AmbiguitySeverity.MEDIUM and not f.resolved))
+    low_count = sum(1 for f in flags if (f.severity == AmbiguitySeverity.LOW and not f.resolved))
+
+    return AnalysisResponse(
+        id=doc.id,
+        filename=doc.filename,
+        status=doc.status.value,
+        ambiguities_count=len(flags),
+        high_count=high_count,
+        medium_count=medium_count,
+        low_count=low_count,
+        ambiguities=flag_schemas,
+        contradictions_count=len(contradictions),
+        edge_cases_count=len(edge_cases),
+        tasks_count=len(tasks),
+        quality_score=QualityScoreSchema(
+            completeness=quality.completeness,
+            clarity=quality.clarity,
+            consistency=quality.consistency,
+            overall=quality.overall,
+        ),
+    )
+
+
+async def _persist_refined_version(
+    doc: FSDocument,
+    refined_text: str,
+    db: AsyncSession,
+) -> FSVersion:
+    versions_result = await db.execute(
+        select(FSVersion)
+        .where(FSVersion.fs_id == doc.id)
+        .order_by(FSVersion.version_number.desc())
+    )
+    existing_versions = versions_result.scalars().all()
+    next_version = (existing_versions[0].version_number + 1) if existing_versions else 2
+
+    if not existing_versions:
+        baseline = FSVersion(
+            fs_id=doc.id,
+            version_number=1,
+            parsed_text=doc.parsed_text or doc.original_text or "",
+            file_path=doc.file_path,
+            file_size=doc.file_size,
+            content_type=doc.content_type,
+            content_hash=hashlib.sha256((doc.parsed_text or doc.original_text or "").encode()).hexdigest()[:32],
+            diff_summary="Baseline before refinement",
+        )
+        db.add(baseline)
+        await db.flush()
+
+    version = FSVersion(
+        fs_id=doc.id,
+        version_number=next_version,
+        parsed_text=refined_text,
+        file_path=doc.file_path,
+        file_size=doc.file_size,
+        content_type=doc.content_type,
+        content_hash=hashlib.sha256(refined_text.encode()).hexdigest()[:32],
+        diff_summary="Refinement pipeline accepted as latest FS version",
+    )
+    db.add(version)
+
+    # Latest always becomes active working text.
+    doc.parsed_text = refined_text
+    doc.original_text = refined_text
+    doc.status = FSDocumentStatus.PARSED
+    await db.flush()
+    await db.refresh(version)
+    return version
+
 
 @router.post("/{doc_id}/analyze", response_model=APIResponse[AnalysisResponse])
 async def analyze_document(
     doc_id: uuid.UUID,
+    sections_filter: str = Query(None, alias="sections", description="Comma-separated section indices to re-analyze selectively"),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[AnalysisResponse]:
     """Trigger LangGraph analysis pipeline on a parsed document.
@@ -67,13 +287,49 @@ async def analyze_document(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    if doc.status not in (FSDocumentStatus.PARSED, FSDocumentStatus.COMPLETE, FSDocumentStatus.ANALYZING):
+    if doc.status not in (
+        FSDocumentStatus.PARSED,
+        FSDocumentStatus.COMPLETE,
+        FSDocumentStatus.ANALYZING,
+        FSDocumentStatus.ERROR,
+    ):
         raise HTTPException(
             status_code=400,
             detail=f"Document must be parsed before analysis. Current status: {doc.status.value}",
         )
 
-    # Update status to ANALYZING
+    if doc.status == FSDocumentStatus.COMPLETE:
+        existing = await _build_analysis_response_from_db(doc_id, doc, db)
+        return APIResponse(data=existing)
+
+    if doc.status == FSDocumentStatus.ANALYZING:
+        from datetime import datetime, timezone, timedelta
+        stuck_threshold = timedelta(minutes=3)
+        now = datetime.now(timezone.utc)
+        last_update = doc.updated_at.replace(tzinfo=timezone.utc) if doc.updated_at.tzinfo is None else doc.updated_at
+        if (now - last_update) > stuck_threshold:
+            logger.warning("Document %s stuck in ANALYZING for >3min — resetting to PARSED", doc_id)
+            doc.status = FSDocumentStatus.PARSED
+            await db.commit()
+        else:
+            max_wait_seconds = 60
+            elapsed = 0
+            while elapsed < max_wait_seconds:
+                await asyncio.sleep(3)
+                elapsed += 3
+                await db.refresh(doc)
+                if doc.status == FSDocumentStatus.COMPLETE:
+                    existing = await _build_analysis_response_from_db(doc_id, doc, db)
+                    return APIResponse(data=existing)
+                if doc.status == FSDocumentStatus.ERROR:
+                    doc.status = FSDocumentStatus.PARSED
+                    await db.commit()
+                    break
+            if doc.status == FSDocumentStatus.ANALYZING:
+                doc.status = FSDocumentStatus.PARSED
+                await db.commit()
+
+    # Status PARSED/ERROR: start fresh analysis
     doc.status = FSDocumentStatus.ANALYZING
     await db.commit()
 
@@ -90,14 +346,61 @@ async def analyze_document(
         for s in parsed.sections
     ]
 
+    if sections_filter:
+        try:
+            changed_indices = {int(x.strip()) for x in sections_filter.split(",") if x.strip()}
+            from app.db.models import PipelineCacheDB
+            from sqlalchemy import delete as sql_delete
+            await db.execute(sql_delete(PipelineCacheDB).where(PipelineCacheDB.document_id == doc_id))
+            await db.commit()
+            logger.info("Selective analysis for sections %s (cache cleared)", changed_indices)
+        except (ValueError, TypeError):
+            changed_indices = None
+    else:
+        changed_indices = None
+
     # Run the LangGraph pipeline
+    cancel_evt = _asyncio.Event()
+    _cancel_events[doc_id] = cancel_evt
     try:
-        pipeline_result = await run_analysis_pipeline(str(doc.id), sections)
-    except Exception as exc:
-        doc.status = FSDocumentStatus.ERROR
+        try:
+            pipeline_result = await run_analysis_pipeline(
+                str(doc.id), sections, db=db, cancel_event=cancel_evt
+            )
+        except Exception as exc:
+            doc.status = FSDocumentStatus.ERROR
+            await db.commit()
+            logger.error("Analysis pipeline failed for %s: %s", doc_id, exc)
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "Analysis failed",
+                    "reason": str(exc),
+                    "retry_after": 10,
+                },
+            )
+    finally:
+        _cancel_events.pop(doc_id, None)
+
+    if cancel_evt.is_set():
+        doc.status = FSDocumentStatus.PARSED
         await db.commit()
-        logger.error("Analysis pipeline failed for %s: %s", doc_id, exc)
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {exc}")
+        return APIResponse(
+            data=AnalysisResponse(
+                id=doc.id,
+                filename=doc.filename,
+                status="PARSED",
+                ambiguities_count=0,
+                high_count=0,
+                medium_count=0,
+                low_count=0,
+                ambiguities=[],
+                contradictions_count=0,
+                edge_cases_count=0,
+                tasks_count=0,
+                quality_score=None,
+            ),
+        )
 
     # ── Delete existing results for this document (re-analysis) ──
     for model_class in [AmbiguityFlagDB, ContradictionDB, EdgeCaseGapDB, ComplianceTagDB, FSTaskDB, TraceabilityEntryDB, DebateResultDB, DuplicateFlagDB, TestCaseDB]:
@@ -373,6 +676,108 @@ async def analyze_document(
     )
 
 
+@router.post("/{doc_id}/cancel-analysis", response_model=APIResponse[dict])
+async def cancel_analysis(
+    doc_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[dict]:
+    """Cancel a running analysis for a document."""
+    evt = _cancel_events.get(doc_id)
+    if not evt:
+        return APIResponse(
+            data={
+                "cancelled": False,
+                "reason": "No active analysis found for this document",
+            },
+        )
+
+    evt.set()
+
+    await asyncio.sleep(1)
+
+    result = await db.execute(
+        select(FSDocument).where(FSDocument.id == doc_id)
+    )
+    doc = result.scalar_one_or_none()
+    if doc and doc.status == FSDocumentStatus.ANALYZING:
+        doc.status = FSDocumentStatus.PARSED
+        from app.db.audit import log_audit_event
+        await log_audit_event(db, doc_id, AuditEventType.ANALYSIS_CANCELLED)
+        await db.commit()
+
+    return APIResponse(data={"cancelled": True, "document_id": str(doc_id)})
+
+
+@router.post("/{doc_id}/refine", response_model=APIResponse[RefinementResponse])
+async def refine_document(
+    doc_id: uuid.UUID,
+    mode: str = Query("auto", description="Refinement mode: auto, targeted, full"),
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[RefinementResponse]:
+    """Run refinement pipeline and return refined FS candidate.
+
+    mode=auto: targeted if <= 5 issues, full otherwise.
+    mode=targeted: only fix affected paragraphs (fast, fewer tokens).
+    mode=full: rewrite entire document (thorough).
+    """
+    from app.pipeline.refinement_graph import run_refinement_pipeline
+
+    result = await run_refinement_pipeline(str(doc_id), db, mode=mode)
+    if result.get("errors"):
+        raise HTTPException(status_code=400, detail="; ".join(result["errors"]))
+
+    suggestions = [
+        RefinementSuggestionSchema(
+            issue=str(s.get("issue") or s.get("issue_type") or "issue"),
+            original=str(s.get("original_text") or ""),
+            refined=str(s.get("suggested_fix") or ""),
+        )
+        for s in result.get("suggestions", [])
+    ]
+    diff = [RefinementDiffLineSchema(line=str(d.get("line", ""))) for d in result.get("diff", [])]
+
+    return APIResponse(
+        data=RefinementResponse(
+            original_score=float(result.get("original_score", 0.0)),
+            refined_score=float(result.get("refined_score", result.get("original_score", 0.0))),
+            changes_made=int(result.get("changes_made", 0)),
+            refined_text=str(result.get("refined_text", result.get("original_text", ""))),
+            diff=diff,
+            suggestions=suggestions,
+        )
+    )
+
+
+@router.post("/{doc_id}/refine/accept")
+async def accept_refined_document(
+    doc_id: uuid.UUID,
+    body: AcceptRefinementRequest,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[dict]:
+    """Persist refined text as latest version. Returns immediately; the frontend
+    triggers re-analysis separately via the analyze endpoint so the progress
+    stepper works correctly."""
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
+    doc = doc_result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    refined_text = (body.refined_text or "").strip()
+    if not refined_text:
+        raise HTTPException(status_code=400, detail="refined_text is required")
+
+    version = await _persist_refined_version(doc, refined_text, db)
+    await db.commit()
+
+    return APIResponse(
+        data={
+            "accepted": True,
+            "version_id": str(version.id),
+            "version_number": version.version_number,
+        }
+    )
+
+
 @router.get("/{doc_id}/ambiguities", response_model=APIResponse[list[AmbiguityFlagSchema]])
 async def list_ambiguities(
     doc_id: uuid.UUID,
@@ -424,6 +829,7 @@ async def resolve_ambiguity(
     flag.resolved = True
     await db.commit()
     await db.refresh(flag)
+    await _refresh_quality_score_internal(doc_id, db)
 
     return APIResponse(
         data=AmbiguityFlagSchema(
@@ -437,6 +843,20 @@ async def resolve_ambiguity(
             resolved=flag.resolved,
         ),
     )
+
+
+@router.get("/{doc_id}/quality-score/refresh")
+async def refresh_quality_score(
+    doc_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[dict]:
+    """Recompute quality score from current DB state without rerunning full pipeline."""
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
+    doc = doc_result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    refreshed = await _refresh_quality_score_internal(doc_id, db)
+    return APIResponse(data=refreshed)
 
 
 # ── L4 Endpoints ───────────────────────────────────────
@@ -574,6 +994,249 @@ async def resolve_edge_case(
     )
 
 
+@router.post("/{doc_id}/edge-cases/{edge_case_id}/accept")
+async def accept_edge_case_suggestion(
+    doc_id: uuid.UUID,
+    edge_case_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[EdgeCaseGapSchema]:
+    """Accept an edge case suggestion: merge suggested_addition into the FS
+    document text at the relevant section, mark the edge case as resolved,
+    and create a new version snapshot."""
+    ec_result = await db.execute(
+        select(EdgeCaseGapDB).where(
+            EdgeCaseGapDB.id == edge_case_id,
+            EdgeCaseGapDB.fs_id == doc_id,
+        )
+    )
+    row = ec_result.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Edge case gap not found")
+    if row.resolved:
+        raise HTTPException(status_code=400, detail="Edge case already resolved")
+    if not row.suggested_addition:
+        raise HTTPException(status_code=400, detail="No suggested addition to apply")
+
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
+    doc = doc_result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    text = doc.parsed_text or doc.original_text or ""
+    text = _append_to_section(text, row.section_index, row.suggested_addition.strip())
+
+    version = await _persist_refined_version(doc, text, db)
+    row.resolved = True
+    await db.commit()
+    await db.refresh(row)
+
+    return APIResponse(
+        data=EdgeCaseGapSchema(
+            id=row.id,
+            section_index=row.section_index,
+            section_heading=row.section_heading,
+            scenario_description=row.scenario_description,
+            impact=row.impact.value,
+            suggested_addition=row.suggested_addition,
+            resolved=row.resolved,
+        ),
+    )
+
+
+def _append_to_section(text: str, section_index: int, addition: str) -> str:
+    """Append text at the end of a specific section in the document."""
+    from app.parsers.section_extractor import extract_sections_from_text
+    sections = extract_sections_from_text(text)
+    target = None
+    for s in sections:
+        if s.section_index == section_index:
+            target = s
+            break
+    if target and target.content:
+        last_line = target.content.rstrip().split("\n")[-1]
+        pos = text.rfind(last_line)
+        if pos >= 0:
+            end = pos + len(last_line)
+            return text[:end] + "\n" + addition + text[end:]
+    return text.rstrip() + "\n\n" + addition
+
+
+@router.post("/{doc_id}/contradictions/{contradiction_id}/accept")
+async def accept_contradiction_suggestion(
+    doc_id: uuid.UUID,
+    contradiction_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[ContradictionSchema]:
+    """Accept a contradiction resolution: merge suggested_resolution into the FS
+    document at section A, mark resolved, create a version snapshot."""
+    c_result = await db.execute(
+        select(ContradictionDB).where(
+            ContradictionDB.id == contradiction_id,
+            ContradictionDB.fs_id == doc_id,
+        )
+    )
+    row = c_result.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Contradiction not found")
+    if row.resolved:
+        raise HTTPException(status_code=400, detail="Contradiction already resolved")
+    if not row.suggested_resolution:
+        raise HTTPException(status_code=400, detail="No suggested resolution to apply")
+
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
+    doc = doc_result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    text = doc.parsed_text or doc.original_text or ""
+    text = _append_to_section(text, row.section_a_index, row.suggested_resolution.strip())
+
+    await _persist_refined_version(doc, text, db)
+    row.resolved = True
+    await db.commit()
+    await db.refresh(row)
+
+    return APIResponse(
+        data=ContradictionSchema(
+            id=row.id,
+            section_a_index=row.section_a_index,
+            section_a_heading=row.section_a_heading,
+            section_b_index=row.section_b_index,
+            section_b_heading=row.section_b_heading,
+            description=row.description,
+            severity=row.severity.value,
+            suggested_resolution=row.suggested_resolution,
+            resolved=row.resolved,
+        ),
+    )
+
+
+# ── Bulk Operations ────────────────────────────────────
+
+
+@router.post("/{doc_id}/edge-cases/bulk-accept")
+async def bulk_accept_edge_cases(
+    doc_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[dict]:
+    """Accept all unresolved edge case suggestions, merging each into the document."""
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
+    doc = doc_result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    rows_result = await db.execute(
+        select(EdgeCaseGapDB).where(
+            EdgeCaseGapDB.fs_id == doc_id,
+            EdgeCaseGapDB.resolved.is_(False),
+        ).order_by(EdgeCaseGapDB.section_index)
+    )
+    rows = rows_result.scalars().all()
+
+    text = doc.parsed_text or doc.original_text or ""
+    accepted = 0
+    for row in rows:
+        if row.suggested_addition:
+            text = _append_to_section(text, row.section_index, row.suggested_addition.strip())
+            accepted += 1
+        row.resolved = True
+
+    if accepted > 0:
+        await _persist_refined_version(doc, text, db)
+    await db.commit()
+    return APIResponse(data={"accepted": accepted, "resolved": len(rows)})
+
+
+@router.post("/{doc_id}/edge-cases/bulk-resolve")
+async def bulk_resolve_edge_cases(
+    doc_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[dict]:
+    """Mark all unresolved edge cases as resolved without merging text."""
+    rows_result = await db.execute(
+        select(EdgeCaseGapDB).where(
+            EdgeCaseGapDB.fs_id == doc_id,
+            EdgeCaseGapDB.resolved.is_(False),
+        )
+    )
+    rows = rows_result.scalars().all()
+    for row in rows:
+        row.resolved = True
+    await db.commit()
+    return APIResponse(data={"resolved": len(rows)})
+
+
+@router.post("/{doc_id}/contradictions/bulk-accept")
+async def bulk_accept_contradictions(
+    doc_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[dict]:
+    """Accept all unresolved contradiction resolutions, merging each into the document."""
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
+    doc = doc_result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    rows_result = await db.execute(
+        select(ContradictionDB).where(
+            ContradictionDB.fs_id == doc_id,
+            ContradictionDB.resolved.is_(False),
+        ).order_by(ContradictionDB.section_a_index)
+    )
+    rows = rows_result.scalars().all()
+
+    text = doc.parsed_text or doc.original_text or ""
+    accepted = 0
+    for row in rows:
+        if row.suggested_resolution:
+            text = _append_to_section(text, row.section_a_index, row.suggested_resolution.strip())
+            accepted += 1
+        row.resolved = True
+
+    if accepted > 0:
+        await _persist_refined_version(doc, text, db)
+    await db.commit()
+    return APIResponse(data={"accepted": accepted, "resolved": len(rows)})
+
+
+@router.post("/{doc_id}/contradictions/bulk-resolve")
+async def bulk_resolve_contradictions(
+    doc_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[dict]:
+    """Mark all unresolved contradictions as resolved without merging text."""
+    rows_result = await db.execute(
+        select(ContradictionDB).where(
+            ContradictionDB.fs_id == doc_id,
+            ContradictionDB.resolved.is_(False),
+        )
+    )
+    rows = rows_result.scalars().all()
+    for row in rows:
+        row.resolved = True
+    await db.commit()
+    return APIResponse(data={"resolved": len(rows)})
+
+
+@router.post("/{doc_id}/ambiguities/bulk-resolve")
+async def bulk_resolve_ambiguities(
+    doc_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[dict]:
+    """Mark all unresolved ambiguities as resolved."""
+    rows_result = await db.execute(
+        select(AmbiguityFlagDB).where(
+            AmbiguityFlagDB.fs_id == doc_id,
+            AmbiguityFlagDB.resolved.is_(False),
+        )
+    )
+    rows = rows_result.scalars().all()
+    for row in rows:
+        row.resolved = True
+    await db.commit()
+    return APIResponse(data={"resolved": len(rows)})
+
+
 @router.get("/{doc_id}/quality-score", response_model=APIResponse[QualityDashboardResponse])
 async def get_quality_dashboard(
     doc_id: uuid.UUID,
@@ -591,22 +1254,31 @@ async def get_quality_dashboard(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Load all analysis results
+    # Load only unresolved issues for quality score (matches build endpoint behavior)
     ambiguities_result = await db.execute(
-        select(AmbiguityFlagDB).where(AmbiguityFlagDB.fs_id == doc_id)
+        select(AmbiguityFlagDB).where(
+            AmbiguityFlagDB.fs_id == doc_id,
+            AmbiguityFlagDB.resolved.is_(False),
+        )
     )
     ambiguities = ambiguities_result.scalars().all()
 
     contradictions_result = await db.execute(
         select(ContradictionDB)
-        .where(ContradictionDB.fs_id == doc_id)
+        .where(
+            ContradictionDB.fs_id == doc_id,
+            ContradictionDB.resolved.is_(False),
+        )
         .order_by(ContradictionDB.section_a_index)
     )
     contradictions = contradictions_result.scalars().all()
 
     edge_cases_result = await db.execute(
         select(EdgeCaseGapDB)
-        .where(EdgeCaseGapDB.fs_id == doc_id)
+        .where(
+            EdgeCaseGapDB.fs_id == doc_id,
+            EdgeCaseGapDB.resolved.is_(False),
+        )
         .order_by(EdgeCaseGapDB.section_index)
     )
     edge_cases = edge_cases_result.scalars().all()
@@ -620,20 +1292,14 @@ async def get_quality_dashboard(
 
     # Recompute quality score from persisted data
     from app.pipeline.nodes.quality_node import compute_quality_score
+    from app.parsers.section_extractor import extract_sections_from_text
 
-    # Get section count from analysis result or parse
-    from app.parsers.router import parse_document as do_parse
+    text = (doc.parsed_text or doc.original_text or "").strip()
     try:
-        parsed = await do_parse(str(doc.id), db)
-        total_sections = len(parsed.sections)
+        total_sections = len(extract_sections_from_text(text)) if text else 1
     except Exception:
-        # Fallback: estimate from ambiguity section indices
-        all_indices = set()
-        for a in ambiguities:
-            all_indices.add(a.section_index)
-        for e in edge_cases:
-            all_indices.add(e.section_index)
-        total_sections = max(len(all_indices), 1)
+        total_sections = 1
+    total_sections = max(total_sections, 1)
 
     quality = compute_quality_score(
         total_sections=total_sections,

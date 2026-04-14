@@ -16,32 +16,31 @@ logger = logging.getLogger(__name__)
 
 # ── Prompt Templates ────────────────────────────────────
 
-TASK_DECOMPOSITION_SYSTEM_PROMPT = """You are an expert software architect and project manager decomposing Functional Specification (FS) requirements into actionable developer tasks.
+TASK_DECOMPOSITION_SYSTEM_PROMPT = """You are a staff software architect decomposing Functional Specification requirements into a developer-ready task backlog. Each task you produce will be assigned to an autonomous coding agent that implements it without human guidance — so precision is paramount.
 
-For each FS section, produce ATOMIC, implementable dev tasks. Each task should be:
-- **Specific**: Clear enough for a developer to start immediately
-- **Testable**: Has concrete acceptance criteria
-- **Scoped**: Covers one piece of functionality (not too broad, not too granular)
+TASK: Convert every implementable requirement in the section into atomic, independently-deliverable development tasks. Each task must be specific enough that an AI coding agent can implement it correctly on the first attempt.
 
-Hard requirement:
-- If the section contains any actionable product requirement (e.g. "shall", "must", "should", "will", "needs to", "requires"), you MUST return at least 1 task.
-- Only return [] when the section is purely non-requirement content (e.g. headings, intro text with no behavior, or empty filler).
+MANDATORY RULES:
+- If the section contains ANY actionable requirement (shall/must/should/will/needs to/requires), produce at least 1 task.
+- Return [] ONLY when the section is pure boilerplate (table of contents, revision history, glossary definitions with no behavior).
+- Every task title MUST start with a verb: Create, Implement, Build, Add, Configure, Design, Write.
+- Each task maps to exactly ONE deliverable artifact or capability (one API endpoint, one DB model, one UI component, one integration).
 
-For each task, provide:
-1. **title**: Short, actionable title (e.g., "Implement user login API endpoint")
-2. **description**: Detailed description of what to implement, including technical approach
-3. **acceptance_criteria**: List of verifiable acceptance criteria (at least 2)
-4. **effort**: Effort complexity — LOW (< 2 hours), MEDIUM (2-8 hours), HIGH (> 8 hours), UNKNOWN (not enough info)
-5. **tags**: List of relevant tags from: frontend, backend, db, auth, api, testing, security, devops, integration, ui, performance
+TASK STRUCTURE:
+1. "title" — Verb-first, specific, max 12 words. Bad: "User stuff". Good: "Implement POST /api/users/register endpoint".
+2. "description" — COMPLETE implementation specification: what to build, input/output data shapes, business logic rules, error handling. NO phrases like "as described in the FS" — embed the actual requirement.
+3. "acceptance_criteria" — 2-5 VERIFIABLE statements each testable with a concrete assertion. Bad: "Works correctly". Good: "Returns HTTP 409 with DUPLICATE_EMAIL error when email exists".
+4. "effort" — LOW (single function, simple CRUD, < 2h), MEDIUM (full endpoint with validation, UI page with state, 2-8h), HIGH (complex multi-component feature, > 8h), UNKNOWN (requirement too vague to estimate).
+5. "tags" — From: frontend, backend, db, auth, api, testing, security, devops, integration, ui, performance.
 
-Guidelines:
-- Break large features into 2-5 smaller tasks
-- Each task should be completable independently (when dependencies are resolved)
-- Include data model tasks, API tasks, frontend tasks, and testing tasks as needed
-- Don't create tasks for trivially obvious things (like "create a file")
-- Focus on the substantive implementation work
+DECOMPOSITION GUIDELINES:
+- Break features along LAYER boundaries: DB model -> API endpoint -> Frontend component
+- 2-5 tasks per feature is the sweet spot
+- Data model tasks before API tasks. Backend before frontend for same feature.
+- DO NOT create generic "Write tests for X" tasks — testing criteria belong in acceptance_criteria
+- DO NOT create "design" or "plan" tasks — every task must produce working code
 
-Return your analysis as a JSON array of tasks. If the section has no implementable requirements, return [].
+Return ONLY a valid JSON array. No markdown fences, no prose outside the array.
 
 Example output:
 ```json
@@ -63,14 +62,13 @@ Example output:
 
 IMPORTANT: Return ONLY a valid JSON array. No markdown, no explanations outside the JSON."""
 
-TASK_DECOMPOSITION_USER_PROMPT = """Decompose the following FS section into atomic developer tasks:
+TASK_DECOMPOSITION_USER_PROMPT = """Decompose every implementable requirement in this section into atomic dev tasks. Each task must be independently implementable and produce working code.
 
-## Section {index}: {heading}
+Section {index}: "{heading}"
 
 {content}
 
----
-Return a JSON array of tasks. If no implementable tasks, return []."""
+Return a JSON array of tasks. If the section contains no implementable requirements, return []."""
 
 
 # ── Detection Function ──────────────────────────────────
@@ -108,6 +106,7 @@ async def decompose_section_into_tasks(
             system=TASK_DECOMPOSITION_SYSTEM_PROMPT,
             temperature=0.0,
             max_tokens=4096,
+            role="build",
         )
 
         if not isinstance(result, list):

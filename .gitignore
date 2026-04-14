@@ -24,6 +24,10 @@ uploads/
 # Docker
 *.log
 
+# Test artifacts
+*.db
+backend/*.db
+
 # IDE
 .vscode/
 .idea/

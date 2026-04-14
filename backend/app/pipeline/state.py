@@ -228,6 +228,9 @@ class FSAnalysisState(TypedDict, total=False):
     fs_id: str
     parsed_sections: List[dict]  # List of SectionInput-like dicts
 
+    # Project context (summaries of sibling documents in the same project)
+    project_context: List[dict]
+
     # L3: Ambiguity detection
     ambiguities: List[dict]  # List of AmbiguityFlag-like dicts
 

@@ -3,15 +3,30 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { listVersions, getImpactAnalysis, uploadVersion } from "@/lib/api";
+import type { FSVersionItem, ImpactAnalysisData } from "@/lib/api";
 import {
-  listVersions,
-  getImpactAnalysis,
-  uploadVersion,
-} from "@/lib/api";
-import type {
-  FSVersionItem,
-  ImpactAnalysisData,
-} from "@/lib/api";
+  PageShell,
+  KpiCard,
+  FadeIn,
+  StaggerList,
+  StaggerItem,
+  EmptyState,
+} from "@/components/index";
+import Badge from "@/components/Badge";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  GitCompare,
+  Upload,
+  Clock,
+  XCircle,
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  Plus,
+  Minus,
+  PenLine,
+} from "lucide-react";
 
 function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-US", {
@@ -23,28 +38,46 @@ function formatDate(dateStr: string): string {
   });
 }
 
-const CHANGE_COLORS: Record<string, string> = {
-  ADDED: "#22c55e",
-  MODIFIED: "#f59e0b",
-  DELETED: "#ef4444",
+const CHANGE_BORDER: Record<string, string> = {
+  ADDED: "var(--success-border, #22c55e)",
+  MODIFIED: "var(--warning-border, #f59e0b)",
+  DELETED: "var(--error-border, #ef4444)",
 };
 
-const CHANGE_ICONS: Record<string, string> = {
-  ADDED: "+",
-  MODIFIED: "~",
-  DELETED: "−",
+const CHANGE_BADGE_VARIANT: Record<string, "success" | "warning" | "error"> = {
+  ADDED: "success",
+  MODIFIED: "warning",
+  DELETED: "error",
 };
 
-const IMPACT_COLORS: Record<string, string> = {
-  INVALIDATED: "#ef4444",
-  REQUIRES_REVIEW: "#f59e0b",
-  UNAFFECTED: "#22c55e",
+const CHANGE_ICON: Record<string, typeof Plus> = {
+  ADDED: Plus,
+  MODIFIED: PenLine,
+  DELETED: Minus,
+};
+
+const IMPACT_BORDER: Record<string, string> = {
+  INVALIDATED: "var(--error-border, #ef4444)",
+  REQUIRES_REVIEW: "var(--warning-border, #f59e0b)",
+  UNAFFECTED: "var(--success-border, #22c55e)",
+};
+
+const IMPACT_BADGE_VARIANT: Record<string, "error" | "warning" | "success"> = {
+  INVALIDATED: "error",
+  REQUIRES_REVIEW: "warning",
+  UNAFFECTED: "success",
 };
 
 const IMPACT_LABELS: Record<string, string> = {
   INVALIDATED: "Invalidated",
   REQUIRES_REVIEW: "Needs Review",
   UNAFFECTED: "Unaffected",
+};
+
+const IMPACT_ICON: Record<string, typeof XCircle> = {
+  INVALIDATED: XCircle,
+  REQUIRES_REVIEW: AlertTriangle,
+  UNAFFECTED: CheckCircle2,
 };
 
 export default function ImpactDashboardPage() {
@@ -66,12 +99,8 @@ export default function ImpactDashboardPage() {
     try {
       setLoading(true);
       const result = await listVersions(docId);
-      setVersions(result.data.versions || []);
-      // Auto-select latest version (if > 1)
-      if (result.data.versions.length > 1) {
-        const latest = result.data.versions[result.data.versions.length - 1];
-        setSelectedVersion(latest.id);
-      }
+      const vers = result.data.versions || [];
+      setVersions(vers);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load versions");
     } finally {
@@ -80,20 +109,37 @@ export default function ImpactDashboardPage() {
   }, [docId]);
 
   useEffect(() => {
+    setVersions([]);
+    setSelectedVersion(null);
+    setImpactData(null);
+  }, [docId]);
+
+  useEffect(() => {
     if (docId) fetchVersions();
   }, [docId, fetchVersions]);
 
-  const fetchImpactData = useCallback(async (versionId: string) => {
-    try {
-      setImpactLoading(true);
-      const result = await getImpactAnalysis(docId, versionId);
-      setImpactData(result.data);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to load impact data");
-    } finally {
-      setImpactLoading(false);
+  useEffect(() => {
+    if (versions.length === 0) return;
+    const ids = new Set(versions.map((v) => v.id));
+    if (selectedVersion == null || !ids.has(selectedVersion)) {
+      setSelectedVersion(versions[versions.length - 1].id);
     }
-  }, [docId]);
+  }, [versions, selectedVersion]);
+
+  const fetchImpactData = useCallback(
+    async (versionId: string) => {
+      try {
+        setImpactLoading(true);
+        const result = await getImpactAnalysis(docId, versionId);
+        setImpactData(result.data);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to load impact data");
+      } finally {
+        setImpactLoading(false);
+      }
+    },
+    [docId]
+  );
 
   useEffect(() => {
     if (selectedVersion) {
@@ -101,7 +147,7 @@ export default function ImpactDashboardPage() {
     }
   }, [selectedVersion, fetchImpactData]);
 
-  const handleUploadVersion = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -119,6 +165,10 @@ export default function ImpactDashboardPage() {
     }
   };
 
+  const handleCompare = (versionId: string) => {
+    setSelectedVersion(versionId);
+  };
+
   const toggleChange = (index: number) => {
     setExpandedChanges((prev) => {
       const next = new Set(prev);
@@ -126,6 +176,15 @@ export default function ImpactDashboardPage() {
       else next.add(index);
       return next;
     });
+  };
+
+  const openFilePicker = () => fileInputRef.current?.click();
+
+  const onZoneKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openFilePicker();
+    }
   };
 
   if (loading) {
@@ -139,463 +198,581 @@ export default function ImpactDashboardPage() {
 
   if (error) {
     return (
-      <div className="empty-state">
-        <div className="empty-state-icon">⚠️</div>
-        <h3>Error</h3>
-        <p>{error}</p>
-        <Link href={`/documents/${docId}`} className="btn btn-primary btn-sm">
-          ← Back to Document
-        </Link>
-      </div>
+      <PageShell
+        backHref={`/documents/${docId}`}
+        title="Impact Analysis"
+        maxWidth={960}
+      >
+        <FadeIn>
+          <EmptyState
+            icon={<AlertTriangle size={40} strokeWidth={1.25} aria-hidden />}
+            title="Error"
+            description={error}
+            action={
+              <Link href={`/documents/${docId}`} className="btn btn-primary btn-sm">
+                Back to Document
+              </Link>
+            }
+          />
+        </FadeIn>
+      </PageShell>
     );
   }
 
   const rework = impactData?.rework_estimate;
 
   return (
-    <div style={{ maxWidth: "960px" }}>
-      <Link href={`/documents/${docId}`} className="back-link">
-        ← Back to Document
-      </Link>
-
-      <div style={{ marginBottom: "2rem" }}>
-        <h1 style={{ fontSize: "1.8rem", fontWeight: 700, marginBottom: "0.5rem" }}>
-          🔄 Change Impact Analysis
-        </h1>
-        <p style={{ color: "var(--text-secondary)", fontSize: "0.95rem" }}>
-          Upload a new version of the FS document to see what tasks are affected
-        </p>
-      </div>
-
-      {/* Upload New Version */}
-      <div
-        style={{
-          background: "var(--bg-card)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-lg)",
-          padding: "1.5rem",
-          marginBottom: "1.5rem",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
-          <div>
-            <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.25rem" }}>
-              Upload New Version
+    <PageShell
+      backHref={`/documents/${docId}`}
+      title="Impact Analysis"
+      subtitle="Upload a new version of the FS document to see what tasks are affected"
+      maxWidth={960}
+    >
+      <FadeIn>
+        <div className="card" style={{ marginBottom: "1.5rem" }}>
+          <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.75rem" }}>
+            Upload new version
+          </h3>
+          <p className="page-subtitle" style={{ marginBottom: "1rem", fontSize: "0.875rem" }}>
+            Upload an updated FS document to trigger impact analysis
+          </p>
+          <motion.div
+            className="upload-zone"
+            onClick={uploading ? undefined : openFilePicker}
+            onKeyDown={uploading ? undefined : onZoneKeyDown}
+            role="button"
+            tabIndex={uploading ? -1 : 0}
+            aria-disabled={uploading}
+            whileHover={uploading ? undefined : { scale: 1.01 }}
+            transition={{ type: "spring", stiffness: 400, damping: 25 }}
+            style={{ cursor: uploading ? "not-allowed" : "pointer", opacity: uploading ? 0.7 : 1 }}
+          >
+            <div className="upload-icon">
+              <Upload size={40} strokeWidth={1.5} aria-hidden />
+            </div>
+            <h3>
+              {uploading
+                ? "Uploading…"
+                : "Drop a file here or click to browse"}
             </h3>
-            <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
-              Upload an updated FS document to trigger impact analysis
-            </p>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <p>PDF, DOCX, or TXT — triggers parse, diff, and impact analysis</p>
+            <div className="file-types">
+              <span className="file-type-badge">.PDF</span>
+              <span className="file-type-badge">.DOCX</span>
+              <span className="file-type-badge">.TXT</span>
+            </div>
             <input
               ref={fileInputRef}
               type="file"
               accept=".pdf,.docx,.txt"
-              onChange={handleUploadVersion}
+              onChange={handleUpload}
               style={{ display: "none" }}
               id="version-upload"
-            />
-            <button
-              className="btn btn-primary"
-              onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
-              style={{ padding: "10px 24px", fontSize: "0.9rem" }}
-            >
-              {uploading ? (
-                <>
-                  <span className="spinner" style={{ width: "14px", height: "14px" }} />
-                  Uploading…
-                </>
-              ) : (
-                <>📤 Upload Version {versions.length > 0 ? `v${versions.length + 1}` : "v2"}</>
-              )}
-            </button>
-          </div>
+            />
+          </motion.div>
+          {uploadError && (
+            <p style={{ color: "var(--error)", marginTop: "0.75rem", fontSize: "0.85rem" }}>
+              {uploadError}
+            </p>
+          )}
         </div>
-        {uploadError && (
-          <p style={{ color: "var(--error)", marginTop: "0.75rem", fontSize: "0.85rem" }}>
-            ❌ {uploadError}
-          </p>
-        )}
-      </div>
+      </FadeIn>
 
-      {/* Version Selector */}
       {versions.length > 0 && (
-        <div
-          style={{
-            background: "var(--bg-card)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius-lg)",
-            padding: "1.5rem",
-            marginBottom: "1.5rem",
-          }}
-        >
-          <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "1rem" }}>
-            📑 Version History ({versions.length})
-          </h3>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-            {versions.map((v) => (
-              <button
-                key={v.id}
-                onClick={() => setSelectedVersion(v.id)}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: "var(--radius-sm)",
-                  border: selectedVersion === v.id
-                    ? "2px solid var(--accent-primary)"
-                    : "1px solid var(--border-subtle)",
-                  background: selectedVersion === v.id
-                    ? "rgba(108, 92, 231, 0.15)"
-                    : "var(--bg-secondary)",
-                  color: selectedVersion === v.id
-                    ? "var(--accent-primary)"
-                    : "var(--text-secondary)",
-                  cursor: "pointer",
-                  fontSize: "0.85rem",
-                  fontWeight: selectedVersion === v.id ? 700 : 500,
-                  transition: "all 0.2s ease",
-                }}
-              >
-                v{v.version_number}
-                <span style={{ display: "block", fontSize: "0.72rem", opacity: 0.6, marginTop: "2px" }}>
-                  {formatDate(v.created_at)}
-                </span>
-              </button>
-            ))}
+        <FadeIn delay={0.05}>
+          <div style={{ marginBottom: "1.5rem" }}>
+            <h3
+              style={{
+                fontSize: "0.95rem",
+                fontWeight: 600,
+                marginBottom: "0.75rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+              }}
+            >
+              <GitCompare size={18} aria-hidden />
+              Version timeline ({versions.length})
+            </h3>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "row",
+                flexWrap: "nowrap",
+                gap: "0.75rem",
+                overflowX: "auto",
+                paddingBottom: "0.25rem",
+                WebkitOverflowScrolling: "touch",
+              }}
+            >
+              {versions.map((v) => {
+                const selected = selectedVersion === v.id;
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    onClick={() => handleCompare(v.id)}
+                    className="card card-flat"
+                    style={{
+                      flex: "0 0 auto",
+                      minWidth: "140px",
+                      textAlign: "left",
+                      cursor: "pointer",
+                      padding: "1rem 1.125rem",
+                      borderWidth: selected ? 2 : 1,
+                      borderColor: selected ? "var(--accent-primary)" : "var(--border-subtle)",
+                      background: selected ? "rgba(108, 92, 231, 0.12)" : "var(--bg-card)",
+                      boxShadow: selected ? "var(--shadow-sm)" : undefined,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        fontSize: "0.95rem",
+                        color: selected ? "var(--accent-primary)" : "var(--text-primary)",
+                        marginBottom: "0.35rem",
+                      }}
+                    >
+                      v{v.version_number}
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.35rem",
+                        fontSize: "0.75rem",
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      <Clock size={12} aria-hidden />
+                      {formatDate(v.created_at)}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        </FadeIn>
       )}
 
-      {/* No versions yet hint */}
       {versions.length === 0 && (
-        <div className="empty-state">
-          <div className="empty-state-icon">📋</div>
-          <h3>No Versions Yet</h3>
-          <p>Upload a new version of the FS document to begin impact analysis.</p>
-        </div>
+        <EmptyState
+          icon={<GitCompare size={40} strokeWidth={1.25} aria-hidden />}
+          title="No versions yet"
+          description="Upload a new version of the FS document to begin impact analysis."
+        />
       )}
 
-      {/* Impact Analysis Loading */}
       {impactLoading && (
-        <div className="page-loading">
+        <div className="page-loading" style={{ minHeight: "120px", marginTop: "1rem" }}>
           <div className="spinner" />
           Loading impact analysis…
         </div>
       )}
 
-      {/* Impact Results */}
       {impactData && !impactLoading && (
         <>
-          {/* Rework Summary Card */}
-          {rework && (
-            <div
-              style={{
-                background: "linear-gradient(135deg, rgba(108, 92, 231, 0.1), rgba(168, 85, 247, 0.05))",
-                border: "1px solid rgba(108, 92, 231, 0.25)",
-                borderRadius: "var(--radius-lg)",
-                padding: "1.5rem",
-                marginBottom: "1.5rem",
-              }}
-            >
-              <h3 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "1rem" }}>
-                📊 Rework Estimate — v{impactData.version_number}
-              </h3>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "1rem", marginBottom: "1rem" }}>
-                <div style={{ textAlign: "center", padding: "1rem", background: "rgba(239, 68, 68, 0.1)", borderRadius: "var(--radius-md)", border: "1px solid rgba(239, 68, 68, 0.2)" }}>
-                  <div style={{ fontSize: "2rem", fontWeight: 800, color: "#ef4444" }}>{rework.invalidated_count}</div>
-                  <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Invalidated</div>
-                </div>
-                <div style={{ textAlign: "center", padding: "1rem", background: "rgba(245, 158, 11, 0.1)", borderRadius: "var(--radius-md)", border: "1px solid rgba(245, 158, 11, 0.2)" }}>
-                  <div style={{ fontSize: "2rem", fontWeight: 800, color: "#f59e0b" }}>{rework.review_count}</div>
-                  <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Need Review</div>
-                </div>
-                <div style={{ textAlign: "center", padding: "1rem", background: "rgba(34, 197, 94, 0.1)", borderRadius: "var(--radius-md)", border: "1px solid rgba(34, 197, 94, 0.2)" }}>
-                  <div style={{ fontSize: "2rem", fontWeight: 800, color: "#22c55e" }}>{rework.unaffected_count}</div>
-                  <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Unaffected</div>
-                </div>
-                <div style={{ textAlign: "center", padding: "1rem", background: "rgba(108, 92, 231, 0.1)", borderRadius: "var(--radius-md)", border: "1px solid rgba(108, 92, 231, 0.2)" }}>
-                  <div style={{ fontSize: "2rem", fontWeight: 800, color: "var(--accent-primary)" }}>{rework.total_rework_days}d</div>
-                  <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Est. Rework</div>
-                </div>
-              </div>
-              {rework.changes_summary && (
-                <p style={{ color: "var(--text-secondary)", fontSize: "0.88rem", lineHeight: 1.6, margin: 0 }}>
-                  {rework.changes_summary}
-                </p>
-              )}
+          <FadeIn>
+            <div className="kpi-row" style={{ marginBottom: "1.5rem" }}>
+              <KpiCard
+                label="Total changes"
+                value={impactData.changes.length}
+                icon={<GitCompare size={22} aria-hidden />}
+                iconBg="rgba(108, 92, 231, 0.2)"
+                delay={0}
+              />
+              <KpiCard
+                label="Invalidated tasks"
+                value={impactData.invalidated_count}
+                icon={<XCircle size={22} aria-hidden />}
+                iconBg="rgba(239, 68, 68, 0.2)"
+                delay={0.05}
+              />
+              <KpiCard
+                label="Needs review tasks"
+                value={impactData.review_count}
+                icon={<AlertTriangle size={22} aria-hidden />}
+                iconBg="rgba(245, 158, 11, 0.2)"
+                delay={0.1}
+              />
+              <KpiCard
+                label="Unaffected tasks"
+                value={impactData.unaffected_count}
+                icon={<CheckCircle2 size={22} aria-hidden />}
+                iconBg="rgba(34, 197, 94, 0.2)"
+                delay={0.15}
+              />
             </div>
+          </FadeIn>
+
+          {rework && (
+            <FadeIn delay={0.08}>
+              <div style={{ marginBottom: "1.5rem" }}>
+                <h3
+                  style={{
+                    fontSize: "0.95rem",
+                    fontWeight: 600,
+                    marginBottom: "0.75rem",
+                  }}
+                >
+                  Rework estimate — v{impactData.version_number}
+                </h3>
+                <div className="kpi-row" style={{ marginBottom: rework.changes_summary ? "1rem" : 0 }}>
+                  <KpiCard
+                    label="Est. rework (days)"
+                    value={rework.total_rework_days}
+                    suffix="d"
+                    decimals={rework.total_rework_days % 1 !== 0 ? 1 : 0}
+                    icon={<Clock size={22} aria-hidden />}
+                    iconBg="rgba(108, 92, 231, 0.25)"
+                    delay={0}
+                  />
+                </div>
+                {rework.changes_summary && (
+                  <p
+                    style={{
+                      color: "var(--text-secondary)",
+                      fontSize: "0.88rem",
+                      lineHeight: 1.6,
+                      margin: 0,
+                    }}
+                  >
+                    {rework.changes_summary}
+                  </p>
+                )}
+              </div>
+            </FadeIn>
           )}
 
-          {/* What Changed? */}
           {impactData.changes.length > 0 && (
-            <div
-              style={{
-                background: "var(--bg-card)",
-                border: "1px solid var(--border-subtle)",
-                borderRadius: "var(--radius-lg)",
-                padding: "1.5rem",
-                marginBottom: "1.5rem",
-              }}
-            >
-              <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "1rem" }}>
-                📝 What Changed? ({impactData.changes.length} section{impactData.changes.length === 1 ? "" : "s"})
+            <FadeIn>
+              <h3 style={{ fontSize: "0.95rem", fontWeight: 600, marginBottom: "0.75rem" }}>
+                What changed ({impactData.changes.length} section
+                {impactData.changes.length === 1 ? "" : "s"})
               </h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              <StaggerList style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "1.5rem" }}>
                 {impactData.changes.map((change, idx) => {
                   const isExpanded = expandedChanges.has(idx);
-                  const color = CHANGE_COLORS[change.change_type] || "#6b7280";
+                  const borderColor = CHANGE_BORDER[change.change_type] ?? "var(--border-subtle)";
+                  const Icon = CHANGE_ICON[change.change_type] ?? Plus;
+                  const badgeVariant: "success" | "warning" | "error" | "neutral" =
+                    CHANGE_BADGE_VARIANT[change.change_type] ?? "neutral";
+
                   return (
-                    <div
-                      key={idx}
-                      style={{
-                        border: `1px solid ${color}33`,
-                        borderRadius: "var(--radius-md)",
-                        overflow: "hidden",
-                        transition: "all 0.2s ease",
-                      }}
-                    >
-                      <button
-                        onClick={() => toggleChange(idx)}
+                    <StaggerItem key={idx}>
+                      <div
+                        className="card card-flat"
                         style={{
-                          width: "100%",
-                          padding: "12px 16px",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "10px",
-                          background: `${color}0a`,
-                          border: "none",
-                          cursor: "pointer",
-                          color: "var(--text-primary)",
-                          fontSize: "0.9rem",
-                          fontWeight: 600,
-                          textAlign: "left",
+                          padding: 0,
+                          overflow: "hidden",
+                          borderLeftWidth: 4,
+                          borderLeftStyle: "solid",
+                          borderLeftColor: borderColor,
                         }}
                       >
-                        <span
+                        <button
+                          type="button"
+                          onClick={() => toggleChange(idx)}
                           style={{
-                            width: "24px",
-                            height: "24px",
-                            borderRadius: "6px",
-                            background: `${color}22`,
-                            color: color,
+                            width: "100%",
+                            padding: "12px 16px",
                             display: "flex",
                             alignItems: "center",
-                            justifyContent: "center",
-                            fontSize: "0.85rem",
-                            fontWeight: 800,
-                            flexShrink: 0,
+                            gap: "10px",
+                            background: "transparent",
+                            border: "none",
+                            cursor: "pointer",
+                            color: "var(--text-primary)",
+                            fontSize: "0.9rem",
+                            fontWeight: 600,
+                            textAlign: "left",
                           }}
                         >
-                          {CHANGE_ICONS[change.change_type]}
-                        </span>
-                        <span style={{ flex: 1 }}>{change.section_heading || `Section ${change.section_index + 1}`}</span>
-                        <span
-                          style={{
-                            padding: "2px 8px",
-                            borderRadius: "4px",
-                            fontSize: "0.7rem",
-                            fontWeight: 700,
-                            background: `${color}22`,
-                            color: color,
-                            textTransform: "uppercase",
-                            letterSpacing: "0.05em",
-                          }}
-                        >
-                          {change.change_type}
-                        </span>
-                        <span
-                          style={{
-                            transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)",
-                            transition: "transform 0.2s ease",
-                            opacity: 0.4,
-                            fontSize: "0.75rem",
-                          }}
-                        >
-                          ▼
-                        </span>
-                      </button>
-                      {isExpanded && (
-                        <div style={{ padding: "1rem 16px", borderTop: `1px solid ${color}22` }}>
-                          {change.change_type === "MODIFIED" && (
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-                              <div>
-                                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#ef4444", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.5rem" }}>
-                                  Previous
-                                </div>
-                                <div style={{
-                                  background: "rgba(239, 68, 68, 0.05)",
-                                  border: "1px solid rgba(239, 68, 68, 0.15)",
-                                  borderRadius: "var(--radius-sm)",
-                                  padding: "12px",
-                                  fontSize: "0.82rem",
-                                  lineHeight: 1.6,
-                                  color: "var(--text-secondary)",
-                                  whiteSpace: "pre-wrap",
-                                  maxHeight: "300px",
-                                  overflow: "auto",
-                                }}>
-                                  {change.old_text || "(empty)"}
-                                </div>
+                          <span
+                            style={{
+                              width: "28px",
+                              height: "28px",
+                              borderRadius: "8px",
+                              background: `${borderColor}22`,
+                              color: borderColor,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                            }}
+                          >
+                            <Icon size={16} strokeWidth={2.5} aria-hidden />
+                          </span>
+                          <span style={{ flex: 1, minWidth: 0 }}>
+                            {change.section_heading || `Section ${change.section_index + 1}`}
+                          </span>
+                          <Badge variant={badgeVariant}>{change.change_type}</Badge>
+                          <ChevronDown
+                            size={18}
+                            aria-hidden
+                            style={{
+                              flexShrink: 0,
+                              opacity: 0.45,
+                              transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)",
+                              transition: "transform 0.2s ease",
+                            }}
+                          />
+                        </button>
+                        <AnimatePresence initial={false}>
+                          {isExpanded && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
+                              style={{ overflow: "hidden" }}
+                            >
+                              <div
+                                style={{
+                                  padding: "0 16px 16px",
+                                  borderTop: "1px solid var(--border-subtle)",
+                                }}
+                              >
+                                {change.change_type === "MODIFIED" && (
+                                  <div
+                                    style={{
+                                      display: "grid",
+                                      gridTemplateColumns: "1fr 1fr",
+                                      gap: "1rem",
+                                      marginTop: "1rem",
+                                    }}
+                                  >
+                                    <div>
+                                      <div
+                                        style={{
+                                          fontSize: "0.72rem",
+                                          fontWeight: 700,
+                                          color: "#ef4444",
+                                          textTransform: "uppercase",
+                                          letterSpacing: "0.06em",
+                                          marginBottom: "0.5rem",
+                                        }}
+                                      >
+                                        Previous
+                                      </div>
+                                      <div
+                                        style={{
+                                          background: "rgba(239, 68, 68, 0.05)",
+                                          border: "1px solid rgba(239, 68, 68, 0.15)",
+                                          borderRadius: "var(--radius-sm)",
+                                          padding: "12px",
+                                          fontSize: "0.82rem",
+                                          lineHeight: 1.6,
+                                          color: "var(--text-secondary)",
+                                          whiteSpace: "pre-wrap",
+                                          maxHeight: "300px",
+                                          overflow: "auto",
+                                        }}
+                                      >
+                                        {change.old_text || "(empty)"}
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div
+                                        style={{
+                                          fontSize: "0.72rem",
+                                          fontWeight: 700,
+                                          color: "#22c55e",
+                                          textTransform: "uppercase",
+                                          letterSpacing: "0.06em",
+                                          marginBottom: "0.5rem",
+                                        }}
+                                      >
+                                        New
+                                      </div>
+                                      <div
+                                        style={{
+                                          background: "rgba(34, 197, 94, 0.05)",
+                                          border: "1px solid rgba(34, 197, 94, 0.15)",
+                                          borderRadius: "var(--radius-sm)",
+                                          padding: "12px",
+                                          fontSize: "0.82rem",
+                                          lineHeight: 1.6,
+                                          color: "var(--text-secondary)",
+                                          whiteSpace: "pre-wrap",
+                                          maxHeight: "300px",
+                                          overflow: "auto",
+                                        }}
+                                      >
+                                        {change.new_text || "(empty)"}
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                                {change.change_type === "ADDED" && (
+                                  <div
+                                    style={{
+                                      background: "rgba(34, 197, 94, 0.05)",
+                                      border: "1px solid rgba(34, 197, 94, 0.15)",
+                                      borderRadius: "var(--radius-sm)",
+                                      padding: "12px",
+                                      fontSize: "0.82rem",
+                                      lineHeight: 1.6,
+                                      color: "var(--text-secondary)",
+                                      whiteSpace: "pre-wrap",
+                                      maxHeight: "300px",
+                                      overflow: "auto",
+                                      marginTop: "1rem",
+                                    }}
+                                  >
+                                    {change.new_text || "(empty)"}
+                                  </div>
+                                )}
+                                {change.change_type === "DELETED" && (
+                                  <div
+                                    style={{
+                                      background: "rgba(239, 68, 68, 0.05)",
+                                      border: "1px solid rgba(239, 68, 68, 0.15)",
+                                      borderRadius: "var(--radius-sm)",
+                                      padding: "12px",
+                                      fontSize: "0.82rem",
+                                      lineHeight: 1.6,
+                                      color: "var(--text-secondary)",
+                                      whiteSpace: "pre-wrap",
+                                      textDecoration: "line-through",
+                                      opacity: 0.7,
+                                      maxHeight: "300px",
+                                      overflow: "auto",
+                                      marginTop: "1rem",
+                                    }}
+                                  >
+                                    {change.old_text || "(empty)"}
+                                  </div>
+                                )}
                               </div>
-                              <div>
-                                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#22c55e", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.5rem" }}>
-                                  New
-                                </div>
-                                <div style={{
-                                  background: "rgba(34, 197, 94, 0.05)",
-                                  border: "1px solid rgba(34, 197, 94, 0.15)",
-                                  borderRadius: "var(--radius-sm)",
-                                  padding: "12px",
-                                  fontSize: "0.82rem",
-                                  lineHeight: 1.6,
-                                  color: "var(--text-secondary)",
-                                  whiteSpace: "pre-wrap",
-                                  maxHeight: "300px",
-                                  overflow: "auto",
-                                }}>
-                                  {change.new_text || "(empty)"}
-                                </div>
-                              </div>
-                            </div>
+                            </motion.div>
                           )}
-                          {change.change_type === "ADDED" && (
-                            <div style={{
-                              background: "rgba(34, 197, 94, 0.05)",
-                              border: "1px solid rgba(34, 197, 94, 0.15)",
-                              borderRadius: "var(--radius-sm)",
-                              padding: "12px",
-                              fontSize: "0.82rem",
-                              lineHeight: 1.6,
-                              color: "var(--text-secondary)",
-                              whiteSpace: "pre-wrap",
-                              maxHeight: "300px",
-                              overflow: "auto",
-                            }}>
-                              {change.new_text || "(empty)"}
-                            </div>
-                          )}
-                          {change.change_type === "DELETED" && (
-                            <div style={{
-                              background: "rgba(239, 68, 68, 0.05)",
-                              border: "1px solid rgba(239, 68, 68, 0.15)",
-                              borderRadius: "var(--radius-sm)",
-                              padding: "12px",
-                              fontSize: "0.82rem",
-                              lineHeight: 1.6,
-                              color: "var(--text-secondary)",
-                              whiteSpace: "pre-wrap",
-                              textDecoration: "line-through",
-                              opacity: 0.7,
-                              maxHeight: "300px",
-                              overflow: "auto",
-                            }}>
-                              {change.old_text || "(empty)"}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                        </AnimatePresence>
+                      </div>
+                    </StaggerItem>
                   );
                 })}
-              </div>
-            </div>
+              </StaggerList>
+            </FadeIn>
           )}
 
-          {/* Affected Tasks */}
           {impactData.task_impacts.length > 0 && (
-            <div
-              style={{
-                background: "var(--bg-card)",
-                border: "1px solid var(--border-subtle)",
-                borderRadius: "var(--radius-lg)",
-                padding: "1.5rem",
-                marginBottom: "1.5rem",
-              }}
-            >
-              <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "1rem" }}>
-                🎯 Affected Tasks ({impactData.task_impacts.filter(t => t.impact_type !== "UNAFFECTED").length} of {impactData.task_impacts.length})
+            <FadeIn>
+              <h3 style={{ fontSize: "0.95rem", fontWeight: 600, marginBottom: "0.75rem" }}>
+                Affected tasks (
+                {impactData.task_impacts.filter((t) => t.impact_type !== "UNAFFECTED").length} of{" "}
+                {impactData.task_impacts.length})
               </h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                {impactData.task_impacts
+              <StaggerList style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "1.5rem" }}>
+                {[...impactData.task_impacts]
                   .sort((a, b) => {
-                    const priority: Record<string, number> = { INVALIDATED: 0, REQUIRES_REVIEW: 1, UNAFFECTED: 2 };
+                    const priority: Record<string, number> = {
+                      INVALIDATED: 0,
+                      REQUIRES_REVIEW: 1,
+                      UNAFFECTED: 2,
+                    };
                     return (priority[a.impact_type] ?? 9) - (priority[b.impact_type] ?? 9);
                   })
                   .map((impact, idx) => {
-                    const color = IMPACT_COLORS[impact.impact_type] || "#6b7280";
-                    const label = IMPACT_LABELS[impact.impact_type] || impact.impact_type;
+                    const borderColor = IMPACT_BORDER[impact.impact_type] ?? "var(--border-subtle)";
+                    const label = IMPACT_LABELS[impact.impact_type] ?? impact.impact_type;
+                    const badgeVariant: "error" | "warning" | "success" | "neutral" =
+                      IMPACT_BADGE_VARIANT[impact.impact_type] ?? "neutral";
+                    const ImpactIcon = IMPACT_ICON[impact.impact_type] ?? CheckCircle2;
+
                     return (
-                      <div
-                        key={idx}
-                        style={{
-                          display: "flex",
-                          alignItems: "flex-start",
-                          gap: "12px",
-                          padding: "12px 16px",
-                          background: `${color}08`,
-                          border: `1px solid ${color}22`,
-                          borderRadius: "var(--radius-md)",
-                          transition: "all 0.2s ease",
-                        }}
-                      >
-                        <span
+                      <StaggerItem key={`${impact.task_id}-${idx}`}>
+                        <div
+                          className="card card-flat"
                           style={{
-                            padding: "3px 10px",
-                            borderRadius: "4px",
-                            fontSize: "0.7rem",
-                            fontWeight: 700,
-                            background: `${color}22`,
-                            color: color,
-                            textTransform: "uppercase",
-                            letterSpacing: "0.04em",
-                            whiteSpace: "nowrap",
-                            flexShrink: 0,
-                            marginTop: "2px",
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: "12px",
+                            borderLeftWidth: 4,
+                            borderLeftStyle: "solid",
+                            borderLeftColor: borderColor,
                           }}
                         >
-                          {label}
-                        </span>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: "3px" }}>
-                            {impact.task_title || impact.task_id}
+                          <span
+                            style={{
+                              width: "32px",
+                              height: "32px",
+                              borderRadius: "8px",
+                              background: `${borderColor}22`,
+                              color: borderColor,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                              marginTop: "2px",
+                            }}
+                          >
+                            <ImpactIcon size={18} strokeWidth={2} aria-hidden />
+                          </span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "0.5rem",
+                                flexWrap: "wrap",
+                                marginBottom: "0.35rem",
+                              }}
+                            >
+                              <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>
+                                {impact.task_title || impact.task_id}
+                              </span>
+                              <Badge variant={badgeVariant}>{label}</Badge>
+                            </div>
+                            {impact.reason && (
+                              <div
+                                style={{
+                                  fontSize: "0.82rem",
+                                  color: "var(--text-secondary)",
+                                  lineHeight: 1.5,
+                                }}
+                              >
+                                {impact.reason}
+                              </div>
+                            )}
+                            {impact.change_section && (
+                              <div
+                                style={{
+                                  fontSize: "0.75rem",
+                                  color: "var(--text-muted)",
+                                  marginTop: "4px",
+                                }}
+                              >
+                                Changed section: {impact.change_section}
+                              </div>
+                            )}
                           </div>
-                          {impact.reason && (
-                            <div style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                              {impact.reason}
-                            </div>
-                          )}
-                          {impact.change_section && (
-                            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "4px" }}>
-                              Changed section: {impact.change_section}
-                            </div>
-                          )}
                         </div>
-                      </div>
+                      </StaggerItem>
                     );
                   })}
-              </div>
-            </div>
+              </StaggerList>
+            </FadeIn>
           )}
 
-          {/* No changes */}
           {impactData.changes.length === 0 && (
-            <div className="empty-state">
-              <div className="empty-state-icon">✅</div>
-              <h3>No Changes Detected</h3>
-              <p>This version is identical to the previous one.</p>
-            </div>
+            <EmptyState
+              icon={<CheckCircle2 size={40} strokeWidth={1.25} aria-hidden />}
+              title="No changes detected"
+              description="This version is identical to the previous one."
+            />
           )}
         </>
       )}
 
-      {/* Show message when version 1 selected */}
       {selectedVersion && !impactLoading && !impactData && versions.length > 0 && (
-        <div className="empty-state">
-          <div className="empty-state-icon">📄</div>
-          <h3>Original Version</h3>
-          <p>This is the first version. Upload a new version to see change impact analysis.</p>
-        </div>
+        <EmptyState
+          icon={<GitCompare size={40} strokeWidth={1.25} aria-hidden />}
+          title="Original version"
+          description="This is the first version. Upload a new version to see change impact analysis."
+        />
       )}
-    </div>
+    </PageShell>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -8,14 +8,45 @@ import {
   listAmbiguities,
   resolveAmbiguity,
   getDebateResults,
+  bulkResolveAmbiguities,
 } from "@/lib/api";
 import type { AmbiguityFlag, DebateResult } from "@/lib/api";
+import {
+  PageShell,
+  KpiCard,
+  Tabs,
+  FadeIn,
+  StaggerList,
+  StaggerItem,
+  ScoreBar,
+  EmptyState,
+} from "@/components/index";
+import Badge from "@/components/Badge";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Search,
+  AlertTriangle,
+  CheckCircle2,
+  Shield,
+  Swords,
+  ChevronDown,
+  RefreshCw,
+  Zap,
+} from "lucide-react";
 
-const severityConfig = {
-  HIGH: { color: "#ef4444", bg: "#ef444418", label: "🔴 HIGH", border: "#ef444444" },
-  MEDIUM: { color: "#f59e0b", bg: "#f59e0b18", label: "🟡 MEDIUM", border: "#f59e0b44" },
-  LOW: { color: "#3b82f6", bg: "#3b82f618", label: "🔵 LOW", border: "#3b82f644" },
+const severityBorder: Record<AmbiguityFlag["severity"], string> = {
+  HIGH: "var(--error)",
+  MEDIUM: "var(--warning)",
+  LOW: "var(--info)",
 };
+
+function severityBadgeVariant(
+  sev: AmbiguityFlag["severity"]
+): "error" | "warning" | "info" {
+  if (sev === "HIGH") return "error";
+  if (sev === "MEDIUM") return "warning";
+  return "info";
+}
 
 function DebateTranscript({ debate }: { debate: DebateResult }) {
   const [expanded, setExpanded] = useState(false);
@@ -23,225 +54,152 @@ function DebateTranscript({ debate }: { debate: DebateResult }) {
 
   return (
     <div
+      className="accordion-item"
       style={{
-        marginTop: "12px",
-        background: isCleared
-          ? "rgba(34, 197, 94, 0.06)"
-          : "rgba(139, 92, 246, 0.06)",
-        border: `1px solid ${isCleared ? "rgba(34, 197, 94, 0.25)" : "rgba(139, 92, 246, 0.25)"}`,
-        borderRadius: "10px",
-        overflow: "hidden",
+        marginTop: "0.75rem",
+        background: isCleared ? "var(--bg-success-subtle)" : "var(--bg-accent-subtle)",
+        borderColor: isCleared ? "rgba(22, 163, 74, 0.2)" : "var(--border-subtle)",
       }}
     >
-      {/* Header */}
       <button
+        type="button"
+        className="accordion-trigger"
         onClick={() => setExpanded(!expanded)}
-        style={{
-          width: "100%",
-          padding: "10px 14px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          background: "none",
-          border: "none",
-          cursor: "pointer",
-          color: "var(--text-primary)",
-          fontSize: "0.82rem",
-          fontWeight: 600,
-        }}
+        aria-expanded={expanded}
       >
-        <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span>⚔️ Adversarial Debate</span>
-          <span
-            style={{
-              padding: "2px 8px",
-              borderRadius: "6px",
-              fontSize: "0.7rem",
-              fontWeight: 700,
-              background: isCleared ? "rgba(34, 197, 94, 0.15)" : "rgba(239, 68, 68, 0.15)",
-              color: isCleared ? "#22c55e" : "#ef4444",
-              border: `1px solid ${isCleared ? "rgba(34, 197, 94, 0.3)" : "rgba(239, 68, 68, 0.3)"}`,
-            }}
-          >
-            {isCleared ? "✓ CLEARED" : "✗ CONFIRMED AMBIGUOUS"}
-          </span>
-          <span
-            style={{
-              padding: "2px 8px",
-              borderRadius: "6px",
-              fontSize: "0.7rem",
-              fontWeight: 600,
-              background: "rgba(139, 92, 246, 0.1)",
-              color: "#8b5cf6",
-            }}
-          >
-            {debate.confidence}% confidence
-          </span>
+        <span style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+          <Swords size={16} style={{ opacity: 0.85 }} />
+          <span>Adversarial Debate</span>
+          <Badge variant={isCleared ? "success" : "error"}>
+            {isCleared ? "Cleared" : "Confirmed ambiguous"}
+          </Badge>
         </span>
-        <span
-          style={{
-            transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
-            transition: "transform 0.2s ease",
-            opacity: 0.5,
-          }}
-        >
-          ▼
-        </span>
+        <ChevronDown
+          size={18}
+          className={`accordion-chevron${expanded ? " open" : ""}`}
+          aria-hidden
+        />
       </button>
-
-      {/* Expanded content */}
-      {expanded && (
-        <div
-          style={{
-            padding: "0 14px 14px",
-            borderTop: "1px solid var(--border-subtle)",
-          }}
-        >
-          {/* Red Agent */}
-          <div
-            style={{
-              margin: "12px 0 8px",
-              padding: "10px 12px",
-              borderRadius: "8px",
-              background: "rgba(239, 68, 68, 0.06)",
-              borderLeft: "3px solid #ef4444",
-            }}
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            key="debate-body"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
+            style={{ overflow: "hidden" }}
           >
-            <div
-              style={{
-                fontSize: "0.75rem",
-                fontWeight: 700,
-                color: "#ef4444",
-                marginBottom: "6px",
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-              }}
-            >
-              🔴 Red Agent — &quot;It IS ambiguous&quot;
-            </div>
-            <div
-              style={{
-                fontSize: "0.82rem",
-                lineHeight: 1.7,
-                color: "var(--text-secondary)",
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              {debate.red_argument}
-            </div>
-          </div>
-
-          {/* Blue Agent */}
-          <div
-            style={{
-              margin: "8px 0",
-              padding: "10px 12px",
-              borderRadius: "8px",
-              background: "rgba(59, 130, 246, 0.06)",
-              borderLeft: "3px solid #3b82f6",
-            }}
-          >
-            <div
-              style={{
-                fontSize: "0.75rem",
-                fontWeight: 700,
-                color: "#3b82f6",
-                marginBottom: "6px",
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-              }}
-            >
-              🔵 Blue Agent — &quot;It IS clear&quot;
-            </div>
-            <div
-              style={{
-                fontSize: "0.82rem",
-                lineHeight: 1.7,
-                color: "var(--text-secondary)",
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              {debate.blue_argument}
-            </div>
-          </div>
-
-          {/* Arbiter */}
-          <div
-            style={{
-              margin: "8px 0 0",
-              padding: "10px 12px",
-              borderRadius: "8px",
-              background: "rgba(139, 92, 246, 0.08)",
-              borderLeft: "3px solid #8b5cf6",
-            }}
-          >
-            <div
-              style={{
-                fontSize: "0.75rem",
-                fontWeight: 700,
-                color: "#8b5cf6",
-                marginBottom: "6px",
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-              }}
-            >
-              ⚖️ Arbiter Verdict
-            </div>
-            <div
-              style={{
-                fontSize: "0.82rem",
-                lineHeight: 1.7,
-                color: "var(--text-secondary)",
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              {debate.arbiter_reasoning}
-            </div>
-
-            {/* Confidence bar */}
-            <div style={{ marginTop: "8px" }}>
+            <div className="accordion-content">
               <div
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  fontSize: "0.7rem",
-                  color: "var(--text-muted)",
-                  marginBottom: "4px",
-                }}
-              >
-                <span>Confidence</span>
-                <span>{debate.confidence}%</span>
-              </div>
-              <div
-                style={{
-                  height: "4px",
-                  background: "var(--bg-tertiary)",
-                  borderRadius: "2px",
-                  overflow: "hidden",
+                  marginBottom: "0.5rem",
+                  padding: "0.625rem 0.75rem",
+                  borderRadius: "var(--radius-md)",
+                  background: "var(--bg-error-subtle)",
+                  borderLeft: "3px solid var(--error)",
                 }}
               >
                 <div
                   style={{
-                    height: "100%",
-                    width: `${debate.confidence}%`,
-                    background:
-                      debate.confidence >= 80
-                        ? "#22c55e"
-                        : debate.confidence >= 50
-                          ? "#f59e0b"
-                          : "#ef4444",
-                    borderRadius: "2px",
-                    transition: "width 0.3s ease",
+                    fontSize: "0.75rem",
+                    fontWeight: 700,
+                    color: "var(--error)",
+                    marginBottom: "0.375rem",
                   }}
-                />
+                >
+                  Red Agent — &quot;It IS ambiguous&quot;
+                </div>
+                <div
+                  style={{
+                    fontSize: "0.8125rem",
+                    lineHeight: 1.7,
+                    color: "var(--text-secondary)",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {debate.red_argument}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  marginBottom: "0.5rem",
+                  padding: "0.625rem 0.75rem",
+                  borderRadius: "var(--radius-md)",
+                  background: "var(--bg-info-subtle)",
+                  borderLeft: "3px solid var(--info)",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: 700,
+                    color: "var(--info)",
+                    marginBottom: "0.375rem",
+                  }}
+                >
+                  Blue Agent — &quot;It IS clear&quot;
+                </div>
+                <div
+                  style={{
+                    fontSize: "0.8125rem",
+                    lineHeight: 1.7,
+                    color: "var(--text-secondary)",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {debate.blue_argument}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: "0.625rem 0.75rem",
+                  borderRadius: "var(--radius-md)",
+                  background: "var(--bg-accent-subtle)",
+                  borderLeft: "3px solid var(--accent-primary)",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: 700,
+                    color: "var(--accent-primary)",
+                    marginBottom: "0.375rem",
+                  }}
+                >
+                  Arbiter Verdict
+                </div>
+                <div
+                  style={{
+                    fontSize: "0.8125rem",
+                    lineHeight: 1.7,
+                    color: "var(--text-secondary)",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {debate.arbiter_reasoning}
+                </div>
+                <div style={{ marginTop: "0.75rem" }}>
+                  <ScoreBar
+                    label="Confidence"
+                    value={debate.confidence}
+                    max={100}
+                    color={
+                      debate.confidence >= 80
+                        ? "var(--success)"
+                        : debate.confidence >= 50
+                          ? "var(--warning)"
+                          : "var(--error)"
+                    }
+                  />
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -255,6 +213,7 @@ export default function AmbiguitiesPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
+  const [filterTab, setFilterTab] = useState<string>("all");
 
   const fetchFlags = useCallback(async () => {
     try {
@@ -262,7 +221,6 @@ export default function AmbiguitiesPage() {
       setFlags(result.data || []);
       setHasAnalyzed(result.data && result.data.length > 0);
 
-      // Also fetch debate results
       try {
         const debateResult = await getDebateResults(docId);
         setDebates(debateResult.data?.results || []);
@@ -288,7 +246,6 @@ export default function AmbiguitiesPage() {
       setFlags(result.data.ambiguities);
       setHasAnalyzed(true);
 
-      // Refresh debate results
       try {
         const debateResult = await getDebateResults(docId);
         setDebates(debateResult.data?.results || []);
@@ -313,7 +270,19 @@ export default function AmbiguitiesPage() {
     }
   };
 
-  // Find debate result for a specific flag
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const handleBulkResolve = async () => {
+    setBulkLoading(true);
+    try {
+      await bulkResolveAmbiguities(docId);
+      setFlags((prev) => prev.map((f) => ({ ...f, resolved: true })));
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Bulk resolve failed");
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
   const getDebateForFlag = (flag: AmbiguityFlag): DebateResult | undefined => {
     return debates.find(
       (d) =>
@@ -322,7 +291,6 @@ export default function AmbiguitiesPage() {
     );
   };
 
-  // Count cleared flags (exist in debates with CLEAR verdict)
   const clearedDebates = debates.filter((d) => d.verdict === "CLEAR");
 
   const total = flags.length;
@@ -335,6 +303,21 @@ export default function AmbiguitiesPage() {
   ).length;
   const progressPct = total > 0 ? Math.round((resolved / total) * 100) : 0;
 
+  const filteredFlags = useMemo(() => {
+    switch (filterTab) {
+      case "high":
+        return flags.filter((f) => f.severity === "HIGH");
+      case "medium":
+        return flags.filter((f) => f.severity === "MEDIUM");
+      case "low":
+        return flags.filter((f) => f.severity === "LOW");
+      case "resolved":
+        return flags.filter((f) => f.resolved);
+      default:
+        return flags;
+    }
+  }, [flags, filterTab]);
+
   if (loading) {
     return (
       <div className="page-loading">
@@ -344,400 +327,351 @@ export default function AmbiguitiesPage() {
     );
   }
 
-  return (
-    <div style={{ maxWidth: "900px" }}>
-      <Link href={`/documents/${docId}`} className="back-link">
-        ← Back to Document
-      </Link>
+  const unresolvedCount = flags.filter((f) => !f.resolved).length;
 
-      <div style={{ marginBottom: "2rem" }}>
-        <h1 style={{ fontSize: "1.8rem", fontWeight: 700, marginBottom: "0.5rem" }}>
-          🔍 Ambiguity Analysis
-        </h1>
-        <p style={{ color: "var(--text-secondary)", fontSize: "0.95rem" }}>
-          AI-detected ambiguities, vague language, and incomplete requirements
-        </p>
-      </div>
-
-      {/* Action button */}
-      <div style={{ marginBottom: "2rem" }}>
+  const actionButtons = (
+    <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+      {unresolvedCount > 0 && (
         <button
-          className="btn btn-primary"
-          onClick={handleAnalyze}
-          disabled={analyzing}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "8px",
-            padding: "12px 28px",
-            fontSize: "1rem",
-          }}
+          type="button"
+          className="btn btn-success"
+          onClick={handleBulkResolve}
+          disabled={bulkLoading}
+          style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
         >
-          {analyzing ? (
-            <>
-              <span className="spinner" style={{ width: "16px", height: "16px" }} />
-              Analyzing…
-            </>
-          ) : hasAnalyzed ? (
-            <>🔄 Re-analyze Document</>
-          ) : (
-            <>⚡ Run Analysis</>
-          )}
+          <CheckCircle2 size={18} />
+          {bulkLoading ? "Resolving…" : `Resolve All (${unresolvedCount})`}
         </button>
-        {error && (
-          <p style={{ color: "#ef4444", marginTop: "0.75rem", fontSize: "0.9rem" }}>
-            ❌ {error}
-          </p>
+      )}
+      <button
+        type="button"
+        className="btn btn-primary"
+        onClick={handleAnalyze}
+        disabled={analyzing}
+      >
+        {analyzing ? (
+          <>
+            <span className="spinner" style={{ width: 16, height: 16 }} />
+            Analyzing…
+          </>
+        ) : hasAnalyzed ? (
+          <>
+            <RefreshCw size={18} />
+            Re-analyze Document
+          </>
+        ) : (
+          <>
+            <Zap size={18} />
+            Run Analysis
+          </>
         )}
-      </div>
+      </button>
+    </div>
+  );
 
-      {/* Debate Summary Banner */}
-      {debates.length > 0 && (
-        <div
-          style={{
-            marginBottom: "1.5rem",
-            padding: "14px 18px",
-            borderRadius: "12px",
-            background: "linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(59, 130, 246, 0.08))",
-            border: "1px solid rgba(139, 92, 246, 0.2)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: "12px",
-          }}
-        >
-          <div>
-            <div style={{ fontSize: "0.9rem", fontWeight: 700, color: "var(--text-primary)", marginBottom: "4px" }}>
-              ⚔️ Adversarial Validation (L6)
-            </div>
-            <div style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>
-              {debates.length} HIGH severity flag{debates.length !== 1 ? "s" : ""} challenged
-              by Red vs Blue agent debate
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: "12px" }}>
-            <div
-              style={{
-                textAlign: "center",
-                padding: "6px 14px",
-                borderRadius: "8px",
-                background: "rgba(239, 68, 68, 0.1)",
-              }}
-            >
-              <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "#ef4444" }}>
-                {debates.filter((d) => d.verdict === "AMBIGUOUS").length}
-              </div>
-              <div style={{ fontSize: "0.68rem", color: "#ef4444", fontWeight: 600 }}>Confirmed</div>
-            </div>
-            <div
-              style={{
-                textAlign: "center",
-                padding: "6px 14px",
-                borderRadius: "8px",
-                background: "rgba(34, 197, 94, 0.1)",
-              }}
-            >
-              <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "#22c55e" }}>
-                {clearedDebates.length}
-              </div>
-              <div style={{ fontSize: "0.68rem", color: "#22c55e", fontWeight: 600 }}>Cleared</div>
-            </div>
-          </div>
+  return (
+    <PageShell
+      backHref={`/documents/${docId}`}
+      backLabel="Back to Document"
+      title="Ambiguity Analysis"
+      subtitle="AI-detected ambiguities, vague language, and incomplete requirements"
+      actions={actionButtons}
+      maxWidth={900}
+    >
+      {error && (
+        <div className="alert alert-error" style={{ marginBottom: "1.25rem" }}>
+          {error}
         </div>
       )}
 
-      {/* Stats + Progress */}
       {flags.length > 0 && (
         <>
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-            gap: "1rem",
-            marginBottom: "1.5rem",
-          }}>
-            <div className="info-item">
-              <div className="info-label">Total</div>
-              <div className="info-value">{total}</div>
+          <FadeIn delay={0.04}>
+            <div className="kpi-row">
+              <KpiCard
+                label="Total flags"
+                value={total}
+                icon={<AlertTriangle size={20} />}
+                iconBg="var(--well-amber)"
+                delay={0}
+              />
+              <KpiCard
+                label="HIGH severity"
+                value={highCount}
+                icon={<Shield size={20} />}
+                iconBg="var(--well-red)"
+                delay={0.05}
+              />
+              <KpiCard
+                label="Resolved"
+                value={resolved}
+                icon={<CheckCircle2 size={20} />}
+                iconBg="var(--well-green)"
+                delay={0.1}
+              />
+              <KpiCard
+                label="Debate coverage"
+                value={debates.length}
+                icon={<Swords size={20} />}
+                iconBg="var(--well-purple)"
+                delay={0.15}
+              />
             </div>
-            <div className="info-item" style={{ borderLeft: "3px solid #ef4444" }}>
-              <div className="info-label">High</div>
-              <div className="info-value" style={{ color: "#ef4444" }}>{highCount}</div>
-            </div>
-            <div className="info-item" style={{ borderLeft: "3px solid #f59e0b" }}>
-              <div className="info-label">Medium</div>
-              <div className="info-value" style={{ color: "#f59e0b" }}>{mediumCount}</div>
-            </div>
-            <div className="info-item" style={{ borderLeft: "3px solid #3b82f6" }}>
-              <div className="info-label">Low</div>
-              <div className="info-value" style={{ color: "#3b82f6" }}>{lowCount}</div>
-            </div>
-            <div className="info-item">
-              <div className="info-label">Resolved</div>
-              <div className="info-value" style={{ color: "#22c55e" }}>
-                {resolved}/{total}
-              </div>
-            </div>
-          </div>
+          </FadeIn>
 
-          {/* Progress bar */}
-          <div style={{ marginBottom: "2rem" }}>
-            <div style={{
-              display: "flex",
-              justifyContent: "space-between",
-              fontSize: "0.8rem",
-              color: "var(--text-secondary)",
-              marginBottom: "6px",
-            }}>
-              <span>Resolution Progress</span>
-              <span>{progressPct}%</span>
-            </div>
-            <div style={{
-              height: "8px",
-              background: "var(--bg-tertiary)",
-              borderRadius: "4px",
-              overflow: "hidden",
-            }}>
-              <div style={{
-                height: "100%",
-                width: `${progressPct}%`,
-                background: progressPct === 100
-                  ? "linear-gradient(135deg, #22c55e, #10b981)"
-                  : "var(--accent-gradient)",
-                borderRadius: "4px",
-                transition: "width 0.3s ease",
-              }} />
-            </div>
+          <FadeIn delay={0.08} style={{ marginBottom: "1.5rem" }}>
+            <ScoreBar
+              label="Resolution Progress"
+              value={progressPct}
+              max={100}
+              color={
+                progressPct === 100
+                  ? "var(--success)"
+                  : progressPct >= 70
+                    ? "var(--accent-primary)"
+                    : progressPct >= 40
+                      ? "var(--warning)"
+                      : "var(--error)"
+              }
+            />
             {unresolvedHigh > 0 && (
-              <p style={{
-                color: "#ef4444",
-                fontSize: "0.82rem",
-                marginTop: "8px",
-                fontWeight: 600,
-              }}>
-                ⚠ {unresolvedHigh} HIGH severity issue{unresolvedHigh > 1 ? "s" : ""} require resolution
+              <p
+                className="alert alert-warning"
+                style={{
+                  marginTop: "0.75rem",
+                  marginBottom: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                }}
+              >
+                <AlertTriangle size={16} />
+                {unresolvedHigh} HIGH severity issue{unresolvedHigh > 1 ? "s" : ""} still open
               </p>
             )}
-          </div>
-
-          {/* Cleared by debate section */}
-          {clearedDebates.length > 0 && (
-            <div style={{ marginBottom: "2rem" }}>
-              <h3 style={{
-                fontSize: "1rem",
-                fontWeight: 600,
-                marginBottom: "12px",
-                color: "#22c55e",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              }}>
-                ✓ Overridden by Debate ({clearedDebates.length})
-              </h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                {clearedDebates.map((debate, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      background: "var(--bg-card)",
-                      border: "1px solid rgba(34, 197, 94, 0.3)",
-                      borderRadius: "12px",
-                      padding: "16px",
-                      opacity: 0.7,
-                      borderLeft: "4px solid #22c55e",
-                    }}
-                  >
-                    <div style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      marginBottom: "8px",
-                    }}>
-                      <span style={{
-                        padding: "2px 10px",
-                        borderRadius: "8px",
-                        fontSize: "0.72rem",
-                        fontWeight: 700,
-                        background: "rgba(34, 197, 94, 0.12)",
-                        color: "#22c55e",
-                        border: "1px solid rgba(34, 197, 94, 0.3)",
-                      }}>
-                        OVERRIDDEN BY DEBATE
-                      </span>
-                      <span style={{
-                        fontSize: "0.78rem",
-                        color: "var(--text-muted)",
-                        fontWeight: 500,
-                      }}>
-                        §{debate.section_index + 1} · {debate.section_heading}
-                      </span>
-                    </div>
-                    <div style={{
-                      background: "rgba(34, 197, 94, 0.06)",
-                      padding: "8px 12px",
-                      borderRadius: "6px",
-                      fontSize: "0.85rem",
-                      fontFamily: "var(--font-mono)",
-                      color: "var(--text-secondary)",
-                      textDecoration: "line-through",
-                      marginBottom: "8px",
-                    }}>
-                      &ldquo;{debate.flagged_text}&rdquo;
-                    </div>
-                    <DebateTranscript debate={debate} />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Active flags list */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            {flags.map((flag) => {
-              const sev = severityConfig[flag.severity] || severityConfig.MEDIUM;
-              const debate = getDebateForFlag(flag);
-
-              return (
-                <div
-                  key={flag.id}
-                  style={{
-                    background: "var(--bg-card)",
-                    border: `1px solid ${flag.resolved ? "var(--border-subtle)" : sev.border}`,
-                    borderRadius: "12px",
-                    padding: "20px",
-                    opacity: flag.resolved ? 0.6 : 1,
-                    transition: "all 0.2s ease",
-                    borderLeft: `4px solid ${flag.resolved ? "#22c55e" : sev.color}`,
-                  }}
-                >
-                  <div style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "flex-start",
-                    marginBottom: "12px",
-                  }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                      <span style={{
-                        padding: "3px 10px",
-                        borderRadius: "8px",
-                        fontSize: "0.72rem",
-                        fontWeight: 700,
-                        background: sev.bg,
-                        color: sev.color,
-                        border: `1px solid ${sev.border}`,
-                      }}>
-                        {sev.label}
-                      </span>
-                      <span style={{
-                        fontSize: "0.82rem",
-                        color: "var(--text-muted)",
-                        fontWeight: 500,
-                      }}>
-                        §{flag.section_index + 1} · {flag.section_heading}
-                      </span>
-                      {debate && debate.verdict === "AMBIGUOUS" && (
-                        <span style={{
-                          padding: "2px 8px",
-                          borderRadius: "6px",
-                          fontSize: "0.68rem",
-                          fontWeight: 700,
-                          background: "rgba(239, 68, 68, 0.1)",
-                          color: "#ef4444",
-                          border: "1px solid rgba(239, 68, 68, 0.25)",
-                        }}>
-                          ⚔️ Debate Confirmed
-                        </span>
-                      )}
-                    </div>
-                    {flag.resolved ? (
-                      <span style={{
-                        fontSize: "0.78rem",
-                        color: "#22c55e",
-                        fontWeight: 600,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "4px",
-                      }}>
-                        ✓ Resolved
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => flag.id && handleResolve(flag.id)}
-                        style={{
-                          padding: "4px 14px",
-                          borderRadius: "6px",
-                          fontSize: "0.78rem",
-                          fontWeight: 600,
-                          background: "rgba(34, 197, 94, 0.1)",
-                          color: "#22c55e",
-                          border: "1px solid rgba(34, 197, 94, 0.3)",
-                          cursor: "pointer",
-                          transition: "all 0.15s ease",
-                        }}
-                        onMouseEnter={(e) => {
-                          (e.target as HTMLButtonElement).style.background = "rgba(34, 197, 94, 0.2)";
-                        }}
-                        onMouseLeave={(e) => {
-                          (e.target as HTMLButtonElement).style.background = "rgba(34, 197, 94, 0.1)";
-                        }}
-                      >
-                        ✓ Mark Resolved
-                      </button>
-                    )}
-                  </div>
-
-                  <div style={{
-                    background: sev.bg,
-                    padding: "10px 14px",
-                    borderRadius: "8px",
-                    fontSize: "0.88rem",
-                    lineHeight: 1.6,
-                    fontFamily: "var(--font-mono)",
-                    marginBottom: "10px",
-                    color: "var(--text-primary)",
-                    borderLeft: `3px solid ${sev.color}`,
-                  }}>
-                    &ldquo;{flag.flagged_text}&rdquo;
-                  </div>
-
-                  <p style={{
-                    fontSize: "0.88rem",
-                    color: "var(--text-secondary)",
-                    lineHeight: 1.6,
-                    marginBottom: "10px",
-                  }}>
-                    <strong>Why:</strong> {flag.reason}
-                  </p>
-
-                  <div style={{
-                    background: "var(--bg-tertiary)",
-                    padding: "10px 14px",
-                    borderRadius: "8px",
-                    fontSize: "0.88rem",
-                    lineHeight: 1.6,
-                    color: "var(--accent-primary)",
-                    fontWeight: 500,
-                  }}>
-                    💬 {flag.clarification_question}
-                  </div>
-
-                  {/* Debate transcript for HIGH flags */}
-                  {debate && <DebateTranscript debate={debate} />}
-                </div>
-              );
-            })}
-          </div>
+          </FadeIn>
         </>
       )}
 
-      {/* Empty state */}
-      {!loading && flags.length === 0 && hasAnalyzed && (
-        <div className="empty-state">
-          <div className="empty-state-icon">✅</div>
-          <h3>No ambiguities detected</h3>
-          <p>The document appears to have clear, well-defined requirements.</p>
-        </div>
+      {debates.length > 0 && (
+        <FadeIn delay={0.06} style={{ marginBottom: "1.5rem" }}>
+          <div className="section-card">
+            <div className="section-card-header">Adversarial Validation</div>
+            <div className="section-card-body">
+              <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: "1rem" }}>
+                {debates.length} HIGH severity flag{debates.length !== 1 ? "s" : ""} challenged by Red vs
+                Blue agent debate.
+              </p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
+                <Badge variant="error">
+                  Confirmed: {debates.filter((d) => d.verdict === "AMBIGUOUS").length}
+                </Badge>
+                <Badge variant="success">
+                  Cleared: {clearedDebates.length}
+                </Badge>
+              </div>
+            </div>
+          </div>
+        </FadeIn>
       )}
-    </div>
+
+      {flags.length > 0 && (
+        <>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.75rem",
+              flexWrap: "wrap",
+              marginBottom: "1rem",
+            }}
+          >
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.35rem",
+                fontSize: "0.8125rem",
+                color: "var(--text-muted)",
+                fontWeight: 600,
+              }}
+            >
+              <Search size={16} aria-hidden />
+              Filter
+            </span>
+            <Tabs
+              items={[
+                { key: "all", label: "All", count: flags.length },
+                { key: "high", label: "HIGH", count: highCount },
+                { key: "medium", label: "MEDIUM", count: mediumCount },
+                { key: "low", label: "LOW", count: lowCount },
+                { key: "resolved", label: "Resolved", count: resolved },
+              ]}
+              active={filterTab}
+              onChange={setFilterTab}
+            />
+          </div>
+
+          <StaggerList style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+            {filteredFlags.map((flag) => {
+              const leftColor = flag.resolved ? "var(--success)" : severityBorder[flag.severity];
+              const debate = getDebateForFlag(flag);
+
+              return (
+                <StaggerItem key={flag.id ?? `${flag.section_index}-${flag.flagged_text.slice(0, 24)}`}>
+                  <motion.div
+                    className="card"
+                    whileHover={{ y: -3 }}
+                    transition={{ type: "spring", stiffness: 420, damping: 28 }}
+                    style={{
+                      borderLeft: `4px solid ${leftColor}`,
+                      opacity: flag.resolved ? 0.72 : 1,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "flex-start",
+                        gap: "0.75rem",
+                        marginBottom: "0.75rem",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                        <Badge variant={severityBadgeVariant(flag.severity)}>{flag.severity}</Badge>
+                        <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)", fontWeight: 500 }}>
+                          Section {flag.section_index + 1} · {flag.section_heading}
+                        </span>
+                        {debate && debate.verdict === "AMBIGUOUS" && (
+                          <Badge variant="error">Debate Confirmed</Badge>
+                        )}
+                      </div>
+                      {flag.resolved ? (
+                        <Badge variant="success">Resolved</Badge>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn-success btn-sm"
+                          onClick={() => flag.id && handleResolve(flag.id)}
+                          disabled={!flag.id}
+                        >
+                          <CheckCircle2 size={14} />
+                          Mark Resolved
+                        </button>
+                      )}
+                    </div>
+
+                    <div
+                      style={{
+                        padding: "0.625rem 0.875rem",
+                        borderRadius: "var(--radius-md)",
+                        fontSize: "0.875rem",
+                        lineHeight: 1.6,
+                        marginBottom: "0.625rem",
+                        borderLeft: `3px solid ${leftColor}`,
+                        background: "var(--bg-tertiary)",
+                        fontFamily: "var(--font-mono)",
+                      }}
+                    >
+                      &ldquo;{flag.flagged_text}&rdquo;
+                    </div>
+
+                    <p
+                      style={{
+                        fontSize: "0.875rem",
+                        color: "var(--text-secondary)",
+                        lineHeight: 1.6,
+                        marginBottom: "0.625rem",
+                      }}
+                    >
+                      <strong>Why:</strong> {flag.reason}
+                    </p>
+
+                    <div
+                      style={{
+                        background: "var(--bg-accent-subtle)",
+                        padding: "0.625rem 0.875rem",
+                        borderRadius: "var(--radius-md)",
+                        fontSize: "0.875rem",
+                        lineHeight: 1.6,
+                        color: "var(--accent-primary)",
+                        fontWeight: 500,
+                      }}
+                    >
+                      {flag.clarification_question}
+                    </div>
+
+                    {debate && <DebateTranscript debate={debate} />}
+                  </motion.div>
+                </StaggerItem>
+              );
+            })}
+          </StaggerList>
+
+          {clearedDebates.length > 0 && (
+            <FadeIn delay={0.05} style={{ marginTop: "2rem" }}>
+              <h2
+                className="page-title"
+                style={{ fontSize: "1.05rem", marginBottom: "0.75rem", color: "var(--success)" }}
+              >
+                <CheckCircle2 size={18} style={{ verticalAlign: "text-bottom", marginRight: "0.35rem" }} />
+                Cleared by debate ({clearedDebates.length})
+              </h2>
+              <StaggerList style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                {clearedDebates.map((debate, idx) => (
+                  <StaggerItem key={`cleared-${idx}-${debate.section_index}-${debate.flagged_text.slice(0, 16)}`}>
+                    <motion.div
+                      className="card"
+                      whileHover={{ y: -2 }}
+                      transition={{ type: "spring", stiffness: 400, damping: 26 }}
+                      style={{
+                        borderLeft: "4px solid var(--success)",
+                        opacity: 0.88,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem", flexWrap: "wrap" }}>
+                        <Badge variant="success">Overridden by debate</Badge>
+                        <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)", fontWeight: 500 }}>
+                          Section {debate.section_index + 1} · {debate.section_heading}
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          padding: "0.5rem 0.75rem",
+                          borderRadius: "var(--radius-md)",
+                          fontSize: "0.875rem",
+                          color: "var(--text-secondary)",
+                          textDecoration: "line-through",
+                          marginBottom: "0.5rem",
+                          background: "var(--bg-tertiary)",
+                          fontFamily: "var(--font-mono)",
+                        }}
+                      >
+                        &ldquo;{debate.flagged_text}&rdquo;
+                      </div>
+                      <DebateTranscript debate={debate} />
+                    </motion.div>
+                  </StaggerItem>
+                ))}
+              </StaggerList>
+            </FadeIn>
+          )}
+        </>
+      )}
+
+      {!loading && flags.length === 0 && hasAnalyzed && (
+        <EmptyState
+          icon={<CheckCircle2 size={40} strokeWidth={1.25} />}
+          title="No ambiguities detected"
+          description="The document appears to have clear, well-defined requirements."
+          action={
+            <Link href={`/documents/${docId}`} className="btn btn-secondary btn-sm" style={{ marginTop: "0.75rem" }}>
+              Back to document
+            </Link>
+          }
+        />
+      )}
+    </PageShell>
   );
 }

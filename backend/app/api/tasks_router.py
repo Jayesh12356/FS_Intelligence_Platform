@@ -12,6 +12,7 @@ from app.db.base import get_db
 from app.db.models import (
     FSDocument,
     FSTaskDB,
+    TaskStatus,
     TraceabilityEntryDB,
 )
 from app.models.schemas import (
@@ -37,6 +38,7 @@ class TaskUpdateBody(BaseModel):
     title: str | None = None
     description: str | None = None
     effort: str | None = None
+    status: str | None = None
     tags: list[str] | None = None
     acceptance_criteria: list[str] | None = None
 
@@ -69,6 +71,7 @@ async def list_tasks(
             acceptance_criteria=r.acceptance_criteria or [],
             effort=r.effort.value,
             tags=r.tags or [],
+            status=r.status.value if r.status else TaskStatus.PENDING.value,
             order=r.order,
             can_parallel=r.can_parallel,
         )
@@ -144,6 +147,7 @@ async def get_task_detail(
             acceptance_criteria=row.acceptance_criteria or [],
             effort=row.effort.value,
             tags=row.tags or [],
+            status=row.status.value if row.status else TaskStatus.PENDING.value,
             order=row.order,
             can_parallel=row.can_parallel,
         ),
@@ -179,6 +183,11 @@ async def update_task(
             row.effort = EffortLevel(body.effort.upper())
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid effort: {body.effort}")
+    if body.status is not None:
+        try:
+            row.status = TaskStatus(body.status.upper())
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {body.status}")
     if body.tags is not None:
         row.tags = body.tags
     if body.acceptance_criteria is not None:
@@ -199,6 +208,7 @@ async def update_task(
             acceptance_criteria=row.acceptance_criteria or [],
             effort=row.effort.value,
             tags=row.tags or [],
+            status=row.status.value if row.status else TaskStatus.PENDING.value,
             order=row.order,
             can_parallel=row.can_parallel,
         ),

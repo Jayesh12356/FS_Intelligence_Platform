@@ -118,6 +118,25 @@ export interface QualityDashboardResponse {
   compliance_tags: ComplianceTag[];
 }
 
+export interface RefinementSuggestion {
+  issue: string;
+  original: string;
+  refined: string;
+}
+
+export interface RefinementDiffLine {
+  line: string;
+}
+
+export interface RefinementResponse {
+  original_score: number;
+  refined_score: number;
+  changes_made: number;
+  refined_text: string;
+  diff: RefinementDiffLine[];
+  suggestions: RefinementSuggestion[];
+}
+
 export interface APIResponse<T> {
   data: T;
   error: string | null;
@@ -259,6 +278,17 @@ export async function parseDocument(
 }
 
 /**
+ * Reset a stuck document status back to PARSED (or UPLOADED).
+ */
+export async function resetDocumentStatus(
+  id: string
+): Promise<APIResponse<{ id: string; old_status: string; new_status: string }>> {
+  return apiFetch<{ id: string; old_status: string; new_status: string }>(`/api/fs/${id}/reset-status`, {
+    method: "POST",
+  });
+}
+
+/**
  * Trigger document analysis (L3+L4).
  * Runs the LangGraph pipeline to detect ambiguities, contradictions,
  * edge cases, and compute quality scores.
@@ -268,6 +298,59 @@ export async function analyzeDocument(
 ): Promise<APIResponse<AnalysisResponse>> {
   return apiFetch<AnalysisResponse>(`/api/fs/${id}/analyze`, {
     method: "POST",
+  });
+}
+
+// ── Analysis Progress ──────────────────────────────────
+
+export interface AnalysisProgress {
+  status: string;
+  current_node: string | null;
+  completed_nodes: string[];
+  total_nodes: number;
+  node_labels: Record<string, string>;
+  logs: string[];
+}
+
+export async function getAnalysisProgress(
+  id: string
+): Promise<APIResponse<AnalysisProgress>> {
+  return apiFetch<AnalysisProgress>(`/api/fs/${id}/analysis-progress`);
+}
+
+export async function cancelAnalysis(
+  docId: string
+): Promise<
+  APIResponse<{ cancelled: boolean; document_id?: string; reason?: string }>
+> {
+  return apiFetch<{ cancelled: boolean; document_id?: string; reason?: string }>(
+    `/api/fs/${docId}/cancel-analysis`,
+    {
+      method: "POST",
+    }
+  );
+}
+
+export async function editSection(
+  docId: string,
+  sectionIndex: number,
+  body: { heading?: string; content?: string }
+): Promise<APIResponse<FSSection>> {
+  return apiFetch<FSSection>(`/api/fs/${docId}/sections/${sectionIndex}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function addSection(
+  docId: string,
+  body: { heading: string; content: string; insert_after?: number }
+): Promise<APIResponse<FSSection>> {
+  return apiFetch<FSSection>(`/api/fs/${docId}/sections`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
 }
 
@@ -334,6 +417,49 @@ export async function resolveEdgeCase(
   });
 }
 
+export async function acceptEdgeCaseSuggestion(
+  docId: string,
+  edgeCaseId: string
+): Promise<APIResponse<EdgeCaseGap>> {
+  return apiFetch<EdgeCaseGap>(`/api/fs/${docId}/edge-cases/${edgeCaseId}/accept`, {
+    method: "POST",
+  });
+}
+
+export async function acceptContradictionSuggestion(
+  docId: string,
+  contradictionId: string
+): Promise<APIResponse<Contradiction>> {
+  return apiFetch<Contradiction>(`/api/fs/${docId}/contradictions/${contradictionId}/accept`, {
+    method: "POST",
+  });
+}
+
+export interface BulkResult {
+  accepted?: number;
+  resolved: number;
+}
+
+export async function bulkAcceptEdgeCases(docId: string): Promise<APIResponse<BulkResult>> {
+  return apiFetch<BulkResult>(`/api/fs/${docId}/edge-cases/bulk-accept`, { method: "POST" });
+}
+
+export async function bulkResolveEdgeCases(docId: string): Promise<APIResponse<BulkResult>> {
+  return apiFetch<BulkResult>(`/api/fs/${docId}/edge-cases/bulk-resolve`, { method: "POST" });
+}
+
+export async function bulkAcceptContradictions(docId: string): Promise<APIResponse<BulkResult>> {
+  return apiFetch<BulkResult>(`/api/fs/${docId}/contradictions/bulk-accept`, { method: "POST" });
+}
+
+export async function bulkResolveContradictions(docId: string): Promise<APIResponse<BulkResult>> {
+  return apiFetch<BulkResult>(`/api/fs/${docId}/contradictions/bulk-resolve`, { method: "POST" });
+}
+
+export async function bulkResolveAmbiguities(docId: string): Promise<APIResponse<BulkResult>> {
+  return apiFetch<BulkResult>(`/api/fs/${docId}/ambiguities/bulk-resolve`, { method: "POST" });
+}
+
 /**
  * Get complete quality dashboard data for a document. (L4)
  */
@@ -342,6 +468,34 @@ export async function getQualityDashboard(
 ): Promise<APIResponse<QualityDashboardResponse>> {
   return apiFetch<QualityDashboardResponse>(`/api/fs/${id}/quality-score`);
 }
+
+export async function refineDocument(
+  id: string
+): Promise<APIResponse<RefinementResponse>> {
+  return apiFetch<RefinementResponse>(`/api/fs/${id}/refine`, {
+    method: "POST",
+  });
+}
+
+export async function acceptRefinedDocument(
+  id: string,
+  refinedText: string
+): Promise<APIResponse<{ accepted: boolean; version_id: string; version_number: number }>> {
+  return apiFetch<{ accepted: boolean; version_id: string; version_number: number }>(
+    `/api/fs/${id}/refine/accept`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refined_text: refinedText }),
+    }
+  );
+}
+
+/** Alias for UI copy: POST refine (suggestions + refined text). */
+export const getRefinementSuggestions = refineDocument;
+
+/** Alias for UI copy: accept refined version. */
+export const applyRefinement = acceptRefinedDocument;
 
 /**
  * Check system health.
@@ -551,6 +705,29 @@ export async function listVersions(
   return apiFetch<VersionListData>(`/api/fs/${id}/versions`);
 }
 
+export interface VersionTextData {
+  id: string;
+  version_number: number;
+  parsed_text: string;
+}
+
+export async function getVersionText(
+  docId: string,
+  versionId: string
+): Promise<APIResponse<VersionTextData>> {
+  return apiFetch<VersionTextData>(`/api/fs/${docId}/versions/${versionId}/text`);
+}
+
+export async function revertToVersion(
+  docId: string,
+  versionId: string
+): Promise<APIResponse<{ reverted: boolean; version_number: number }>> {
+  return apiFetch<{ reverted: boolean; version_number: number }>(
+    `/api/fs/${docId}/versions/${versionId}/revert`,
+    { method: "POST" }
+  );
+}
+
 /**
  * Get diff between a version and its predecessor. (L7)
  */
@@ -706,6 +883,12 @@ export async function getGeneratedFS(
 ): Promise<APIResponse<GeneratedFSData>> {
   return apiFetch<GeneratedFSData>(`/api/code/${id}/generated-fs`);
 }
+
+/** Reverse FS UI aliases (same endpoints as codebase upload / generated FS). */
+export type ReverseUploadItem = CodeUploadItem;
+export const uploadCodeZip = uploadCodebase;
+export const listReverseUploads = listCodeUploads;
+export const getReverseStatus = getGeneratedFS;
 
 /**
  * Get quality report for a code upload. (L8)
@@ -956,6 +1139,36 @@ export async function getAuditLog(
   return apiFetch<AuditLogData>(`/api/fs/${docId}/audit-log`);
 }
 
+// ── Activity Log (Global) ─────────────────────────────
+
+export interface ActivityLogEntry {
+  id: string | null;
+  fs_id: string;
+  document_name: string;
+  event_type: string;
+  event_label: string;
+  detail: string | null;
+  user_id: string;
+  created_at: string | null;
+}
+
+export interface ActivityLogData {
+  events: ActivityLogEntry[];
+  total: number;
+}
+
+export async function getActivityLog(
+  limit: number = 50,
+  offset: number = 0,
+  eventType?: string,
+  documentName?: string
+): Promise<APIResponse<ActivityLogData>> {
+  let url = `/api/activity-log?limit=${limit}&offset=${offset}`;
+  if (eventType) url += `&event_type=${encodeURIComponent(eventType)}`;
+  if (documentName) url += `&document_name=${encodeURIComponent(documentName)}`;
+  return apiFetch<ActivityLogData>(url);
+}
+
 // ── L10 Integrations + Polish ─────────────────────────
 
 // ── Test Cases ────────────────────────────────────────
@@ -1057,6 +1270,88 @@ export async function exportDocxReport(
   return apiFetch<ReportExportData>(`/api/fs/${docId}/export/docx`);
 }
 
+// ── Project Types & Functions ─────────────────────────
+
+export interface FSProject {
+  id: string;
+  name: string;
+  description: string | null;
+  document_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FSProjectDetail extends FSProject {
+  documents: FSDocumentResponse[];
+}
+
+export interface ProjectListData {
+  projects: FSProject[];
+  total: number;
+}
+
+export async function createProject(
+  name: string,
+  description?: string
+): Promise<APIResponse<FSProject>> {
+  return apiFetch<FSProject>("/api/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, description }),
+  });
+}
+
+export async function listProjects(): Promise<APIResponse<ProjectListData>> {
+  return apiFetch<ProjectListData>("/api/projects");
+}
+
+export async function getProject(
+  id: string
+): Promise<APIResponse<FSProjectDetail>> {
+  return apiFetch<FSProjectDetail>(`/api/projects/${id}`);
+}
+
+export async function updateProject(
+  id: string,
+  body: { name?: string; description?: string }
+): Promise<APIResponse<FSProject>> {
+  return apiFetch<FSProject>(`/api/projects/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteProject(
+  id: string
+): Promise<APIResponse<{ id: string; deleted: boolean }>> {
+  return apiFetch<{ id: string; deleted: boolean }>(`/api/projects/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function assignDocumentToProject(
+  projectId: string,
+  docId: string
+): Promise<APIResponse<{ document_id: string; project_id: string; order_in_project: number }>> {
+  return apiFetch<{ document_id: string; project_id: string; order_in_project: number }>(
+    `/api/projects/${projectId}/documents/${docId}`,
+    { method: "POST" }
+  );
+}
+
+export async function uploadFileToProject(
+  file: File,
+  projectId: string
+): Promise<APIResponse<UploadResponse>> {
+  const formData = new FormData();
+  formData.append("file", file);
+  return apiFetch<UploadResponse>(`/api/fs/upload?project_id=${projectId}`, {
+    method: "POST",
+    body: formData,
+  });
+}
+
 // ── MCP Monitoring ────────────────────────────────────
 
 export interface MCPSession {
@@ -1115,5 +1410,39 @@ export async function listMcpSessionEvents(
 ): Promise<APIResponse<MCPSessionEventListData>> {
   return apiFetch<MCPSessionEventListData>(
     `/api/mcp/sessions/${sessionId}/events?limit=${limit}`
+  );
+}
+
+/** Aliases for monitoring UI */
+export const getMCPSessions = listMcpSessions;
+export const getMCPSessionEvents = listMcpSessionEvents;
+export const getMCPSession = getMcpSession;
+
+// ── Build Prompt ──────────────────────────────────────
+
+export interface BuildPromptSummary {
+  quality: number;
+  tasks: number;
+  sections: number;
+  blockers: number;
+  high_ambiguities: number;
+  contradictions: number;
+  edge_cases: number;
+  status: string;
+}
+
+export interface BuildPromptData {
+  prompt: string;
+  mcp_config: Record<string, unknown>;
+  summary: BuildPromptSummary;
+}
+
+export async function getBuildPrompt(
+  docId: string,
+  stack: string = "Next.js + FastAPI",
+  outputFolder: string = "./output"
+): Promise<APIResponse<BuildPromptData>> {
+  return apiFetch<BuildPromptData>(
+    `/api/fs/${docId}/build-prompt?stack=${encodeURIComponent(stack)}&output_folder=${encodeURIComponent(outputFolder)}`
   );
 }

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from collections import defaultdict
 import os
+from typing import Optional
 
+import httpx
 from fastmcp import FastMCP
 
 from config import (
+    BACKEND_URL,
     MCP_DRY_RUN_DEFAULT,
     MCP_MIN_QUALITY_SCORE,
     MCP_REQUIRE_TRACEABILITY,
@@ -28,11 +31,33 @@ def register(mcp: FastMCP) -> None:
         return await request_json("GET", f"/api/fs/{document_id}/tasks/{task_id}")
 
     @mcp.tool()
-    async def update_task(document_id: str, task_id: str, updates: dict) -> dict:
-        """Use to edit task metadata as implementation progresses."""
-        allowed = {"title", "description", "effort", "tags", "acceptance_criteria"}
-        payload = {k: v for k, v in (updates or {}).items() if k in allowed}
-        return await request_json("PATCH", f"/api/fs/{document_id}/tasks/{task_id}", json=payload)
+    async def update_task(
+        document_id: str,
+        task_id: str,
+        status: str,
+        title: Optional[str] = None,
+    ) -> dict:
+        """
+        Updates a task's status. Valid values: PENDING, IN_PROGRESS, COMPLETE.
+        After calling this, immediately call get_task(document_id, task_id)
+        to verify status was persisted correctly.
+        If returned status does not match what you set, retry once.
+        Always verify before moving to next task.
+        """
+        async with httpx.AsyncClient() as client:
+            r = await client.patch(
+                f"{BACKEND_URL}/api/fs/{document_id}/tasks/{task_id}",
+                json={"status": status, "title": title},
+            )
+            if r.status_code == 200:
+                verify = await client.get(
+                    f"{BACKEND_URL}/api/fs/{document_id}/tasks/{task_id}"
+                )
+                return {
+                    "updated": r.json(),
+                    "verified_status": verify.json().get("data", {}).get("status"),
+                }
+            return {"error": r.text, "status_code": r.status_code}
 
     @mcp.tool()
     async def get_dependency_graph(document_id: str) -> dict:

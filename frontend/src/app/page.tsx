@@ -1,74 +1,84 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { listDocuments } from "@/lib/api";
+import { motion } from "framer-motion";
+import {
+  AlertTriangle,
+  Award,
+  Boxes,
+  CheckCircle2,
+  Clock,
+  FileText,
+  GitCompare,
+  ListTodo,
+  Loader2,
+  ScanSearch,
+  Upload,
+  FolderOpen,
+} from "lucide-react";
+import {
+  FadeIn,
+  KpiCard,
+  PageMotion,
+  StaggerItem,
+  StaggerList,
+  StatusBadge,
+} from "@/components/index";
+import { listDocuments, type FSDocumentResponse } from "@/lib/api";
 
-interface DocSummary {
-  id: string;
-  filename: string;
-  status: string;
-  file_size: number | null;
-  created_at: string;
-  updated_at: string;
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  UPLOADED: "#6366f1",
-  PARSING: "#f59e0b",
-  PARSED: "#10b981",
-  ANALYZING: "#3b82f6",
-  COMPLETE: "#10b981",
-  ERROR: "#ef4444",
-  PARSE_FAILED: "#ef4444",
-};
-
-const STATUS_ICONS: Record<string, string> = {
-  UPLOADED: "⬆",
-  PARSING: "⏳",
-  PARSED: "📄",
-  ANALYZING: "🔍",
-  COMPLETE: "✅",
-  ERROR: "❌",
-  PARSE_FAILED: "❌",
+const STATUS_BORDER: Record<string, string> = {
+  UPLOADED: "var(--info)",
+  PARSING: "var(--warning)",
+  PARSED: "var(--success)",
+  ANALYZING: "var(--warning)",
+  COMPLETE: "var(--success)",
+  ERROR: "var(--error)",
+  PARSE_FAILED: "var(--error)",
 };
 
 const FEATURES = [
   {
-    icon: "🔍",
     title: "Ambiguity Detection",
     description:
-      "AI-powered detection of vague, contradictory, or incomplete requirements.",
+      "Surface vague or incomplete requirements with AI-assisted clarification prompts.",
+    icon: ScanSearch,
+    well: "var(--well-blue)" as const,
   },
   {
-    icon: "📋",
+    title: "Contradiction Finder",
+    description:
+      "Cross-check sections to flag conflicting statements before they reach development.",
+    icon: GitCompare,
+    well: "var(--well-peach)" as const,
+  },
+  {
+    title: "Edge Case Analysis",
+    description:
+      "Identify missing scenarios and gaps so acceptance criteria hold up in production.",
+    icon: AlertTriangle,
+    well: "var(--well-amber)" as const,
+  },
+  {
     title: "Task Decomposition",
     description:
-      "Automatically break specs into developer-ready task lists with effort estimates.",
+      "Break functional specs into structured, traceable work items ready for delivery.",
+    icon: ListTodo,
+    well: "var(--well-purple)" as const,
   },
   {
-    icon: "⚡",
-    title: "Change Impact Analysis",
+    title: "Quality Scoring",
     description:
-      "Instantly understand what breaks when a spec changes — trace impacts everywhere.",
+      "Quantify completeness, clarity, and consistency to prioritize spec hardening.",
+    icon: Award,
+    well: "var(--well-green)" as const,
   },
   {
-    icon: "🔗",
-    title: "Full Traceability",
+    title: "Autonomous Build",
     description:
-      "Requirements → Tasks → Test Cases — complete traceability with export.",
-  },
-  {
-    icon: "📤",
-    title: "JIRA & Confluence Export",
-    description:
-      "One-click export to JIRA (epic + stories) and Confluence documentation pages.",
-  },
-  {
-    icon: "🤝",
-    title: "Team Collaboration",
-    description:
-      "Comments, @mentions, approval workflows, and full audit trail.",
+      "Orchestrate analysis, refinement, and build steps through an automated pipeline.",
+    icon: Boxes,
+    well: "var(--well-gray)" as const,
   },
 ];
 
@@ -85,178 +95,223 @@ function formatDate(dateStr: string): string {
 }
 
 function formatSize(bytes: number | null): string {
-  if (!bytes) return "—";
+  if (bytes == null || bytes === 0) return "—";
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-export default function DashboardPage() {
-  const [docs, setDocs] = useState<DocSummary[]>([]);
+function recentUploadsCount(docs: FSDocumentResponse[]): number {
+  const cutoff = Date.now() - 7 * 24 * 3600000;
+  return docs.filter((d) => new Date(d.created_at).getTime() >= cutoff).length;
+}
+
+export default function HomePage() {
+  const [docs, setDocs] = useState<FSDocumentResponse[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     listDocuments()
-      .then((res) => setDocs(res.data?.documents || []))
+      .then((res) => setDocs(res.data?.documents ?? []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
-  const statCounts = {
-    total: docs.length,
-    complete: docs.filter((d) => d.status === "COMPLETE").length,
-    inProgress: docs.filter((d) =>
-      ["UPLOADED", "PARSING", "PARSED", "ANALYZING"].includes(d.status)
-    ).length,
-    errors: docs.filter((d) => ["ERROR", "PARSE_FAILED"].includes(d.status)).length,
-  };
+  const sortedRecent = useMemo(() => {
+    return [...docs].sort(
+      (a, b) =>
+        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+    );
+  }, [docs]);
+
+  const stats = useMemo(() => {
+    const complete = docs.filter((d) => d.status === "COMPLETE").length;
+    const analyzing = docs.filter((d) => d.status === "ANALYZING").length;
+    const recent = recentUploadsCount(docs);
+    return {
+      total: docs.length,
+      complete,
+      analyzing,
+      recent,
+    };
+  }, [docs]);
 
   return (
-    <>
+    <PageMotion>
       <section className="hero" id="hero-section">
-        <div className="hero-badge">◈ AI-Powered FS Intelligence</div>
+        <div className="hero-badge">Functional specification intelligence</div>
         <h1>
-          Turn your <span className="gradient-text">Functional Specs</span>
-          <br />
-          into dev-ready tasks
+          FS <span className="gradient-text">Intelligence</span> Platform
         </h1>
         <p className="hero-subtitle">
-          Bridge the gap between functional teams and developers. Detect
-          ambiguities, decompose tasks, generate test cases, and export to
-          JIRA — all powered by advanced AI.
+          Upload functional specs, run deep analysis, and move from ambiguous
+          prose to structured tasks, quality scores, and build-ready output.
         </p>
         <div className="hero-actions">
           <Link href="/upload" className="btn btn-primary" id="hero-upload-btn">
-            ⬆ Upload FS Document
+            <Upload size={20} />
+            Upload FS
           </Link>
           <Link
             href="/documents"
             className="btn btn-secondary"
             id="hero-docs-btn"
           >
-            📄 View Documents
-          </Link>
-          <Link
-            href="/reverse"
-            className="btn btn-secondary"
-            id="hero-reverse-btn"
-          >
-            🔄 Reverse Generate FS
-          </Link>
-          <Link
-            href="/monitoring"
-            className="btn btn-secondary"
-            id="hero-monitoring-btn"
-          >
-            📡 Live MCP Monitoring
+            <FolderOpen size={20} />
+            View Documents
           </Link>
         </div>
       </section>
 
-      {/* Dashboard Stats */}
       {!loading && docs.length > 0 && (
-        <section
-          id="dashboard-stats"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-            gap: "1rem",
-            marginBottom: "2.5rem",
-          }}
-        >
-          <div className="card" style={{ textAlign: "center", padding: "1.5rem" }}>
-            <div style={{ fontSize: "2rem", fontWeight: 700, color: "var(--color-primary)" }}>
-              {statCounts.total}
-            </div>
-            <div style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Total Documents</div>
+        <FadeIn delay={0.08}>
+          <div className="kpi-row" id="dashboard-stats">
+            <KpiCard
+              label="Total Documents"
+              value={stats.total}
+              icon={<FileText size={20} />}
+              iconBg="var(--well-blue)"
+              delay={0}
+            />
+            <KpiCard
+              label="Complete"
+              value={stats.complete}
+              icon={<CheckCircle2 size={20} />}
+              iconBg="var(--well-green)"
+              delay={0.05}
+            />
+            <KpiCard
+              label="Analyzing"
+              value={stats.analyzing}
+              icon={<Loader2 size={20} />}
+              iconBg="var(--well-amber)"
+              delay={0.1}
+            />
+            <KpiCard
+              label="Recent uploads"
+              value={stats.recent}
+              icon={<Clock size={20} />}
+              iconBg="var(--well-peach)"
+              delay={0.15}
+            />
           </div>
-          <div className="card" style={{ textAlign: "center", padding: "1.5rem" }}>
-            <div style={{ fontSize: "2rem", fontWeight: 700, color: "#10b981" }}>
-              {statCounts.complete}
-            </div>
-            <div style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Analyzed</div>
-          </div>
-          <div className="card" style={{ textAlign: "center", padding: "1.5rem" }}>
-            <div style={{ fontSize: "2rem", fontWeight: 700, color: "#3b82f6" }}>
-              {statCounts.inProgress}
-            </div>
-            <div style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>In Progress</div>
-          </div>
-          <div className="card" style={{ textAlign: "center", padding: "1.5rem" }}>
-            <div style={{ fontSize: "2rem", fontWeight: 700, color: statCounts.errors > 0 ? "#ef4444" : "var(--text-muted)" }}>
-              {statCounts.errors}
-            </div>
-            <div style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Errors</div>
-          </div>
-        </section>
+        </FadeIn>
       )}
 
-      {/* Recent Documents */}
       {!loading && docs.length > 0 && (
-        <section style={{ marginBottom: "2.5rem" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-            <h2 style={{ margin: 0, fontSize: "1.3rem" }}>📄 Recent Documents</h2>
-            <Link href="/documents" className="btn btn-sm" style={{ fontSize: "0.8rem" }}>
-              View All →
+        <FadeIn delay={0.14}>
+          <div className="documents-header">
+            <h2 className="page-title" style={{ fontSize: "1.25rem" }}>
+              Recent documents
+            </h2>
+            <Link href="/documents" className="btn btn-secondary btn-sm">
+              View all
             </Link>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "1rem" }}>
-            {docs.slice(0, 6).map((doc) => {
-              const color = STATUS_COLORS[doc.status] || "#6b7280";
-              const icon = STATUS_ICONS[doc.status] || "📄";
+          <div
+            style={{
+              display: "flex",
+              gap: "1rem",
+              overflowX: "auto",
+              paddingBottom: "0.25rem",
+              marginBottom: "1.5rem",
+              scrollbarGutter: "stable",
+            }}
+          >
+            {sortedRecent.slice(0, 6).map((doc, i) => {
+              const border =
+                STATUS_BORDER[doc.status] ?? "var(--border-strong)";
               return (
-                <Link
+                <motion.div
                   key={doc.id}
-                  href={`/documents/${doc.id}`}
-                  style={{ textDecoration: "none", color: "inherit" }}
+                  initial={{ opacity: 0, x: 16 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{
+                    duration: 0.3,
+                    delay: 0.12 + i * 0.04,
+                    ease: [0.4, 0, 0.2, 1],
+                  }}
+                  style={{ flex: "0 0 auto", minWidth: "min(280px, 85vw)" }}
                 >
-                  <div
-                    className="card"
+                  <Link
+                    href={`/documents/${doc.id}`}
+                    className="card doc-card"
                     id={`doc-card-${doc.id.substring(0, 8)}`}
                     style={{
-                      cursor: "pointer",
-                      transition: "all 0.2s ease",
-                      borderLeft: `3px solid ${color}`,
+                      borderLeft: `3px solid ${border}`,
+                      flexDirection: "column",
+                      alignItems: "stretch",
                     }}
                   >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
-                      <h4 style={{ margin: 0, fontSize: "0.95rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "70%" }}>
-                        {doc.filename}
-                      </h4>
-                      <span
-                        style={{
-                          fontSize: "0.7rem",
-                          padding: "2px 8px",
-                          borderRadius: "12px",
-                          background: `${color}22`,
-                          color: color,
-                          fontWeight: 600,
-                        }}
-                      >
-                        {icon} {doc.status}
-                      </span>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "1rem",
+                        width: "100%",
+                      }}
+                    >
+                      <div className="doc-icon">
+                        <FileText size={20} />
+                      </div>
+                      <div className="doc-info" style={{ minWidth: 0, flex: 1 }}>
+                        <div className="doc-name">{doc.filename}</div>
+                        <div style={{ marginTop: "0.5rem" }}>
+                          <StatusBadge status={doc.status} />
+                        </div>
+                      </div>
                     </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                    <div
+                      className="doc-meta"
+                      style={{ marginTop: "0.75rem", paddingLeft: "58px" }}
+                    >
                       <span>{formatSize(doc.file_size)}</span>
                       <span>{formatDate(doc.updated_at)}</span>
                     </div>
-                  </div>
-                </Link>
+                  </Link>
+                </motion.div>
               );
             })}
           </div>
-        </section>
+        </FadeIn>
       )}
 
-      <section className="feature-grid" id="features-section">
-        {FEATURES.map((f, i) => (
-          <div className="card feature-card" key={i}>
-            <div className="feature-icon">{f.icon}</div>
-            <h3>{f.title}</h3>
-            <p>{f.description}</p>
-          </div>
-        ))}
-      </section>
-    </>
+      <FadeIn delay={0.2}>
+        <h2
+          className="page-title"
+          style={{
+            fontSize: "1.25rem",
+            marginBottom: "1rem",
+            textAlign: "center",
+          }}
+        >
+          Capabilities
+        </h2>
+        <div id="features-section">
+          <StaggerList className="feature-grid">
+            {FEATURES.map((f) => {
+              const Icon = f.icon;
+              return (
+                <StaggerItem key={f.title}>
+                  <div className="card feature-card">
+                    <div
+                      className="feature-icon"
+                      style={{
+                        background: f.well,
+                        color: "var(--accent-primary)",
+                      }}
+                    >
+                      <Icon size={20} />
+                    </div>
+                    <h3>{f.title}</h3>
+                    <p>{f.description}</p>
+                  </div>
+                </StaggerItem>
+              );
+            })}
+          </StaggerList>
+        </div>
+      </FadeIn>
+    </PageMotion>
   );
 }

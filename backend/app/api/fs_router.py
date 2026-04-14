@@ -1,19 +1,23 @@
-"""FS Document API — upload, list, get, delete, parse."""
+"""FS Document API — upload, list, get, delete, parse, reset, section edit."""
 
+import hashlib
 import logging
 import shutil
 import uuid
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db.base import get_db
-from app.db.models import FSDocument, FSDocumentStatus, AuditEventType
+from app.db.models import FSDocument, FSDocumentStatus, FSVersion, AuditEventType
 from app.db.audit import log_audit_event
+from app.parsers.section_extractor import extract_sections_from_text, rebuild_text_from_sections
+from app.parsers.base import FSSection
 from app.models.schemas import (
     APIResponse,
     FSDocumentDetail,
@@ -21,6 +25,8 @@ from app.models.schemas import (
     FSDocumentResponse,
     FSSectionSchema,
     ParseResponse,
+    SectionAddRequest,
+    SectionEditRequest,
     UploadResponse,
 )
 
@@ -83,6 +89,7 @@ async def _save_file(file: UploadFile, doc_id: uuid.UUID) -> tuple[str, int]:
 @router.post("/upload", response_model=APIResponse[UploadResponse])
 async def upload_file(
     file: UploadFile = File(...),
+    project_id: Optional[str] = Query(None, description="Optional project ID to assign document to"),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[UploadResponse]:
     """Upload a PDF, DOCX, or TXT file."""
@@ -98,6 +105,23 @@ async def upload_file(
         logger.exception("Failed to save file: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to save uploaded file")
 
+    parsed_project_id = None
+    order_in_project = 0
+    if project_id:
+        try:
+            parsed_project_id = uuid.UUID(project_id)
+            from app.db.models import FSProject
+            from sqlalchemy import func
+            proj = (await db.execute(select(FSProject).where(FSProject.id == parsed_project_id))).scalar_one_or_none()
+            if not proj:
+                raise HTTPException(status_code=404, detail="Project not found")
+            max_order = (await db.execute(
+                select(func.max(FSDocument.order_in_project)).where(FSDocument.project_id == parsed_project_id)
+            )).scalar() or 0
+            order_in_project = max_order + 1
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid project_id format")
+
     doc = FSDocument(
         id=doc_id,
         filename=file.filename or "unknown",
@@ -105,6 +129,8 @@ async def upload_file(
         file_path=file_path,
         file_size=file_size,
         content_type=file.content_type,
+        project_id=parsed_project_id,
+        order_in_project=order_in_project,
     )
     db.add(doc)
     await db.flush()
@@ -154,7 +180,7 @@ async def get_document(
     doc_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[FSDocumentDetail]:
-    """Get a single document by ID."""
+    """Get a single document by ID, including reconstructed sections."""
     result = await db.execute(
         select(FSDocument).where(FSDocument.id == doc_id)
     )
@@ -163,9 +189,21 @@ async def get_document(
     if doc is None or doc.status == FSDocumentStatus.DELETED:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    return APIResponse(
-        data=FSDocumentDetail.model_validate(doc),
-    )
+    detail = FSDocumentDetail.model_validate(doc)
+
+    if doc.parsed_text:
+        extracted = extract_sections_from_text(doc.parsed_text)
+        logger.info("Extracted %d sections from parsed_text for doc %s", len(extracted), doc_id)
+        detail.sections = [
+            FSSectionSchema(
+                heading=s.heading,
+                content=s.content,
+                section_index=s.section_index,
+            )
+            for s in extracted
+        ]
+
+    return APIResponse(data=detail)
 
 
 @router.get("/{doc_id}/status")
@@ -209,6 +247,31 @@ async def delete_document(
     return APIResponse(
         data={"id": str(doc_id), "deleted": True},
     )
+
+
+@router.post("/{doc_id}/reset-status", response_model=APIResponse[dict])
+async def reset_document_status(
+    doc_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[dict]:
+    """Admin: reset a stuck document back to PARSED (or UPLOADED if never parsed)."""
+    result = await db.execute(
+        select(FSDocument).where(FSDocument.id == doc_id)
+    )
+    doc = result.scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    old_status = doc.status.value if hasattr(doc.status, "value") else str(doc.status)
+    if doc.parsed_text:
+        doc.status = FSDocumentStatus.PARSED
+    else:
+        doc.status = FSDocumentStatus.UPLOADED
+    await db.flush()
+
+    new_status = doc.status.value if hasattr(doc.status, "value") else str(doc.status)
+    logger.info("Reset document %s status: %s → %s", doc_id, old_status, new_status)
+    return APIResponse(data={"id": str(doc_id), "old_status": old_status, "new_status": new_status})
 
 
 @router.post("/{doc_id}/parse", response_model=APIResponse[ParseResponse])
@@ -281,3 +344,120 @@ async def parse_document_endpoint(
             "chunks": len(chunks),
         },
     )
+
+
+# ── Section Edit / Add Endpoints ───────────────────────
+
+
+async def _create_version_snapshot(doc: FSDocument, db: AsyncSession, summary: str) -> FSVersion:
+    """Create a version snapshot before editing."""
+    versions_result = await db.execute(
+        select(FSVersion)
+        .where(FSVersion.fs_id == doc.id)
+        .order_by(FSVersion.version_number.desc())
+    )
+    existing = versions_result.scalars().first()
+    next_num = (existing.version_number + 1) if existing else 1
+
+    version = FSVersion(
+        fs_id=doc.id,
+        version_number=next_num,
+        parsed_text=doc.parsed_text or "",
+        file_path=doc.file_path,
+        file_size=doc.file_size,
+        content_type=doc.content_type,
+        content_hash=hashlib.sha256((doc.parsed_text or "").encode()).hexdigest()[:32],
+        diff_summary=summary,
+    )
+    db.add(version)
+    return version
+
+
+@router.patch("/{doc_id}/sections/{section_index}", response_model=APIResponse[FSSectionSchema])
+async def edit_section(
+    doc_id: uuid.UUID,
+    section_index: int,
+    body: SectionEditRequest,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[FSSectionSchema]:
+    """Edit a section's heading or content in-place."""
+    result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if not doc.parsed_text:
+        raise HTTPException(status_code=400, detail="Document has no parsed text")
+
+    sections = extract_sections_from_text(doc.parsed_text)
+    if section_index < 0 or section_index >= len(sections):
+        raise HTTPException(status_code=404, detail=f"Section index {section_index} out of range (0-{len(sections)-1})")
+
+    old_heading = sections[section_index].heading
+    if body.heading is not None:
+        sections[section_index] = FSSection(
+            heading=body.heading,
+            content=sections[section_index].content,
+            section_index=section_index,
+        )
+    if body.content is not None:
+        sections[section_index] = FSSection(
+            heading=sections[section_index].heading,
+            content=body.content,
+            section_index=section_index,
+        )
+
+    await _create_version_snapshot(doc, db, f"Section '{old_heading}' edited")
+    doc.parsed_text = rebuild_text_from_sections(sections)
+    await log_audit_event(db, doc_id, AuditEventType.SECTION_EDITED, payload={
+        "section_index": section_index,
+        "section_heading": sections[section_index].heading,
+    })
+    await db.flush()
+
+    updated = sections[section_index]
+    return APIResponse(data=FSSectionSchema(
+        heading=updated.heading,
+        content=updated.content,
+        section_index=updated.section_index,
+    ))
+
+
+@router.post("/{doc_id}/sections", response_model=APIResponse[FSSectionSchema])
+async def add_section(
+    doc_id: uuid.UUID,
+    body: SectionAddRequest,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[FSSectionSchema]:
+    """Add a new section to the document."""
+    result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    sections = extract_sections_from_text(doc.parsed_text or "")
+
+    insert_idx = len(sections)
+    if body.insert_after is not None and 0 <= body.insert_after < len(sections):
+        insert_idx = body.insert_after + 1
+
+    new_section = FSSection(heading=body.heading, content=body.content, section_index=insert_idx)
+    sections.insert(insert_idx, new_section)
+
+    for i, s in enumerate(sections):
+        sections[i] = FSSection(heading=s.heading, content=s.content, section_index=i)
+
+    await _create_version_snapshot(doc, db, f"Section '{body.heading}' added")
+    doc.parsed_text = rebuild_text_from_sections(sections)
+    if doc.status == FSDocumentStatus.UPLOADED:
+        doc.status = FSDocumentStatus.PARSED
+    await log_audit_event(db, doc_id, AuditEventType.SECTION_ADDED, payload={
+        "heading": body.heading,
+        "insert_index": insert_idx,
+    })
+    await db.flush()
+
+    return APIResponse(data=FSSectionSchema(
+        heading=new_section.heading,
+        content=new_section.content,
+        section_index=insert_idx,
+    ))

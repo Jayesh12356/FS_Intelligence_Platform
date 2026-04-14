@@ -20,47 +20,47 @@ logger = logging.getLogger(__name__)
 
 # ── Compliance Detection Prompt ─────────────────────────
 
-COMPLIANCE_SYSTEM_PROMPT = """You are an expert compliance analyst reviewing Functional Specification (FS) documents.
+COMPLIANCE_SYSTEM_PROMPT = """You are a compliance officer reviewing Functional Specifications for regulatory and security risk. You tag sections that require special implementation attention due to legal, financial, or data-protection obligations.
 
-Your task is to identify sections that involve compliance-relevant areas. Tag sections that mention or involve:
+TASK: Identify which compliance domains this section touches. Apply tags ONLY when the section contains concrete functionality in that domain — not when it merely mentions a term in passing.
 
-1. **payments** — Payment processing, billing, charges, refunds, financial transactions
-2. **auth** — Authentication, authorization, access control, login, sessions, tokens, roles
-3. **pii** — Personally Identifiable Information: names, emails, phone numbers, addresses, SSNs, health data
-4. **external_api** — Integration with external/third-party APIs, webhooks, external services
-5. **security** — Encryption, data protection, vulnerability handling, SSL/TLS, firewall rules
-6. **data_retention** — Data storage duration, deletion policies, archival, backup procedures
+TAG DEFINITIONS (apply only when the section describes actionable requirements):
 
-For each compliance tag, provide:
-- The tag category (one of: payments, auth, pii, external_api, security, data_retention)
-- A brief reason explaining why this section is tagged
+1. "payments" — Processes, transmits, or stores monetary transactions: charges, refunds, invoicing, billing cycles, payment method storage, financial reconciliation. Triggers PCI-DSS considerations.
+2. "auth" — Implements authentication (login, MFA, SSO, token issuance) or authorization (role checks, permission gates, session management, access control lists). Triggers identity security review.
+3. "pii" — Collects, stores, processes, or transmits Personally Identifiable Information: names, emails, phone numbers, addresses, national IDs, health records, biometric data, location data. Triggers GDPR/CCPA/HIPAA considerations.
+4. "external_api" — Integrates with third-party services: REST/SOAP calls, webhooks, OAuth flows with external providers, data exchange with partner systems. Triggers vendor dependency and SLA review.
+5. "security" — Implements cryptographic operations (encryption at rest/transit, hashing, key management), vulnerability handling, input sanitization, CORS/CSP policies, firewall rules, or intrusion detection.
+6. "data_retention" — Defines how long data is kept, when it is deleted, archival procedures, backup/restore policies, right-to-erasure flows, or audit log retention periods.
 
-Return your analysis as a JSON array. If no compliance areas detected, return an empty array [].
+PRECISION RULES:
+- Tag only when the section describes FUNCTIONAL requirements in that domain, not when it references the domain abstractly
+- A section can have MULTIPLE tags if it crosses domains (e.g., a user registration form is both "auth" and "pii")
+- "reason" must cite the SPECIFIC text or functionality that triggers the tag
 
-Example output format:
-```json
+Return a JSON array. Empty [] if the section has no compliance-relevant functionality.
+
+Example:
 [
   {
-    "tag": "payments",
-    "reason": "Section describes payment gateway integration and refund processing logic."
+    "tag": "pii",
+    "reason": "Section requires collecting user's full name, email, and phone number during registration and storing them in the user profile database."
   },
   {
-    "tag": "pii",
-    "reason": "Section references user email addresses and phone numbers for notifications."
+    "tag": "auth",
+    "reason": "Section specifies JWT-based session management with refresh tokens and role-based access control for admin vs. regular users."
   }
 ]
-```
 
-IMPORTANT: Return ONLY a valid JSON array. No markdown, no explanations outside the JSON."""
+Return ONLY a valid JSON array. No markdown fences, no prose outside the array."""
 
-COMPLIANCE_USER_PROMPT = """Analyze the following FS document section for compliance-relevant areas:
+COMPLIANCE_USER_PROMPT = """Determine which compliance domains this section's requirements fall under. Tag only domains where the section describes concrete, implementable functionality — not passing references.
 
-## Section: {heading}
+Section: "{heading}"
 
 {content}
 
----
-Return a JSON array of compliance tags. If no compliance areas detected, return []."""
+Return a JSON array of compliance tags. If no compliance-relevant functionality is described, return []."""
 
 # Valid compliance tag values
 VALID_TAGS = {"payments", "auth", "pii", "external_api", "security", "data_retention"}
@@ -167,22 +167,33 @@ def compute_quality_score(
             overall=100.0,
         )
 
+    valid_range = set(range(total_sections))
+
     # Clarity: % of sections without ambiguities
     sections_with_ambiguities = set()
     for amb in ambiguities:
-        sections_with_ambiguities.add(amb.get("section_index", -1))
+        idx = amb.get("section_index", -1)
+        if idx in valid_range:
+            sections_with_ambiguities.add(idx)
     clarity = ((total_sections - len(sections_with_ambiguities)) / total_sections) * 100.0
 
     # Completeness: % of sections without edge case gaps
     sections_with_gaps = set()
     for gap in edge_cases:
-        sections_with_gaps.add(gap.get("section_index", -1))
+        idx = gap.get("section_index", -1)
+        if idx in valid_range:
+            sections_with_gaps.add(idx)
     completeness = ((total_sections - len(sections_with_gaps)) / total_sections) * 100.0
 
     # Consistency: based on contradiction rate
     max_pairs = total_sections * (total_sections - 1) / 2 if total_sections > 1 else 1
     contradiction_rate = len(contradictions) / max_pairs if max_pairs > 0 else 0
-    consistency = max(0.0, (1.0 - contradiction_rate) * 100.0)
+    consistency = (1.0 - contradiction_rate) * 100.0
+
+    # Clamp all sub-scores to [0, 100]
+    completeness = max(0.0, min(100.0, completeness))
+    clarity = max(0.0, min(100.0, clarity))
+    consistency = max(0.0, min(100.0, consistency))
 
     # Overall weighted average
     overall = (
@@ -190,6 +201,7 @@ def compute_quality_score(
         + WEIGHT_CLARITY * clarity
         + WEIGHT_CONSISTENCY * consistency
     )
+    overall = max(0.0, min(100.0, overall))
 
     return FSQualityScore(
         completeness=round(completeness, 1),

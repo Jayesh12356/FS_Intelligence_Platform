@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     EMBEDDING_PROVIDER: str = "openai"  # openai | groq | openrouter
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     PRIMARY_MODEL: str = "claude-sonnet-4-20250514"
+    REASONING_MODEL: str = ""
+    BUILD_MODEL: str = ""
+    LONGCONTEXT_MODEL: str = ""
+    FALLBACK_MODEL: str = ""
 
     # ── App ─────────────────────────────────────────────
     ENVIRONMENT: str = "local"

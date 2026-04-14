@@ -29,6 +29,8 @@ class FSDocumentResponse(BaseModel):
     status: str
     file_size: Optional[int] = None
     content_type: Optional[str] = None
+    project_id: Optional[UUID] = None
+    order_in_project: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -193,6 +195,29 @@ class QualityDashboardResponse(BaseModel):
     compliance_tags: List[ComplianceTagSchema]
 
 
+class RefinementSuggestionSchema(BaseModel):
+    issue: str
+    original: str
+    refined: str
+
+
+class RefinementDiffLineSchema(BaseModel):
+    line: str
+
+
+class RefinementResponse(BaseModel):
+    original_score: float
+    refined_score: float
+    changes_made: int
+    refined_text: str
+    diff: List[RefinementDiffLineSchema]
+    suggestions: List[RefinementSuggestionSchema]
+
+
+class AcceptRefinementRequest(BaseModel):
+    refined_text: str
+
+
 # ── Health Schemas ─────────────────────────────────────
 
 
@@ -226,6 +251,7 @@ class FSTaskSchema(BaseModel):
     acceptance_criteria: List[str] = []
     effort: str  # LOW, MEDIUM, HIGH, UNKNOWN
     tags: List[str] = []
+    status: str = "PENDING"
     order: int = 0
     can_parallel: bool = False
 
@@ -653,6 +679,79 @@ class ReportExportResponse(BaseModel):
 
 
 # ── MCP Monitoring Schemas ─────────────────────────────
+
+
+# ── Project Schemas ─────────────────────────────────────
+
+
+class FSProjectCreateRequest(BaseModel):
+    """Request to create a new project."""
+    name: str
+    description: Optional[str] = None
+
+
+class FSProjectUpdateRequest(BaseModel):
+    """Request to update a project."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class FSProjectSchema(BaseModel):
+    """A project grouping related FS documents."""
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    document_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class FSProjectDetailSchema(FSProjectSchema):
+    """Project with documents list."""
+    documents: List[FSDocumentResponse] = []
+
+
+class FSProjectListResponse(BaseModel):
+    """List of projects."""
+    projects: List[FSProjectSchema]
+    total: int
+
+
+# ── Section Edit Schemas ───────────────────────────────
+
+
+class SectionEditRequest(BaseModel):
+    """Request to edit a section in a document."""
+    heading: Optional[str] = None
+    content: Optional[str] = None
+
+
+class SectionAddRequest(BaseModel):
+    """Request to add a new section to a document."""
+    heading: str
+    content: str
+    insert_after: Optional[int] = None
+
+
+# ── Activity Log Schemas ───────────────────────────────
+
+
+class ActivityLogEntry(BaseModel):
+    """A single entry in the global activity log."""
+    id: Optional[UUID] = None
+    fs_id: UUID
+    document_name: str = ""
+    event_type: str
+    event_label: str = ""
+    detail: Optional[str] = None
+    user_id: str = "system"
+    created_at: Optional[datetime] = None
+
+
+class ActivityLogResponse(BaseModel):
+    """Response for the global activity log."""
+    events: List[ActivityLogEntry]
+    total: int
 
 
 class MCPSessionCreateRequest(BaseModel):

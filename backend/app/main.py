@@ -84,6 +84,10 @@ from app.api.audit_router import router as audit_router  # noqa: E402
 # L10 routers
 from app.api.export_router import router as export_router  # noqa: E402
 from app.api.mcp_router import router as mcp_router  # noqa: E402
+from app.api.build_router import router as build_router  # noqa: E402
+# New feature routers
+from app.api.activity_router import router as activity_router  # noqa: E402
+from app.api.project_router import router as project_router  # noqa: E402
 
 app.include_router(fs_router)
 app.include_router(health_router)
@@ -100,6 +104,10 @@ app.include_router(audit_router)
 # L10
 app.include_router(export_router)
 app.include_router(mcp_router)
+app.include_router(build_router)
+# New features
+app.include_router(activity_router)
+app.include_router(project_router)
 
 
 @app.get("/")

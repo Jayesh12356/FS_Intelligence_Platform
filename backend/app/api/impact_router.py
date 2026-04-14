@@ -349,6 +349,47 @@ async def list_versions(
     )
 
 
+@router.get("/{doc_id}/versions/{version_id}/text")
+async def get_version_text(
+    doc_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the full text of a specific version."""
+    result = await db.execute(
+        select(FSVersion).where(FSVersion.id == version_id, FSVersion.fs_id == doc_id)
+    )
+    version = result.scalar_one_or_none()
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+    return {"data": {"id": str(version.id), "version_number": version.version_number, "parsed_text": version.parsed_text or ""}}
+
+
+@router.post("/{doc_id}/versions/{version_id}/revert")
+async def revert_to_version(
+    doc_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Revert document text to a specific version."""
+    ver_result = await db.execute(
+        select(FSVersion).where(FSVersion.id == version_id, FSVersion.fs_id == doc_id)
+    )
+    version = ver_result.scalar_one_or_none()
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
+    doc = doc_result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    doc.parsed_text = version.parsed_text
+    doc.status = FSDocumentStatus.PARSED
+    await db.commit()
+    return {"data": {"reverted": True, "version_number": version.version_number}}
+
+
 # ── Version Diff ────────────────────────────────────────
 
 

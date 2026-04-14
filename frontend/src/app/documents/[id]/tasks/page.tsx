@@ -3,24 +3,49 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { listTasks, getDependencyGraph, getTraceability } from "@/lib/api";
+import type { FSTaskItem, DependencyGraphData, TraceabilityData } from "@/lib/api";
 import {
-  listTasks,
-  getDependencyGraph,
-  getTraceability,
-} from "@/lib/api";
-import type {
-  FSTaskItem,
-  DependencyGraphData,
-  TraceabilityData,
-} from "@/lib/api";
+  PageShell,
+  KpiCard,
+  Tabs,
+  FadeIn,
+  StaggerList,
+  StaggerItem,
+  EmptyState,
+} from "@/components/index";
+import Badge from "@/components/Badge";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  ListTodo,
+  CheckCircle2,
+  Clock,
+  AlertTriangle,
+  ChevronDown,
+  Zap,
+  Flame,
+  HelpCircle,
+  GitBranch,
+  Table,
+} from "lucide-react";
 
-// ── Config ─────────────────────────────────────────────
+type EffortKey = "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
 
-const effortConfig = {
-  LOW: { color: "#22c55e", bg: "#22c55e18", label: "⚡ Low", border: "#22c55e44" },
-  MEDIUM: { color: "#f59e0b", bg: "#f59e0b18", label: "⏱️ Medium", border: "#f59e0b44" },
-  HIGH: { color: "#ef4444", bg: "#ef444418", label: "🔥 High", border: "#ef444444" },
-  UNKNOWN: { color: "#6b7280", bg: "#6b728018", label: "❓ Unknown", border: "#6b728044" },
+const effortConfig: Record<
+  EffortKey,
+  {
+    color: string;
+    bg: string;
+    label: string;
+    border: string;
+    variant: "success" | "warning" | "error" | "neutral";
+    Icon: typeof Zap;
+  }
+> = {
+  LOW: { color: "#22c55e", bg: "#22c55e18", label: "Low", border: "#22c55e44", variant: "success", Icon: Zap },
+  MEDIUM: { color: "#f59e0b", bg: "#f59e0b18", label: "Medium", border: "#f59e0b44", variant: "warning", Icon: Clock },
+  HIGH: { color: "#ef4444", bg: "#ef444418", label: "High", border: "#ef444444", variant: "error", Icon: Flame },
+  UNKNOWN: { color: "#6b7280", bg: "#6b728018", label: "Unknown", border: "#6b728044", variant: "neutral", Icon: HelpCircle },
 };
 
 const tagColors: Record<string, { bg: string; color: string }> = {
@@ -37,8 +62,6 @@ const tagColors: Record<string, { bg: string; color: string }> = {
   performance: { bg: "#f4735618", color: "#f47356" },
 };
 
-// ── Task Card Component ────────────────────────────────
-
 function TaskCard({
   task,
   isExpanded,
@@ -51,269 +74,285 @@ function TaskCard({
   allTasks: FSTaskItem[];
 }) {
   const eff = effortConfig[task.effort] || effortConfig.UNKNOWN;
-
-  // Resolve dependency titles
+  const EffIcon = eff.Icon;
   const depTitles = task.depends_on
     .map((id) => allTasks.find((t) => t.task_id === id))
-    .filter(Boolean);
+    .filter(Boolean) as FSTaskItem[];
 
   return (
     <div
+      className="card overflow-hidden"
       style={{
-        background: "var(--bg-card)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: "12px",
-        overflow: "hidden",
-        transition: "all 0.2s ease",
+        padding: 0,
         borderLeft: `4px solid ${eff.color}`,
       }}
     >
-      {/* Header */}
-      <div
+      <button
+        type="button"
         onClick={onToggle}
         style={{
+          width: "100%",
+          textAlign: "left",
           padding: "16px 20px",
-          cursor: "pointer",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
           gap: "12px",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          color: "inherit",
+          font: "inherit",
         }}
       >
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "10px",
-            marginBottom: "6px",
-            flexWrap: "wrap",
-          }}>
-            <span style={{
-              fontSize: "0.72rem",
-              fontWeight: 700,
-              color: "var(--text-muted)",
-              background: "var(--bg-tertiary)",
-              padding: "2px 8px",
-              borderRadius: "4px",
-              fontFamily: "monospace",
-            }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              marginBottom: "6px",
+              flexWrap: "wrap",
+            }}
+          >
+            <span
+              style={{
+                fontSize: "0.72rem",
+                fontWeight: 700,
+                color: "var(--text-muted)",
+                background: "var(--bg-tertiary)",
+                padding: "2px 8px",
+                borderRadius: "4px",
+                fontFamily: "monospace",
+              }}
+            >
               #{task.order + 1}
             </span>
-            <h3 style={{
-              fontSize: "0.95rem",
-              fontWeight: 600,
-              color: "var(--text-primary)",
-              margin: 0,
-            }}>
+            <h3
+              style={{
+                fontSize: "0.95rem",
+                fontWeight: 600,
+                color: "var(--text-primary)",
+                margin: 0,
+              }}
+            >
               {task.title}
             </h3>
           </div>
-          <div style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            flexWrap: "wrap",
-          }}>
-            {/* Effort badge */}
-            <span style={{
-              padding: "2px 10px",
-              borderRadius: "8px",
-              fontSize: "0.72rem",
-              fontWeight: 600,
-              background: eff.bg,
-              color: eff.color,
-              border: `1px solid ${eff.border}`,
-            }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              flexWrap: "wrap",
+            }}
+          >
+            <Badge
+              variant={eff.variant}
+              style={{
+                background: eff.bg,
+                color: eff.color,
+                border: `1px solid ${eff.border}`,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <EffIcon size={12} strokeWidth={2.5} aria-hidden />
               {eff.label}
+            </Badge>
+            <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 500 }}>
+              Section {task.section_index + 1} · {task.section_heading}
             </span>
-            {/* Source section */}
-            <span style={{
-              fontSize: "0.75rem",
-              color: "var(--text-muted)",
-              fontWeight: 500,
-            }}>
-              §{task.section_index + 1} · {task.section_heading}
-            </span>
-            {/* Parallel badge */}
             {task.can_parallel && (
-              <span style={{
-                padding: "2px 8px",
-                borderRadius: "8px",
-                fontSize: "0.68rem",
-                fontWeight: 600,
-                background: "rgba(99, 102, 241, 0.1)",
-                color: "#6366f1",
-                border: "1px solid rgba(99, 102, 241, 0.3)",
-              }}>
-                ∥ Parallel
-              </span>
+              <Badge variant="accent">Parallel</Badge>
             )}
-            {/* Dependency count */}
             {task.depends_on.length > 0 && (
-              <span style={{
-                fontSize: "0.72rem",
-                color: "var(--text-muted)",
-              }}>
-                🔗 {task.depends_on.length} dep{task.depends_on.length > 1 ? "s" : ""}
+              <span
+                style={{
+                  fontSize: "0.72rem",
+                  color: "var(--text-muted)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                <GitBranch size={12} aria-hidden />
+                {task.depends_on.length} dep{task.depends_on.length > 1 ? "s" : ""}
               </span>
             )}
           </div>
         </div>
-        {/* Tags */}
-        <div style={{
-          display: "flex",
-          gap: "4px",
-          flexWrap: "wrap",
-          justifyContent: "flex-end",
-          maxWidth: "200px",
-        }}>
+        <div
+          style={{
+            display: "flex",
+            gap: "4px",
+            flexWrap: "wrap",
+            justifyContent: "flex-end",
+            maxWidth: "200px",
+          }}
+        >
           {task.tags.slice(0, 4).map((tag) => {
-            const tc = tagColors[tag] || { bg: "var(--bg-tertiary)", color: "var(--text-muted)" };
+            const tc = tagColors[tag] || {
+              bg: "var(--bg-tertiary)",
+              color: "var(--text-muted)",
+            };
             return (
-              <span
+              <Badge
                 key={tag}
+                variant="neutral"
                 style={{
-                  padding: "2px 8px",
-                  borderRadius: "6px",
-                  fontSize: "0.68rem",
-                  fontWeight: 600,
                   background: tc.bg,
                   color: tc.color,
+                  border: `1px solid ${tc.color}33`,
                 }}
               >
                 {tag}
-              </span>
+              </Badge>
             );
           })}
         </div>
-        {/* Expand icon */}
-        <span style={{
-          fontSize: "1.2rem",
-          color: "var(--text-muted)",
-          transition: "transform 0.2s ease",
-          transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)",
-        }}>
-          ▾
-        </span>
-      </div>
+        <motion.span
+          animate={{ rotate: isExpanded ? 180 : 0 }}
+          transition={{ duration: 0.2 }}
+          style={{ display: "flex", color: "var(--text-muted)", flexShrink: 0 }}
+          aria-hidden
+        >
+          <ChevronDown size={20} />
+        </motion.span>
+      </button>
 
-      {/* Expanded content */}
-      {isExpanded && (
-        <div style={{
-          padding: "0 20px 20px",
-          borderTop: "1px solid var(--border-subtle)",
-          paddingTop: "16px",
-        }}>
-          {/* Description */}
-          <div style={{ marginBottom: "16px" }}>
-            <h4 style={{
-              fontSize: "0.78rem",
-              fontWeight: 700,
-              color: "var(--text-muted)",
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              marginBottom: "6px",
-            }}>
-              Description
-            </h4>
-            <p style={{
-              fontSize: "0.88rem",
-              color: "var(--text-secondary)",
-              lineHeight: 1.7,
-              margin: 0,
-            }}>
-              {task.description}
-            </p>
-          </div>
-
-          {/* Acceptance Criteria */}
-          {task.acceptance_criteria.length > 0 && (
-            <div style={{ marginBottom: "16px" }}>
-              <h4 style={{
-                fontSize: "0.78rem",
-                fontWeight: 700,
-                color: "var(--text-muted)",
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                marginBottom: "8px",
-              }}>
-                Acceptance Criteria
-              </h4>
-              <ul style={{
-                margin: 0,
-                paddingLeft: "20px",
-                display: "flex",
-                flexDirection: "column",
-                gap: "6px",
-              }}>
-                {task.acceptance_criteria.map((ac, i) => (
-                  <li key={i} style={{
-                    fontSize: "0.85rem",
+      <AnimatePresence initial={false}>
+        {isExpanded && (
+          <motion.div
+            key="expanded"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
+            style={{ overflow: "hidden", borderTop: "1px solid var(--border-subtle)" }}
+          >
+            <div style={{ padding: "16px 20px 20px" }}>
+              <div style={{ marginBottom: "16px" }}>
+                <h4
+                  style={{
+                    fontSize: "0.78rem",
+                    fontWeight: 700,
+                    color: "var(--text-muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    marginBottom: "6px",
+                  }}
+                >
+                  Description
+                </h4>
+                <p
+                  style={{
+                    fontSize: "0.88rem",
                     color: "var(--text-secondary)",
-                    lineHeight: 1.5,
-                  }}>
-                    {ac}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Dependencies */}
-          {depTitles.length > 0 && (
-            <div>
-              <h4 style={{
-                fontSize: "0.78rem",
-                fontWeight: 700,
-                color: "var(--text-muted)",
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                marginBottom: "8px",
-              }}>
-                Depends On
-              </h4>
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                {depTitles.map((dep) =>
-                  dep ? (
-                    <div
-                      key={dep.task_id}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        padding: "6px 12px",
-                        background: "var(--bg-tertiary)",
-                        borderRadius: "8px",
-                        fontSize: "0.82rem",
-                        color: "var(--text-secondary)",
-                      }}
-                    >
-                      <span style={{
-                        fontFamily: "monospace",
-                        fontSize: "0.72rem",
-                        color: "var(--text-muted)",
-                        background: "var(--bg-card)",
-                        padding: "1px 6px",
-                        borderRadius: "4px",
-                      }}>
-                        #{dep.order + 1}
-                      </span>
-                      {dep.title}
-                    </div>
-                  ) : null
-                )}
+                    lineHeight: 1.7,
+                    margin: 0,
+                  }}
+                >
+                  {task.description}
+                </p>
               </div>
+
+              {task.acceptance_criteria.length > 0 && (
+                <div style={{ marginBottom: "16px" }}>
+                  <h4
+                    style={{
+                      fontSize: "0.78rem",
+                      fontWeight: 700,
+                      color: "var(--text-muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Acceptance Criteria
+                  </h4>
+                  <ul
+                    style={{
+                      margin: 0,
+                      paddingLeft: "20px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                    }}
+                  >
+                    {task.acceptance_criteria.map((ac, i) => (
+                      <li
+                        key={i}
+                        style={{
+                          fontSize: "0.85rem",
+                          color: "var(--text-secondary)",
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {ac}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {depTitles.length > 0 && (
+                <div>
+                  <h4
+                    style={{
+                      fontSize: "0.78rem",
+                      fontWeight: 700,
+                      color: "var(--text-muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Depends On
+                  </h4>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    {depTitles.map((dep) => (
+                      <div
+                        key={dep.task_id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          padding: "6px 12px",
+                          background: "var(--bg-tertiary)",
+                          borderRadius: "8px",
+                          fontSize: "0.82rem",
+                          color: "var(--text-secondary)",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontFamily: "monospace",
+                            fontSize: "0.72rem",
+                            color: "var(--text-muted)",
+                            background: "var(--bg-card)",
+                            padding: "1px 6px",
+                            borderRadius: "4px",
+                          }}
+                        >
+                          #{dep.order + 1}
+                        </span>
+                        {dep.title}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-// ── Dependency Tree Component ──────────────────────────
-
-function DependencyTree({
+function DependencyGraphList({
   graph,
   tasks,
 }: {
@@ -321,131 +360,158 @@ function DependencyTree({
   tasks: FSTaskItem[];
 }) {
   const taskMap = new Map(tasks.map((t) => [t.task_id, t]));
-
-  // Group by depth level
-  const depths = new Map<string, number>();
-
-  function getDepth(nodeId: string): number {
-    if (depths.has(nodeId)) return depths.get(nodeId)!;
-    const deps = graph.adjacency[nodeId] || [];
-    const validDeps = deps.filter((d) => graph.nodes.includes(d));
-    const d = validDeps.length === 0 ? 0 : Math.max(...validDeps.map(getDepth)) + 1;
-    depths.set(nodeId, d);
-    return d;
-  }
-
-  graph.nodes.forEach(getDepth);
-
-  // Group nodes by depth
-  const levels = new Map<number, string[]>();
-  depths.forEach((depth, nodeId) => {
-    if (!levels.has(depth)) levels.set(depth, []);
-    levels.get(depth)!.push(nodeId);
-  });
-
-  const sortedLevels = Array.from(levels.entries()).sort((a, b) => a[0] - b[0]);
+  const nodeSet = new Set(graph.nodes);
+  const rows = graph.nodes
+    .map((id) => taskMap.get(id))
+    .filter((t): t is FSTaskItem => Boolean(t))
+    .sort((a, b) => a.order - b.order);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-      {sortedLevels.map(([level, nodeIds]) => (
-        <div key={level}>
-          <div style={{
-            fontSize: "0.72rem",
-            fontWeight: 700,
-            color: "var(--text-muted)",
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-            marginBottom: "8px",
-          }}>
-            Level {level + 1}
-            {level === 0 && " (No dependencies)"}
-          </div>
-          <div style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "8px",
-          }}>
-            {nodeIds.map((nodeId) => {
-              const task = taskMap.get(nodeId);
-              if (!task) return null;
-              const eff = effortConfig[task.effort] || effortConfig.UNKNOWN;
-              return (
+    <ul
+      style={{
+        listStyle: "none",
+        padding: 0,
+        margin: 0,
+        display: "flex",
+        flexDirection: "column",
+        gap: "12px",
+      }}
+    >
+      {rows.map((task) => {
+        const depIds = (graph.adjacency[task.task_id] || []).filter((id) => nodeSet.has(id));
+        const depTasks = depIds
+          .map((id) => taskMap.get(id))
+          .filter((t): t is FSTaskItem => Boolean(t));
+
+        return (
+          <li key={task.task_id}>
+            <div className="card" style={{ padding: "1rem 1.25rem" }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
                 <div
-                  key={nodeId}
                   style={{
-                    background: "var(--bg-card)",
-                    border: `1px solid ${eff.border}`,
-                    borderRadius: "10px",
-                    padding: "10px 14px",
-                    minWidth: "200px",
-                    maxWidth: "320px",
-                    borderLeft: `3px solid ${eff.color}`,
+                    width: 3,
+                    alignSelf: "stretch",
+                    minHeight: 24,
+                    borderRadius: 2,
+                    background: "var(--accent-primary)",
+                    opacity: 0.45,
+                    flexShrink: 0,
                   }}
-                >
-                  <div style={{
-                    fontSize: "0.82rem",
-                    fontWeight: 600,
-                    color: "var(--text-primary)",
-                    marginBottom: "4px",
-                  }}>
+                  aria-hidden
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: "0.9rem", fontWeight: 600, color: "var(--text-primary)" }}>
                     #{task.order + 1} · {task.title}
                   </div>
-                  <div style={{
-                    display: "flex",
-                    gap: "6px",
-                    alignItems: "center",
-                    fontSize: "0.72rem",
-                    color: "var(--text-muted)",
-                  }}>
-                    <span style={{
-                      padding: "1px 6px",
-                      borderRadius: "4px",
-                      background: eff.bg,
-                      color: eff.color,
-                      fontWeight: 600,
-                    }}>
-                      {eff.label}
-                    </span>
-                    {task.depends_on.length > 0 && (
-                      <span>→ depends on {task.depends_on.length}</span>
-                    )}
-                    {task.can_parallel && <span>∥</span>}
-                  </div>
+                  {depTasks.length > 0 ? (
+                    <div
+                      style={{
+                        marginTop: "12px",
+                        paddingLeft: "14px",
+                        borderLeft: "2px solid var(--border-subtle)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: "0.72rem",
+                          fontWeight: 700,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.05em",
+                          color: "var(--text-muted)",
+                          marginBottom: "8px",
+                        }}
+                      >
+                        Dependencies
+                      </div>
+                      <ul
+                        style={{
+                          listStyle: "none",
+                          padding: 0,
+                          margin: 0,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "6px",
+                        }}
+                      >
+                        {depTasks.map((d) => (
+                          <li
+                            key={d.task_id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              fontSize: "0.84rem",
+                              color: "var(--text-secondary)",
+                              paddingLeft: 4,
+                              borderLeft: "2px solid var(--border-subtle)",
+                              marginLeft: 2,
+                            }}
+                          >
+                            <GitBranch size={14} style={{ opacity: 0.55, flexShrink: 0 }} aria-hidden />
+                            <span style={{ fontFamily: "monospace", fontSize: "0.72rem", color: "var(--text-muted)" }}>
+                              #{d.order + 1}
+                            </span>
+                            {d.title}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <p style={{ margin: "8px 0 0", fontSize: "0.8125rem", color: "var(--text-muted)" }}>
+                      No dependencies
+                    </p>
+                  )}
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-    </div>
+              </div>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
-
-// ── Main Page Component ────────────────────────────────
 
 export default function TaskBoardPage() {
   const params = useParams();
   const docId = params.id as string;
   const [tasks, setTasks] = useState<FSTaskItem[]>([]);
-  const [graph, setGraph] = useState<DependencyGraphData | null>(null);
+  const [depGraph, setDepGraph] = useState<DependencyGraphData | null>(null);
   const [traceability, setTraceability] = useState<TraceabilityData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedTasks, setExpandedTasks] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"tasks" | "dependencies" | "traceability">("tasks");
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const [taskRes, graphRes, traceRes] = await Promise.all([
+      const [tasksSettled, graphSettled, traceSettled] = await Promise.allSettled([
         listTasks(docId),
         getDependencyGraph(docId),
         getTraceability(docId),
       ]);
-      setTasks(taskRes.data.tasks);
-      setGraph(graphRes.data);
-      setTraceability(traceRes.data);
+
+      if (tasksSettled.status === "rejected") {
+        const err = tasksSettled.reason;
+        setError(err instanceof Error ? err.message : "Failed to load task data");
+        setTasks([]);
+        setDepGraph(null);
+        setTraceability(null);
+        return;
+      }
+
+      setTasks(tasksSettled.value.data.tasks ?? []);
+      if (graphSettled.status === "fulfilled") {
+        setDepGraph(graphSettled.value.data);
+      } else {
+        setDepGraph(null);
+      }
+      if (traceSettled.status === "fulfilled") {
+        setTraceability(traceSettled.value.data);
+      } else {
+        setTraceability(null);
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load task data");
     } finally {
@@ -466,238 +532,169 @@ export default function TaskBoardPage() {
     );
   }
 
-  if (error || tasks.length === 0) {
+  if (error) {
     return (
-      <div className="empty-state">
-        <div className="empty-state-icon">📋</div>
-        <h3>Task Board</h3>
-        <p>{error || "Run analysis first to generate dev tasks."}</p>
-        <Link href={`/documents/${docId}`} className="btn btn-secondary btn-sm">
-          ← Back to Document
-        </Link>
-      </div>
+      <PageShell backHref={`/documents/${docId}`} title="Task Board" maxWidth={960}>
+        <FadeIn>
+          <EmptyState
+            icon={<AlertTriangle size={40} strokeWidth={1.5} />}
+            title="Couldn’t load tasks"
+            description={error}
+            action={
+              <Link href={`/documents/${docId}`} className="btn btn-secondary btn-sm">
+                Back to Document
+              </Link>
+            }
+          />
+        </FadeIn>
+      </PageShell>
     );
   }
 
-  // Stats
-  const effortCounts = { LOW: 0, MEDIUM: 0, HIGH: 0, UNKNOWN: 0 };
-  tasks.forEach((t) => {
-    effortCounts[t.effort] = (effortCounts[t.effort] || 0) + 1;
-  });
-  const withDeps = tasks.filter((t) => t.depends_on.length > 0).length;
-  const parallelCount = tasks.filter((t) => t.can_parallel).length;
-
-  // Group traceability by section
-  const traceBySection = new Map<number, { heading: string; tasks: string[] }>();
-  if (traceability) {
-    traceability.entries.forEach((e) => {
-      if (!traceBySection.has(e.section_index)) {
-        traceBySection.set(e.section_index, { heading: e.section_heading, tasks: [] });
-      }
-      traceBySection.get(e.section_index)!.tasks.push(e.task_title);
-    });
+  if (tasks.length === 0) {
+    return (
+      <PageShell backHref={`/documents/${docId}`} title="Task Board" maxWidth={960}>
+        <FadeIn>
+          <EmptyState
+            icon={<ListTodo size={40} strokeWidth={1.5} />}
+            title="No tasks found"
+            description="Run analysis on this document first to generate tasks."
+            action={
+              <Link href={`/documents/${docId}`} className="btn btn-secondary btn-sm">
+                Go to document
+              </Link>
+            }
+          />
+        </FadeIn>
+      </PageShell>
+    );
   }
 
+  const readyCount = tasks.filter((t) => t.depends_on.length === 0).length;
+  const highEffortCount = tasks.filter((t) => t.effort === "HIGH").length;
+  const depEdgeCount = depGraph?.edges.length ?? 0;
+
+  const traceRows =
+    traceability?.entries.slice().sort((a, b) => {
+      if (a.section_index !== b.section_index) return a.section_index - b.section_index;
+      return a.task_title.localeCompare(b.task_title);
+    }) ?? [];
+
   return (
-    <div style={{ maxWidth: "960px" }}>
-      <Link href={`/documents/${docId}`} className="back-link">
-        ← Back to Document
-      </Link>
-
-      {/* Header */}
-      <div style={{ marginBottom: "2rem" }}>
-        <h1 style={{ fontSize: "1.8rem", fontWeight: 700, marginBottom: "0.25rem" }}>
-          📋 Task Board
-        </h1>
-        <p style={{ color: "var(--text-secondary)", fontSize: "0.95rem" }}>
-          {tasks.length} dev tasks decomposed from FS requirements
-        </p>
+    <PageShell
+      backHref={`/documents/${docId}`}
+      title="Task Board"
+      subtitle={`${tasks.length} dev tasks decomposed from FS requirements`}
+      maxWidth={960}
+    >
+      <div className="kpi-row">
+        <KpiCard
+          label="Total Tasks"
+          value={tasks.length}
+          icon={<ListTodo size={22} />}
+          iconBg="rgba(99, 102, 241, 0.2)"
+          delay={0}
+        />
+        <KpiCard
+          label="Completed (where task has no blockers)"
+          value={readyCount}
+          icon={<CheckCircle2 size={22} />}
+          iconBg="rgba(34, 197, 94, 0.2)"
+          delay={0.05}
+        />
+        <KpiCard
+          label="High Effort"
+          value={highEffortCount}
+          icon={<Flame size={22} />}
+          iconBg="rgba(239, 68, 68, 0.2)"
+          delay={0.1}
+        />
+        <KpiCard
+          label="Dependencies"
+          value={depEdgeCount}
+          icon={<GitBranch size={22} />}
+          iconBg="rgba(139, 92, 246, 0.2)"
+          delay={0.15}
+        />
       </div>
 
-      {/* Summary Stats */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-        gap: "1rem",
-        marginBottom: "2rem",
-      }}>
-        <div className="info-item" style={{ borderLeft: "3px solid #6366f1" }}>
-          <div className="info-label">Total Tasks</div>
-          <div className="info-value" style={{ color: "#6366f1" }}>{tasks.length}</div>
-        </div>
-        <div className="info-item" style={{ borderLeft: "3px solid #22c55e" }}>
-          <div className="info-label">Low Effort</div>
-          <div className="info-value" style={{ color: "#22c55e" }}>{effortCounts.LOW}</div>
-        </div>
-        <div className="info-item" style={{ borderLeft: "3px solid #f59e0b" }}>
-          <div className="info-label">Medium Effort</div>
-          <div className="info-value" style={{ color: "#f59e0b" }}>{effortCounts.MEDIUM}</div>
-        </div>
-        <div className="info-item" style={{ borderLeft: "3px solid #ef4444" }}>
-          <div className="info-label">High Effort</div>
-          <div className="info-value" style={{ color: "#ef4444" }}>{effortCounts.HIGH}</div>
-        </div>
-        <div className="info-item" style={{ borderLeft: "3px solid #8b5cf6" }}>
-          <div className="info-label">With Deps</div>
-          <div className="info-value" style={{ color: "#8b5cf6" }}>{withDeps}</div>
-        </div>
-        <div className="info-item" style={{ borderLeft: "3px solid #06b6d4" }}>
-          <div className="info-label">Parallel</div>
-          <div className="info-value" style={{ color: "#06b6d4" }}>{parallelCount}</div>
-        </div>
+      <div style={{ marginBottom: "1.5rem" }}>
+        <Tabs
+          items={[
+            { key: "tasks", label: "All Tasks", count: tasks.length },
+            { key: "dependencies", label: "Dependencies" },
+            { key: "traceability", label: "Traceability" },
+          ]}
+          active={activeTab}
+          onChange={(key) => setActiveTab(key as typeof activeTab)}
+        />
       </div>
 
-      {/* Export Placeholder */}
-      <div style={{
-        display: "flex",
-        gap: "10px",
-        marginBottom: "1.5rem",
-      }}>
-        <button
-          disabled
-          style={{
-            padding: "8px 20px",
-            borderRadius: "8px",
-            fontSize: "0.85rem",
-            fontWeight: 600,
-            background: "var(--bg-tertiary)",
-            color: "var(--text-muted)",
-            border: "1px solid var(--border-subtle)",
-            cursor: "not-allowed",
-            opacity: 0.6,
-          }}
-        >
-          📤 Export to JIRA (L10)
-        </button>
-      </div>
-
-      {/* Tabs */}
-      <div style={{
-        display: "flex",
-        gap: "0",
-        borderBottom: "1px solid var(--border-subtle)",
-        marginBottom: "1.5rem",
-      }}>
-        {[
-          { key: "tasks" as const, label: `📋 Tasks (${tasks.length})` },
-          { key: "dependencies" as const, label: `🔗 Dependencies` },
-          { key: "traceability" as const, label: `🗺️ Traceability` },
-        ].map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            style={{
-              padding: "10px 20px",
-              fontSize: "0.88rem",
-              fontWeight: 600,
-              background: "none",
-              border: "none",
-              borderBottom: activeTab === tab.key ? "2px solid var(--accent-primary)" : "2px solid transparent",
-              color: activeTab === tab.key ? "var(--accent-primary)" : "var(--text-secondary)",
-              cursor: "pointer",
-              transition: "all 0.2s ease",
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tasks Tab */}
       {activeTab === "tasks" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          {tasks.map((task) => (
-            <TaskCard
-              key={task.task_id}
-              task={task}
-              isExpanded={expandedId === task.task_id}
-              onToggle={() =>
-                setExpandedId(expandedId === task.task_id ? null : task.task_id)
-              }
-              allTasks={tasks}
+        <FadeIn>
+          <StaggerList style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {tasks.map((task) => (
+              <StaggerItem key={task.task_id}>
+                <TaskCard
+                  task={task}
+                  isExpanded={expandedTasks === task.task_id}
+                  onToggle={() =>
+                    setExpandedTasks(expandedTasks === task.task_id ? null : task.task_id)
+                  }
+                  allTasks={tasks}
+                />
+              </StaggerItem>
+            ))}
+          </StaggerList>
+        </FadeIn>
+      )}
+
+      {activeTab === "dependencies" && depGraph && (
+        <FadeIn>
+          {depGraph.edges.length === 0 ? (
+            <EmptyState
+              icon={<GitBranch size={40} strokeWidth={1.5} />}
+              title="No dependencies detected"
+              description="All tasks can be worked on independently."
             />
-          ))}
-        </div>
-      )}
-
-      {/* Dependencies Tab */}
-      {activeTab === "dependencies" && graph && (
-        <div>
-          {graph.edges.length === 0 ? (
-            <div className="empty-state" style={{ padding: "2rem" }}>
-              <div className="empty-state-icon">🔗</div>
-              <h3>No dependencies detected</h3>
-              <p>All tasks can be worked on independently.</p>
-            </div>
           ) : (
-            <DependencyTree graph={graph} tasks={tasks} />
+            <DependencyGraphList graph={depGraph} tasks={tasks} />
           )}
-        </div>
+        </FadeIn>
       )}
 
-      {/* Traceability Tab */}
       {activeTab === "traceability" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          {traceBySection.size === 0 ? (
-            <div className="empty-state" style={{ padding: "2rem" }}>
-              <div className="empty-state-icon">🗺️</div>
-              <h3>No traceability data</h3>
-              <p>Run analysis to generate the traceability matrix.</p>
-            </div>
+        <FadeIn>
+          {traceRows.length === 0 ? (
+            <EmptyState
+              icon={<Table size={40} strokeWidth={1.5} />}
+              title="No traceability data"
+              description="Run analysis to generate the traceability matrix."
+            />
           ) : (
-            Array.from(traceBySection.entries())
-              .sort((a, b) => a[0] - b[0])
-              .map(([sectionIdx, data]) => (
-                <div
-                  key={sectionIdx}
-                  style={{
-                    background: "var(--bg-card)",
-                    border: "1px solid var(--border-subtle)",
-                    borderRadius: "12px",
-                    padding: "16px 20px",
-                    borderLeft: "3px solid var(--accent-primary)",
-                  }}
-                >
-                  <h3 style={{
-                    fontSize: "0.9rem",
-                    fontWeight: 700,
-                    marginBottom: "10px",
-                    color: "var(--text-primary)",
-                  }}>
-                    §{sectionIdx + 1} · {data.heading}
-                  </h3>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                    {data.tasks.map((title, i) => (
-                      <div
-                        key={i}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          padding: "6px 12px",
-                          background: "var(--bg-tertiary)",
-                          borderRadius: "8px",
-                          fontSize: "0.84rem",
-                          color: "var(--text-secondary)",
-                        }}
-                      >
-                        <span style={{ color: "var(--text-muted)" }}>→</span>
-                        {title}
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{
-                    marginTop: "8px",
-                    fontSize: "0.72rem",
-                    color: "var(--text-muted)",
-                  }}>
-                    {data.tasks.length} task{data.tasks.length > 1 ? "s" : ""} from this section
-                  </div>
-                </div>
-              ))
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Section</th>
+                    <th>Section heading</th>
+                    <th>Task</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {traceRows.map((row) => (
+                    <tr key={`${row.task_id}-${row.section_index}`}>
+                      <td style={{ fontFamily: "monospace", fontSize: "0.8125rem" }}>{row.section_index + 1}</td>
+                      <td>{row.section_heading}</td>
+                      <td>{row.task_title}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-        </div>
+        </FadeIn>
       )}
-    </div>
+    </PageShell>
   );
 }

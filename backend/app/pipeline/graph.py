@@ -18,10 +18,17 @@ Usage:
     reverse = await run_reverse_pipeline(code_upload_id, snapshot)
 """
 
+import asyncio
+import hashlib
+import json
 import logging
-from typing import Any, Dict, List
+import uuid as _uuid_mod
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable, Dict, List
 
 from langgraph.graph import StateGraph, START, END
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.pipeline.state import FSAnalysisState, FSImpactState, ReverseGenState
 from app.pipeline.nodes.ambiguity_node import ambiguity_node
@@ -41,6 +48,64 @@ from app.pipeline.nodes.reverse_fs_node import reverse_fs_node
 from app.pipeline.nodes.reverse_quality_node import reverse_quality_node
 
 logger = logging.getLogger(__name__)
+
+
+# ── Analysis Progress Tracking (in-memory, per document) ─
+
+ANALYSIS_NODE_ORDER = [
+    "parse_node", "ambiguity_node", "debate_node", "contradiction_node",
+    "edge_case_node", "quality_node", "task_decomposition_node",
+    "dependency_node", "traceability_node", "duplicate_node", "testcase_node",
+]
+
+ANALYSIS_NODE_LABELS: dict[str, str] = {
+    "parse_node": "Loading Sections",
+    "ambiguity_node": "Detecting Ambiguities",
+    "debate_node": "Adversarial Debate",
+    "contradiction_node": "Cross-Reference Contradictions",
+    "edge_case_node": "Edge Case Analysis",
+    "quality_node": "Quality Scoring",
+    "task_decomposition_node": "Task Decomposition",
+    "dependency_node": "Dependency Mapping",
+    "traceability_node": "Traceability Matrix",
+    "duplicate_node": "Duplicate Detection",
+    "testcase_node": "Test Case Generation",
+}
+
+_analysis_progress: dict[str, dict] = {}
+
+
+def get_analysis_progress(fs_id: str) -> dict | None:
+    return _analysis_progress.get(fs_id)
+
+
+def _update_progress(fs_id: str, *, node: str, phase: str, log: str | None = None) -> None:
+    entry = _analysis_progress.setdefault(fs_id, {
+        "completed_nodes": [],
+        "current_node": None,
+        "total_nodes": len(ANALYSIS_NODE_ORDER),
+        "logs": [],
+    })
+    if phase == "start":
+        entry["current_node"] = node
+        msg = f"Started: {ANALYSIS_NODE_LABELS.get(node, node)}"
+    elif phase == "complete":
+        if node not in entry["completed_nodes"]:
+            entry["completed_nodes"].append(node)
+        entry["current_node"] = None
+        msg = f"Completed: {ANALYSIS_NODE_LABELS.get(node, node)}"
+    elif phase == "cached":
+        if node not in entry["completed_nodes"]:
+            entry["completed_nodes"].append(node)
+        entry["current_node"] = None
+        msg = f"Cached: {ANALYSIS_NODE_LABELS.get(node, node)}"
+    else:
+        msg = log or phase
+
+    ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+    entry["logs"].append(f"[{ts}] {msg}")
+    if len(entry["logs"]) > 100:
+        entry["logs"] = entry["logs"][-80:]
 
 
 # ── Parse Node (populates sections into state) ──────────
@@ -200,24 +265,171 @@ def get_compiled_reverse_graph():
     return _compiled_reverse_graph
 
 
+def _compute_input_hash(node_name: str, state: dict) -> str:
+    """Hash the relevant input fields for a given node to detect changes."""
+    keys_by_node: dict[str, list[str]] = {
+        "parse_node": ["fs_id", "parsed_sections"],
+        "ambiguity_node": ["parsed_sections"],
+        "debate_node": ["ambiguities"],
+        "contradiction_node": ["parsed_sections"],
+        "edge_case_node": ["parsed_sections"],
+        "quality_node": ["ambiguities", "contradictions", "edge_cases", "parsed_sections"],
+        "task_decomposition_node": ["parsed_sections", "ambiguities"],
+        "dependency_node": ["tasks"],
+        "traceability_node": ["tasks", "parsed_sections"],
+        "duplicate_node": ["fs_id", "parsed_sections"],
+        "testcase_node": ["tasks", "fs_id"],
+    }
+    relevant_keys = keys_by_node.get(node_name, ["fs_id"])
+    data = {}
+    for k in relevant_keys:
+        v = state.get(k)
+        if isinstance(v, list):
+            data[k] = len(v)
+            if v:
+                data[k + "_sample"] = str(v[0])[:200]
+        elif isinstance(v, dict):
+            data[k] = sorted(v.keys())[:10]
+        else:
+            data[k] = str(v)[:200]
+    raw = json.dumps(data, sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+
+async def _get_cached_result(
+    fs_id: str, node_name: str, input_hash: str, db: AsyncSession
+) -> dict | None:
+    from app.db.models import PipelineCacheDB
+    row = (await db.execute(
+        select(PipelineCacheDB).where(
+            PipelineCacheDB.document_id == fs_id,
+            PipelineCacheDB.node_name == node_name,
+            PipelineCacheDB.input_hash == input_hash,
+        )
+    )).scalar_one_or_none()
+    if not row:
+        return None
+    if row.expires_at and row.expires_at < datetime.now(timezone.utc):
+        await db.delete(row)
+        await db.commit()
+        return None
+    return row.result_data
+
+
+async def _set_cache(
+    fs_id: str, node_name: str, input_hash: str, result_data: dict, db: AsyncSession
+) -> None:
+    from app.db.models import PipelineCacheDB
+    existing = (await db.execute(
+        select(PipelineCacheDB).where(
+            PipelineCacheDB.document_id == fs_id,
+            PipelineCacheDB.node_name == node_name,
+        )
+    )).scalar_one_or_none()
+    if existing:
+        existing.input_hash = input_hash
+        existing.result_data = result_data
+        existing.created_at = datetime.now(timezone.utc)
+        existing.expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+    else:
+        import uuid as _uuid
+        db.add(PipelineCacheDB(
+            id=_uuid.uuid4(),
+            document_id=fs_id,
+            node_name=node_name,
+            input_hash=input_hash,
+            result_data=result_data,
+            created_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+        ))
+    await db.commit()
+
+
+_CACHEABLE_OUTPUT_KEYS: dict[str, list[str]] = {
+    "ambiguity_node": ["ambiguities"],
+    "debate_node": ["ambiguities", "debate_results"],
+    "contradiction_node": ["contradictions"],
+    "edge_case_node": ["edge_cases"],
+    "quality_node": ["quality_score", "compliance_tags"],
+    "task_decomposition_node": ["tasks"],
+    "dependency_node": ["tasks"],
+    "traceability_node": ["traceability_matrix"],
+    "duplicate_node": ["duplicates"],
+    "testcase_node": ["test_cases"],
+}
+
+
+async def _load_project_context(fs_id: str, db: AsyncSession) -> List[Dict[str, Any]]:
+    """Load summaries of sibling documents in the same project for context."""
+    from app.db.models import FSDocument, FSDocumentStatus
+
+    doc_result = await db.execute(
+        select(FSDocument).where(FSDocument.id == _uuid_mod.UUID(fs_id))
+    )
+    doc = doc_result.scalar_one_or_none()
+    if not doc or not doc.project_id:
+        return []
+
+    siblings_result = await db.execute(
+        select(FSDocument).where(
+            FSDocument.project_id == doc.project_id,
+            FSDocument.id != doc.id,
+            FSDocument.status.in_([FSDocumentStatus.COMPLETE, FSDocumentStatus.PARSED]),
+        ).order_by(FSDocument.order_in_project)
+    )
+    siblings = siblings_result.scalars().all()
+    if not siblings:
+        return []
+
+    context = []
+    for sib in siblings:
+        text_preview = (sib.parsed_text or "")[:2000]
+        context.append({
+            "document_id": str(sib.id),
+            "filename": sib.filename,
+            "status": sib.status.value if hasattr(sib.status, "value") else str(sib.status),
+            "text_preview": text_preview,
+        })
+    logger.info(
+        "Loaded project context: %d sibling docs for fs_id=%s (project=%s)",
+        len(context), fs_id, doc.project_id,
+    )
+    return context
+
+
 async def run_analysis_pipeline(
     fs_id: str,
     sections: List[Dict[str, Any]],
+    db: AsyncSession | None = None,
+    cancel_event: "asyncio.Event | None" = None,
 ) -> FSAnalysisState:
     """Run the full analysis pipeline on a parsed document.
+
+    When a db session is provided, each node checks PipelineCacheDB before
+    running. On cache hit the LLM call is skipped entirely, saving tokens.
 
     Args:
         fs_id: Document ID.
         sections: List of parsed section dicts with heading, content, section_index.
+        db: Optional async DB session for pipeline caching.
+        cancel_event: When set, the pipeline stops before the next node.
 
     Returns:
         Final pipeline state with all analysis results populated.
     """
     graph = get_compiled_graph()
 
+    project_context: List[Dict[str, Any]] = []
+    if db is not None:
+        try:
+            project_context = await _load_project_context(fs_id, db)
+        except Exception as exc:
+            logger.warning("Failed to load project context for %s: %s", fs_id, exc)
+
     initial_state: FSAnalysisState = {
         "fs_id": fs_id,
         "parsed_sections": sections,
+        "project_context": project_context,
         "ambiguities": [],
         "debate_results": [],
         "contradictions": [],
@@ -231,9 +443,78 @@ async def run_analysis_pipeline(
         "errors": [],
     }
 
-    logger.info("Starting analysis pipeline for fs_id=%s (%d sections)", fs_id, len(sections))
+    logger.info(
+        "Starting analysis pipeline for fs_id=%s (%d sections, %d project context docs)",
+        fs_id, len(sections), len(project_context),
+    )
 
-    result = await graph.ainvoke(initial_state)
+    _analysis_progress.pop(fs_id, None)
+    _update_progress(fs_id, node="", phase="log", log="Pipeline starting")
+
+    if db is not None:
+        node_order = ANALYSIS_NODE_ORDER
+        node_fns: dict[str, Callable] = {
+            "parse_node": parse_node,
+            "ambiguity_node": ambiguity_node,
+            "debate_node": debate_node,
+            "contradiction_node": contradiction_node,
+            "edge_case_node": edge_case_node,
+            "quality_node": quality_node,
+            "task_decomposition_node": task_decomposition_node,
+            "dependency_node": dependency_node,
+            "traceability_node": traceability_node,
+            "duplicate_node": duplicate_node,
+            "testcase_node": testcase_node,
+        }
+        state = dict(initial_state)
+        cache_hits = 0
+        try:
+            fs_uuid = str(fs_id)
+            import uuid as _uuid
+            _uuid.UUID(fs_uuid)
+        except (ValueError, AttributeError):
+            fs_uuid = None
+
+        for node_name in node_order:
+            if cancel_event and cancel_event.is_set():
+                logger.warning("Analysis cancelled for fs_id=%s at node %s", fs_id, node_name)
+                state["errors"].append(f"Analysis cancelled before {node_name}")
+                break
+            if fs_uuid and node_name in _CACHEABLE_OUTPUT_KEYS:
+                input_hash = _compute_input_hash(node_name, state)
+                try:
+                    cached = await _get_cached_result(fs_uuid, node_name, input_hash, db)
+                except Exception:
+                    cached = None
+                if cached:
+                    for key in _CACHEABLE_OUTPUT_KEYS[node_name]:
+                        if key in cached:
+                            state[key] = cached[key]
+                    cache_hits += 1
+                    logger.info("Cache HIT for %s (fs_id=%s)", node_name, fs_id)
+                    _update_progress(fs_id, node=node_name, phase="cached")
+                    continue
+
+            _update_progress(fs_id, node=node_name, phase="start")
+            logger.info("Running node %s for fs_id=%s", node_name, fs_id)
+            fn = node_fns[node_name]
+            state = await fn(state)
+            _update_progress(fs_id, node=node_name, phase="complete")
+
+            if fs_uuid and node_name in _CACHEABLE_OUTPUT_KEYS:
+                output_data = {k: state.get(k) for k in _CACHEABLE_OUTPUT_KEYS[node_name]}
+                try:
+                    await _set_cache(fs_uuid, node_name, input_hash, output_data, db)
+                except Exception as exc:
+                    logger.warning("Cache write failed for %s: %s", node_name, exc)
+
+        if cache_hits:
+            logger.info("Pipeline used %d cache hits for fs_id=%s", cache_hits, fs_id)
+        result = state
+    else:
+        result = await graph.ainvoke(initial_state)
+
+    _update_progress(fs_id, node="", phase="log", log="Pipeline complete")
 
     logger.info(
         "Pipeline complete for fs_id=%s: %d ambiguities, %d debate_results, %d contradictions, "

@@ -15,50 +15,54 @@ logger = logging.getLogger(__name__)
 
 # ── Prompt Templates ────────────────────────────────────
 
-CONTRADICTION_SYSTEM_PROMPT = """You are an expert requirements analyst for enterprise Functional Specification (FS) documents.
+CONTRADICTION_SYSTEM_PROMPT = """You are a principal requirements analyst specializing in cross-reference validation of Functional Specifications. You detect requirements that CANNOT both be implemented as written — contradictions that force a developer to choose one requirement over another.
 
-Your task is to identify CONTRADICTIONS between two sections of an FS document. A contradiction exists when:
+TASK: Compare two FS sections and identify requirements that are MUTUALLY EXCLUSIVE or LOGICALLY INCOMPATIBLE. A contradiction means a developer CANNOT satisfy both sections simultaneously.
 
-1. **Direct conflict**: Two sections make opposing statements (e.g., one says "data is retained for 30 days", another says "data is deleted after 7 days")
-2. **Logical inconsistency**: Requirements that cannot both be satisfied simultaneously
-3. **Behavioral conflict**: Different expected behaviors for the same scenario
-4. **Scope conflict**: One section includes something another section explicitly excludes
-5. **Temporal conflict**: Different timelines or deadlines for dependent processes
+WHAT COUNTS AS A CONTRADICTION:
+1. NUMERIC CONFLICT — Section A specifies a value (retention period, timeout, limit) that directly conflicts with a value in Section B for the same entity.
+2. BEHAVIORAL CONFLICT — Same trigger/event produces different required outcomes in each section.
+3. LOGICAL IMPOSSIBILITY — Satisfying requirement A makes it physically/logically impossible to satisfy requirement B.
+4. SCOPE CONFLICT — Section A explicitly includes what Section B explicitly excludes (or vice versa) for the same feature.
+5. SEQUENCE CONFLICT — Section A requires X before Y; Section B requires Y before X.
 
-For each contradiction found, provide:
-- A clear description of the conflict
-- Severity: HIGH (blocks development — impossible to implement both), MEDIUM (causes confusion — ambiguous priority), LOW (minor inconsistency — can be resolved with clarification)
-- A suggested resolution: which section to trust, or how to reconcile
+WHAT IS NOT A CONTRADICTION:
+- Sections describing DIFFERENT features that happen to use similar terminology
+- General statements in one section with specific overrides in another (this is normal FS layering)
+- Complementary requirements that cover different aspects of the same feature
+- One section adding detail that the other section omits (this is elaboration, not conflict)
 
-Return your analysis as a JSON array. If no contradictions found, return an empty array [].
+SEVERITY CALIBRATION:
+- HIGH: Both requirements use mandatory language (shall/must) and cannot coexist. A developer must violate one to satisfy the other. Blocks implementation.
+- MEDIUM: Requirements appear to conflict but COULD be reconciled with a reasonable interpretation. Needs clarification to avoid incorrect implementation.
+- LOW: Minor tension between sections that an experienced architect can resolve with standard patterns. Low risk of build error.
 
-Example output format:
-```json
+OUTPUT RULES:
+- "description" must quote the specific conflicting text from BOTH sections
+- "suggested_resolution" must propose a concrete reconciliation (not just "clarify with the team")
+
+Return a JSON array. Empty array [] if no contradictions exist.
+
+Example:
 [
   {
-    "description": "Section A states data must be retained for 90 days, but Section B requires immediate deletion after processing.",
+    "description": "Section A requires 'User data shall be retained for 90 days after account deletion' but Section B states 'All personal data must be permanently deleted within 7 days of a deletion request.' Both use mandatory language for the same data with incompatible timelines.",
     "severity": "HIGH",
-    "suggested_resolution": "Clarify with the compliance team. Section B likely refers to temporary processing data, while Section A covers audit logs. Add explicit scope to each policy."
+    "suggested_resolution": "Separate data categories: personal/PII data follows the 7-day deletion policy (Section B), while anonymized usage logs follow the 90-day retention policy (Section A). Add explicit data classification to both sections."
   }
 ]
-```
 
-IMPORTANT: Return ONLY a valid JSON array. No markdown, no explanations outside the JSON."""
+Return ONLY a valid JSON array. No markdown fences, no prose outside the array."""
 
-CONTRADICTION_USER_PROMPT = """Compare these two FS document sections for contradictions:
+CONTRADICTION_USER_PROMPT = """Determine whether these two sections contain requirements that CANNOT both be implemented as written. Only flag genuine conflicts — not elaborations, not complementary details.
 
-## Section A: {heading_a} (Section {index_a})
-
+SECTION A: "{heading_a}" (Section {index_a})
 {content_a}
 
----
-
-## Section B: {heading_b} (Section {index_b})
-
+SECTION B: "{heading_b}" (Section {index_b})
 {content_b}
 
----
-Return a JSON array of contradictions. If no contradictions are found, return []."""
+Return a JSON array of contradictions. If both sections are compatible, return []."""
 
 
 # ── Detection Function ──────────────────────────────────
@@ -105,6 +109,7 @@ async def detect_contradictions_between_sections(
             system=CONTRADICTION_SYSTEM_PROMPT,
             temperature=0.0,
             max_tokens=2048,
+            role="reasoning",
         )
 
         if not isinstance(result, list):

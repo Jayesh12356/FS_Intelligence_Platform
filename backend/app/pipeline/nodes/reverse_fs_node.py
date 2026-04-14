@@ -18,93 +18,117 @@ logger = logging.getLogger(__name__)
 
 # ── Prompt Templates ────────────────────────────────────
 
-MODULE_SUMMARY_SYSTEM = """You are an expert code analyst. Given a source code file with its functions and classes, write a clear, concise summary of what this module does.
+MODULE_SUMMARY_SYSTEM = """You are a code archaeologist reverse-engineering a codebase into documentation. Given a source file, produce a precise functional summary that captures WHAT the module does (not HOW it does it internally).
 
-Focus on:
-- The primary purpose of this module
-- Key classes and their responsibilities
-- Important functions and what they do
-- Any external dependencies or APIs used
-
-Return a JSON object:
+Return a JSON object with exactly these fields:
 {
   "module_name": "filename without extension",
-  "purpose": "One sentence describing the module's purpose",
-  "key_components": ["list of important functions/classes"],
-  "dependencies": ["external libraries or APIs used"],
-  "summary": "2-3 sentence detailed description"
+  "purpose": "One sentence: the module's single responsibility. Start with a verb (Handles, Manages, Provides, Implements).",
+  "key_components": ["list ONLY public/exported functions and classes — omit internal helpers"],
+  "dependencies": ["external libraries, APIs, or services this module integrates with — omit standard library"],
+  "summary": "2-3 sentences describing: (1) what inputs it accepts, (2) what processing/transformation it performs, (3) what outputs/side effects it produces"
 }
 
-IMPORTANT: Return ONLY valid JSON. No markdown, no explanations."""
+PRECISION RULES:
+- "purpose" must be ONE sentence, no conjunctions (if you need "and", the module has two purposes — pick the primary one)
+- "key_components" should list 3-10 items max — only the functionally significant ones
+- "dependencies" means EXTERNAL packages/services, not internal imports
+- "summary" must be understandable by someone who has never seen the code
 
-MODULE_SUMMARY_USER = """Analyze this source file:
+Return ONLY valid JSON. No markdown fences, no prose outside the object."""
 
-**File**: {file_path}
-**Language**: {language}
-**Entities**:
+MODULE_SUMMARY_USER = """Summarize this source file's functional purpose.
+
+File: {file_path}
+Language: {language}
+Entities (functions/classes):
 {entities}
 
-**Code excerpt** (first 200 lines):
+Code (first 200 lines):
 {code_excerpt}
 
-Provide a module-level summary."""
+Return a JSON module summary."""
 
-USER_FLOW_SYSTEM = """You are an expert at understanding software architectures. Given summaries of all modules in a codebase, identify the main user-facing flows or features.
+USER_FLOW_SYSTEM = """You are a software architect identifying the distinct user-facing features in a codebase by analyzing module summaries. A "user flow" is a complete end-to-end capability that delivers value to a user or system consumer.
 
-A "user flow" is a complete feature or capability of the system (e.g., "User Authentication", "Order Processing", "Report Generation").
+IDENTIFICATION CRITERIA:
+- Each flow must have a clear TRIGGER (user action, API call, scheduled job, event)
+- Each flow must produce a clear OUTCOME (data displayed, record created, notification sent, file exported)
+- A flow spans multiple modules (if only one module is involved, it is likely a utility, not a flow)
+- Merge closely related sub-flows into one (e.g., "Create Order" + "Validate Order" = one "Order Processing" flow)
 
-Return a JSON array of flow objects:
+Return a JSON array:
 [
   {
-    "flow_name": "Name of the flow/feature",
-    "description": "What this flow does from a user/system perspective",
-    "involved_modules": ["list of module names involved"],
-    "entry_points": ["where the flow starts"]
+    "flow_name": "Concise feature name (2-4 words)",
+    "description": "One sentence: who triggers it, what happens, what the outcome is",
+    "involved_modules": ["module names that participate in this flow, in execution order"],
+    "entry_points": ["the specific function or endpoint where the flow begins"]
   }
 ]
 
-Identify 3-10 flows. Focus on major features, not internal utilities.
+TARGET: 3-10 flows. Prioritize user-facing features over internal utilities, background jobs, or infrastructure setup.
 
-IMPORTANT: Return ONLY valid JSON. No markdown, no explanations."""
+Return ONLY valid JSON. No markdown fences, no prose outside the array."""
 
-USER_FLOW_USER = """Here are the module summaries for the codebase:
+USER_FLOW_USER = """Identify the distinct user-facing features in this codebase based on the module summaries below.
 
+Module summaries:
 {module_summaries}
 
-Primary language: {primary_language}
-Total files: {total_files}
-Total lines: {total_lines}
+Codebase stats: {primary_language}, {total_files} files, {total_lines} lines.
 
-Identify the main user-facing flows and features in this system."""
+Return a JSON array of user flows."""
 
-FS_SECTION_SYSTEM = """You are a senior technical writer generating a Functional Specification (FS) document from code analysis.
+FS_SECTION_SYSTEM = """You are a senior technical writer producing a Functional Specification from code analysis. Write formal, implementation-independent requirements — describe WHAT the system does, not HOW the code works.
 
-For the given user flow, write a formal FS section that describes:
-1. **Purpose**: What this feature does
-2. **Actors**: Who uses this feature
-3. **Preconditions**: What must be true before this feature can be used
-4. **Main Flow**: Step-by-step description of the happy path
-5. **Alternate Flows**: Edge cases and error handling
-6. **Data Requirements**: What data is needed/produced
-7. **Non-Functional Requirements**: Performance, security, etc. (if evident from code)
+MANDATORY STRUCTURE (use these exact headings):
 
-Write in clear, professional requirements language. Use "shall" for requirements.
-Do NOT include code snippets — this is a functional specification, not technical docs.
+1. Purpose
+   One paragraph: what business capability this feature provides and why it exists.
 
-Return the section as plain text with clear headings. Do not wrap in JSON."""
+2. Actors
+   Bullet list of user roles or system agents that interact with this feature.
 
-FS_SECTION_USER = """Generate an FS section for this flow:
+3. Preconditions
+   Numbered list of conditions that MUST be true before this feature can execute.
 
-**Flow**: {flow_name}
-**Description**: {flow_description}
+4. Functional Requirements
+   Numbered list using "The system shall..." language. Each requirement must be:
+   - Specific: contains measurable criteria where possible
+   - Testable: a QA engineer can verify it with a concrete test
+   - Atomic: one behavior per requirement
 
-**Involved Modules**:
+5. Alternate Flows & Error Handling
+   Numbered list of what happens when preconditions fail, inputs are invalid, or dependencies are unavailable.
+
+6. Data Requirements
+   Table or list of data entities: name, type, constraints, source/destination.
+
+7. Non-Functional Requirements
+   Performance, security, scalability, or availability requirements evident from the code. Use "shall" language with specific thresholds where the code reveals them.
+
+WRITING RULES:
+- Use "shall" for mandatory requirements, "should" for recommendations
+- NEVER include code snippets, function names, class names, or file paths
+- NEVER say "the code does X" — say "the system shall do X"
+- Write for a reader who has never seen the codebase
+- Be concise: 150-400 words per section
+
+Return plain text with the section headings above. Do NOT wrap in JSON."""
+
+FS_SECTION_USER = """Write a formal Functional Specification section for this feature. Describe WHAT the system does, not how the code works.
+
+Feature: {flow_name}
+Description: {flow_description}
+
+Involved components:
 {involved_modules}
 
-**Module Details**:
+Component details:
 {module_details}
 
-Write a complete FS section for this flow."""
+Return a complete FS section using the required structure (Purpose, Actors, Preconditions, Functional Requirements, Alternate Flows, Data Requirements, Non-Functional Requirements)."""
 
 
 # ── Node Functions ──────────────────────────────────────
@@ -147,6 +171,7 @@ async def _generate_module_summaries(
                 system=MODULE_SUMMARY_SYSTEM,
                 temperature=0.0,
                 max_tokens=1024,
+                role="longcontext",
             )
             if isinstance(result, dict):
                 result["file_path"] = f.get("path", "")
@@ -229,6 +254,7 @@ async def _identify_user_flows(
             system=USER_FLOW_SYSTEM,
             temperature=0.0,
             max_tokens=4096,
+            role="longcontext",
         )
         if isinstance(result, list):
             return result
@@ -287,6 +313,7 @@ async def _generate_fs_sections(
                 system=FS_SECTION_SYSTEM,
                 temperature=0.1,
                 max_tokens=4096,
+                role="longcontext",
             )
             sections.append({
                 "heading": flow_name,

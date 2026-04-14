@@ -1,12 +1,19 @@
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+
 export default function AnalysisPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/documents");
+  }, [router]);
+
   return (
-    <div className="empty-state">
-      <div className="empty-state-icon">🔍</div>
-      <h3>Analysis Dashboard</h3>
-      <p>
-        Analysis features will be available after document parsing is
-        implemented (Level 2+).
-      </p>
+    <div className="page-loading">
+      <div className="spinner" />
+      Redirecting to documents\u2026
     </div>
   );
 }

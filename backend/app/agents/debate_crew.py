@@ -10,6 +10,7 @@ Usage:
     verdict = await run_debate("The system should respond quickly")
 """
 
+import asyncio
 import json
 import logging
 from typing import Optional
@@ -27,84 +28,77 @@ logger = logging.getLogger(__name__)
 # ── Task Descriptions ──────────────────────────────────
 
 
-RED_TASK_DESCRIPTION = """Analyze the following requirement that has been flagged as potentially ambiguous.
+RED_TASK_DESCRIPTION = """A requirement has been flagged for adversarial review.
 
-**Requirement text:**
-{requirement_text}
+REQUIREMENT: "{requirement_text}"
+FLAG REASON: {flag_reason}
+SECTION: {section_heading}
 
-**Why it was flagged:**
-{flag_reason}
+Your task: Prove this requirement is AMBIGUOUS by constructing 3-5 numbered points. For EACH point:
+1. Quote the exact ambiguous phrase from the requirement
+2. Provide TWO plausible but mutually exclusive developer interpretations
+3. Explain the business consequence if the wrong interpretation is chosen
 
-**Section:** {section_heading}
-
-Your job: Argue convincingly that this requirement IS ambiguous and cannot be
-implemented as-is. Identify specific gaps, undefined terms, missing edge cases,
-vague language, and contradictory implications. Be thorough and precise.
-
-Provide your argument as a structured analysis with specific points."""
+Focus on ambiguities that affect: data contracts, user-visible behavior, security boundaries, error handling, and performance expectations. Do NOT flag stylistic issues or theoretical edge cases with negligible impact."""
 
 RED_TASK_EXPECTED_OUTPUT = (
-    "A detailed argument (3-5 specific points) explaining why this requirement "
-    "is ambiguous, with concrete examples of how different developers might "
-    "interpret it differently."
+    "3-5 numbered points, each containing: the ambiguous phrase (quoted), "
+    "two concrete conflicting interpretations, and the business impact of "
+    "choosing the wrong one."
 )
 
 
-BLUE_TASK_DESCRIPTION = """You have seen a requirement that was flagged as potentially ambiguous,
-and the QA engineer has argued it IS ambiguous.
+BLUE_TASK_DESCRIPTION = """The adversarial analyst has argued this requirement is ambiguous. You must rebut their argument.
 
-**Requirement text:**
-{requirement_text}
+REQUIREMENT: "{requirement_text}"
+SECTION: {section_heading}
 
-**Section:** {section_heading}
+The adversarial analyst has presented numbered points arguing ambiguity. For EACH of their points, provide a numbered rebuttal:
+1. Cite the specific standard, pattern, or convention that resolves the alleged ambiguity (e.g., RFC 7231, OWASP ASVS, REST conventions, SQL ACID guarantees, IEEE 830)
+2. Explain why any competent developer in this domain would arrive at the same implementation
+3. If the point has SOME merit, concede it explicitly rather than making a weak defense
 
-**QA Engineer's argument (RedAgent):**
-The QA engineer has already presented their case for why this is ambiguous.
-
-Your job: Defend this requirement as CLEAR and implementable. Explain how a
-competent developer would interpret and build from this requirement using
-standard engineering practices and domain knowledge. Counter the QA engineer's
-concerns point by point.
-
-Provide your defense as a structured rebuttal with specific points."""
+Only defend points that are genuinely clear. If a point is legitimately ambiguous, say so — your credibility depends on honest assessment, not blind defense."""
 
 BLUE_TASK_EXPECTED_OUTPUT = (
-    "A detailed defense (3-5 specific points) explaining why this requirement "
-    "is clear enough to implement, with references to standard practices and "
-    "reasonable assumptions."
+    "Numbered rebuttals matching the adversary's points. Each contains: "
+    "the standard/convention that resolves it, why the interpretation is "
+    "unambiguous in practice, or an honest concession if the point is valid."
 )
 
 
-ARBITER_TASK_DESCRIPTION = """You must evaluate the debate between the QA Engineer and the Senior Developer
-about whether a requirement is ambiguous or clear.
+ARBITER_TASK_DESCRIPTION = """Evaluate the debate and render a final verdict.
 
-**Requirement text:**
-{requirement_text}
+REQUIREMENT: "{requirement_text}"
+SECTION: {section_heading}
 
-**Section:** {section_heading}
+Both sides have presented numbered arguments. For each contested point, determine which side is more convincing, then synthesize a final verdict.
 
-Both sides have presented their arguments. Review them carefully and render
-your final verdict.
+DECISION FRAMEWORK:
+1. For each point: would two developers at different companies build the SAME thing? If no → point favors AMBIGUOUS.
+2. Does the alleged ambiguity affect user-visible behavior, data contracts, or security? If yes and unresolved → favors AMBIGUOUS.
+3. Did the defender cite a specific, widely-adopted standard that resolves it? If yes → point favors CLEAR.
+4. Did the defender concede the point? If yes → point favors AMBIGUOUS.
 
-You MUST respond with ONLY a valid JSON object in this exact format:
+CONFIDENCE CALIBRATION:
+  90-100: All/nearly all points favor one side overwhelmingly
+  70-89: Clear majority of evidence favors one side
+  50-69: Close call, roughly balanced arguments
+  Below 50: Evidence is ambiguous (default to AMBIGUOUS verdict in this case)
+
+You MUST respond with ONLY a valid JSON object:
 {{
   "verdict": "AMBIGUOUS" or "CLEAR",
-  "reasoning": "Your detailed reasoning for the verdict (2-3 sentences)",
+  "reasoning": "2-3 sentences summarizing which points were decisive and why",
   "confidence": <integer 0-100>
 }}
 
-Rules for your verdict:
-- If the ambiguity would genuinely block implementation or lead to incorrect
-  builds, rule AMBIGUOUS
-- If the concern is theoretical or easily resolved by standard engineering
-  practice, rule CLEAR
-- Confidence should reflect how certain you are (>80 = strong, 50-80 = moderate, <50 = weak)
-
-IMPORTANT: Return ONLY the JSON object. No markdown, no extra text."""
+IMPORTANT: Return ONLY the JSON object. No markdown fences, no extra text."""
 
 ARBITER_TASK_EXPECTED_OUTPUT = (
-    'A JSON object with keys: "verdict" (AMBIGUOUS or CLEAR), '
-    '"reasoning" (string), "confidence" (integer 0-100).'
+    'A JSON object with exactly three keys: "verdict" (AMBIGUOUS or CLEAR), '
+    '"reasoning" (2-3 sentence summary of decisive points), '
+    '"confidence" (integer 0-100, calibrated per the framework above).'
 )
 
 
@@ -176,7 +170,7 @@ async def run_debate(
     )
 
     try:
-        result = crew.kickoff()
+        result = await asyncio.to_thread(crew.kickoff)
 
         # Extract individual task outputs
         red_argument = _extract_task_output(result, 0, "Red argument unavailable")

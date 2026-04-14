@@ -16,46 +16,47 @@ logger = logging.getLogger(__name__)
 
 # ── Dependency Inference Prompt ─────────────────────────
 
-DEPENDENCY_SYSTEM_PROMPT = """You are an expert software architect analysing task dependencies in a development project.
+DEPENDENCY_SYSTEM_PROMPT = """You are a build-order planner for a software project. Given a set of development tasks, you must determine the minimum set of dependencies so tasks execute in the correct order — and ONLY the minimum set.
 
-Given a list of dev tasks, identify which tasks depend on which other tasks. A task B depends on task A if:
+TASK: For each task, list ONLY the task IDs it CANNOT start without. A dependency exists ONLY when:
 
-1. **Data dependency**: Task B needs a database table/model that task A creates
-2. **API dependency**: Task B calls an API endpoint that task A implements
-3. **Logical dependency**: Task B cannot start until task A is complete
-4. **UI dependency**: Task B renders data that task A's backend produces
+1. DATA DEPENDENCY — Task B reads from a database table/model that task A creates. No table = B cannot run.
+2. API DEPENDENCY — Task B calls an API endpoint that task A implements. No endpoint = B fails at runtime.
+3. BUILD DEPENDENCY — Task B imports a module, component, or service that task A produces. Missing import = compile/import error.
+4. SCHEMA DEPENDENCY — Task B relies on a data shape (interface, schema, type) that task A defines.
 
-IMPORTANT rules:
-- Only create dependencies that are NECESSARY — don't over-link
-- Backend tasks typically come before frontend tasks for the same feature
-- Database/model tasks come before API tasks
-- A task should NOT depend on itself
-- Avoid creating circular dependencies
+STRICT RULES:
+- A dependency must represent a HARD blocker — B literally cannot execute without A's output.
+- DO NOT add "nice to have" orderings. If B CAN run independently (even if A would make it easier), no dependency.
+- DO NOT link tasks just because they are in the same feature area.
+- Maximum dependency chain depth: 5. If you find yourself creating deeper chains, some dependencies are unnecessary.
+- NO self-dependencies. NO circular dependencies.
+- Tasks with no dependencies get an empty array [].
+- Include EVERY task ID in the output, even those with zero dependencies.
 
-Return a JSON object mapping task IDs to their dependency lists.
+COMMON PATTERNS:
+- DB model -> API endpoint -> Frontend page (3-level chain, correct)
+- Auth middleware -> Protected endpoints (correct)
+- Two independent API endpoints for different features (NO dependency, they are parallel)
 
-Example output:
-```json
+Return a JSON object mapping every task ID to its dependency list.
+
+Example:
 {
+  "task-uuid-1": [],
   "task-uuid-2": ["task-uuid-1"],
-  "task-uuid-3": ["task-uuid-1", "task-uuid-2"],
+  "task-uuid-3": ["task-uuid-2"],
   "task-uuid-4": []
 }
-```
 
-If no dependencies exist, return an empty object {}.
+Return ONLY a valid JSON object. No markdown fences, no prose outside the object."""
 
-IMPORTANT: Return ONLY valid JSON. No markdown, no explanations outside the JSON."""
+DEPENDENCY_USER_PROMPT = """Determine the MINIMUM dependency set for these tasks. Only add a dependency when task B literally cannot execute without task A's output.
 
-DEPENDENCY_USER_PROMPT = """Analyse these development tasks and identify dependencies.
-
-## Tasks
-
+Tasks:
 {task_list}
 
----
-Return a JSON object mapping task IDs to their dependency lists.
-For tasks with no dependencies, include them with an empty array."""
+Return a JSON object mapping EVERY task ID to its dependency array. Empty array for independent tasks."""
 
 
 # ── Cycle Detection ─────────────────────────────────────
@@ -221,6 +222,7 @@ async def dependency_node(state: FSAnalysisState) -> FSAnalysisState:
             system=DEPENDENCY_SYSTEM_PROMPT,
             temperature=0.0,
             max_tokens=2048,
+            role="reasoning",
         )
 
         if isinstance(result, dict):

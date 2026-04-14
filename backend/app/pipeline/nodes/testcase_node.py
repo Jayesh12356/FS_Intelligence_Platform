@@ -10,11 +10,28 @@ from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
-# Import call_llm at module level so it can be mocked in tests
+# Import LLM client at module level so it can be mocked in tests
 try:
-    from app.llm.client import call_llm
+    from app.llm import get_llm_client
 except ImportError:
-    call_llm = None  # type: ignore
+    get_llm_client = None  # type: ignore
+
+
+TESTCASE_SYSTEM_PROMPT = """You are a senior QA engineer writing test cases from acceptance criteria. Every test case you produce must be executable — a tester or automated framework can follow the steps and verify the expected result without ambiguity.
+
+RULES:
+1. Generate 1-3 test cases per task. Prioritize: one happy-path test, one failure/edge-case test, one boundary test (if applicable).
+2. "title" — Descriptive, starts with "Verify" or "Test". Max 15 words. Must identify WHAT is being tested.
+3. "preconditions" — SPECIFIC system state required. Bad: "System is running". Good: "User 'testuser@example.com' exists with role ADMIN and active session".
+4. "steps" — Numbered, atomic actions. Each step has exactly one action. Include specific test data (URLs, payloads, field values). A step must never combine two actions.
+5. "expected_result" — OBSERVABLE, MEASURABLE outcome. Include status codes, exact field values, timing constraints. Bad: "It works". Good: "API returns HTTP 201 with JSON body containing 'user_id' (UUID format) and 'created_at' (ISO 8601)".
+6. "test_type" — Choose based on scope:
+   - UNIT: Tests a single function/method in isolation with mocked dependencies
+   - INTEGRATION: Tests interaction between two+ components (API + DB, service + external API)
+   - E2E: Tests complete user flow through the full system stack
+   - ACCEPTANCE: Validates a business requirement from the user's perspective
+
+Return ONLY a JSON array. No markdown fences, no prose outside the array."""
 
 
 def _coerce_text(value: Any) -> str:
@@ -73,7 +90,7 @@ async def testcase_node(state: Dict[str, Any]) -> Dict[str, Any]:
     fs_id = state.get("fs_id", "")
     test_cases: List[Dict[str, Any]] = []
     errors: List[str] = list(state.get("errors", []))
-    llm_available = call_llm is not None
+    llm_available = get_llm_client is not None
 
     if not tasks:
         logger.info("No tasks found — skipping test case generation")
@@ -107,9 +124,8 @@ async def testcase_node(state: Dict[str, Any]) -> Dict[str, Any]:
             })
             continue
 
-        # Use LLM to generate test cases from acceptance criteria
         criteria_text = "\n".join(f"  {i+1}. {c}" for i, c in enumerate(criteria))
-        prompt = f"""Generate test cases for the following task.
+        prompt = f"""Write executable test cases for this task. Cover the happy path and at least one failure/edge case.
 
 Task: {title}
 Description: {description}
@@ -117,17 +133,18 @@ Description: {description}
 Acceptance Criteria:
 {criteria_text}
 
-Generate 1-3 test cases. For each test case, return a JSON array where each element has:
-- "title": short test name
-- "preconditions": what must be true before the test
-- "steps": array of step descriptions
-- "expected_result": what should happen
+Return a JSON array of 1-3 test cases. Each element must have:
+- "title": descriptive test name (starts with "Verify" or "Test")
+- "preconditions": specific system state required before test execution
+- "steps": array of atomic, numbered step descriptions with concrete test data
+- "expected_result": observable, measurable outcome with specific values/codes
 - "test_type": one of "UNIT", "INTEGRATION", "E2E", or "ACCEPTANCE"
 
-Return ONLY a JSON array, no other text."""
+Return ONLY a JSON array."""
 
         try:
-            response = await call_llm(prompt)
+            client = get_llm_client()
+            response = await client.call_llm(prompt, system=TESTCASE_SYSTEM_PROMPT, role="build")
             # Parse the JSON response
             response_text = _extract_json_array(response)
             parsed = json.loads(response_text)

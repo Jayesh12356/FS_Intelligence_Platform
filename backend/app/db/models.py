@@ -48,6 +48,13 @@ class EffortLevel(str, enum.Enum):
     UNKNOWN = "UNKNOWN"
 
 
+class TaskStatus(str, enum.Enum):
+    """Execution status for an FS task."""
+    PENDING = "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETE = "COMPLETE"
+
+
 class ChangeType(str, enum.Enum):
     """Type of change between FS versions."""
     ADDED = "ADDED"
@@ -60,6 +67,32 @@ class ImpactType(str, enum.Enum):
     INVALIDATED = "INVALIDATED"
     REQUIRES_REVIEW = "REQUIRES_REVIEW"
     UNAFFECTED = "UNAFFECTED"
+
+
+class FSProject(Base):
+    """A project that groups related FS documents together."""
+
+    __tablename__ = "fs_projects"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(256), nullable=False, unique=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    documents = relationship("FSDocument", back_populates="project", lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<FSProject id={self.id} name={self.name}>"
 
 
 class FSDocument(Base):
@@ -79,6 +112,8 @@ class FSDocument(Base):
     file_path = Column(String(1024), nullable=True)
     file_size = Column(Integer, nullable=True)
     content_type = Column(String(128), nullable=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("fs_projects.id", ondelete="SET NULL"), nullable=True)
+    order_in_project = Column(Integer, nullable=False, default=0)
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
@@ -92,6 +127,7 @@ class FSDocument(Base):
     )
 
     # Relationships
+    project = relationship("FSProject", back_populates="documents")
     versions = relationship("FSVersion", back_populates="document", cascade="all, delete-orphan")
     analysis_results = relationship("AnalysisResult", back_populates="document", cascade="all, delete-orphan")
     ambiguity_flags = relationship("AmbiguityFlagDB", back_populates="document", cascade="all, delete-orphan")
@@ -305,6 +341,11 @@ class FSTaskDB(Base):
         default=EffortLevel.MEDIUM,
     )
     tags = Column(JSON, nullable=False, default=list)  # List[str]
+    status = Column(
+        Enum(TaskStatus),
+        nullable=False,
+        default=TaskStatus.PENDING,
+    )
     order = Column(Integer, nullable=False, default=0)
     can_parallel = Column(Boolean, nullable=False, default=False)
     created_at = Column(
@@ -551,6 +592,9 @@ class AuditEventType(str, enum.Enum):
     COMMENT_ADDED = "COMMENT_ADDED"
     COMMENT_RESOLVED = "COMMENT_RESOLVED"
     SUBMITTED_FOR_APPROVAL = "SUBMITTED_FOR_APPROVAL"
+    SECTION_EDITED = "SECTION_EDITED"
+    SECTION_ADDED = "SECTION_ADDED"
+    ANALYSIS_CANCELLED = "ANALYSIS_CANCELLED"
 
 
 class DuplicateFlagDB(Base):
@@ -793,3 +837,88 @@ class MCPSessionEventDB(Base):
     )
 
     session = relationship("MCPSessionDB", back_populates="events")
+
+
+# ── Build Engine Models ────────────────────────────────
+
+
+class BuildStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    PAUSED = "PAUSED"
+    COMPLETE = "COMPLETE"
+    FAILED = "FAILED"
+
+
+class BuildStateDB(Base):
+    """Persists autonomous build progress so crashed sessions can resume."""
+
+    __tablename__ = "build_states"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("fs_documents.id", ondelete="CASCADE"), nullable=False)
+    status = Column(Enum(BuildStatus), nullable=False, default=BuildStatus.PENDING)
+    current_phase = Column(Integer, nullable=False, default=0)
+    current_task_index = Column(Integer, nullable=False, default=0)
+    completed_task_ids = Column(JSON, nullable=False, default=list)
+    failed_task_ids = Column(JSON, nullable=False, default=list)
+    total_tasks = Column(Integer, nullable=False, default=0)
+    stack = Column(String(256), nullable=False, default="")
+    output_folder = Column(String(1024), nullable=False, default="")
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    last_updated = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class FileRegistryDB(Base):
+    """Maps every created file to its originating task and FS section."""
+
+    __tablename__ = "file_registry"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("fs_documents.id", ondelete="CASCADE"), nullable=False)
+    task_id = Column(String(64), nullable=False)
+    section_id = Column(String(256), nullable=False, default="")
+    file_path = Column(String(1024), nullable=False)
+    file_type = Column(String(64), nullable=False, default="unknown")
+    status = Column(String(32), nullable=False, default="CREATED")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    last_modified = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class BuildSnapshotDB(Base):
+    """Rollback snapshot taken before risky operations."""
+
+    __tablename__ = "build_snapshots"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("fs_documents.id", ondelete="CASCADE"), nullable=False)
+    snapshot_reason = Column(String(512), nullable=False, default="")
+    quality_score_at_snapshot = Column(Float, nullable=True)
+    file_registry_snapshot = Column(JSON, nullable=False, default=list)
+    task_states_snapshot = Column(JSON, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class PipelineCacheDB(Base):
+    """Caches individual pipeline node results to avoid re-running unchanged nodes."""
+
+    __tablename__ = "pipeline_cache"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("fs_documents.id", ondelete="CASCADE"), nullable=False)
+    node_name = Column(String(128), nullable=False)
+    input_hash = Column(String(128), nullable=False)
+    result_data = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=True)

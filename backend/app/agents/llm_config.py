@@ -12,26 +12,39 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+_PROVIDER_KEY_MAP = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
+
 
 def get_crewai_llm() -> LLM:
     """Create a CrewAI LLM instance using the project's LLM settings.
 
-    Maps the project's LLM_PROVIDER and PRIMARY_MODEL to CrewAI's
-    provider format (e.g., 'anthropic/claude-sonnet-4-20250514').
+    Maps the project's LLM_PROVIDER and PRIMARY_MODEL to LiteLLM's
+    provider prefix format (e.g., 'openrouter/deepseek/deepseek-v3.2').
+
+    When provider is openrouter and REASONING_MODEL is set, uses that
+    model for debate agents (the hardest reasoning task).
 
     Returns:
         CrewAI LLM configured with the project's API keys and model.
     """
     settings = get_settings()
+    provider = settings.LLM_PROVIDER.lower().strip()
 
-    if settings.LLM_PROVIDER == "openai":
-        model_str = f"openai/{settings.PRIMARY_MODEL}"
-        api_key = settings.OPENAI_API_KEY
-    else:
-        model_str = f"anthropic/{settings.PRIMARY_MODEL}"
-        api_key = settings.ANTHROPIC_API_KEY
+    key_attr = _PROVIDER_KEY_MAP.get(provider, "ANTHROPIC_API_KEY")
+    api_key = getattr(settings, key_attr, "")
 
-    logger.debug("CrewAI LLM configured: %s", model_str)
+    base_model = settings.PRIMARY_MODEL
+    if provider == "openrouter" and settings.REASONING_MODEL.strip():
+        base_model = settings.REASONING_MODEL.strip()
+
+    model_str = f"{provider}/{base_model}"
+
+    logger.debug("CrewAI LLM configured: provider=%s, model=%s", provider, model_str)
 
     return LLM(
         model=model_str,

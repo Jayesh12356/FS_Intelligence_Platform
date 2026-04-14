@@ -7,208 +7,81 @@ import {
   getQualityDashboard,
   resolveContradiction,
   resolveEdgeCase,
+  acceptEdgeCaseSuggestion,
+  acceptContradictionSuggestion,
+  bulkAcceptEdgeCases,
+  bulkResolveEdgeCases,
+  bulkAcceptContradictions,
+  bulkResolveContradictions,
 } from "@/lib/api";
-import type {
-  QualityDashboardResponse,
-  ComplianceTag,
-} from "@/lib/api";
+import type { QualityDashboardResponse, ComplianceTag } from "@/lib/api";
+import {
+  PageShell,
+  KpiCard,
+  Tabs,
+  QualityGauge,
+  ScoreBar,
+  FadeIn,
+  StaggerList,
+  StaggerItem,
+} from "@/components/index";
+import Badge from "@/components/Badge";
+import EmptyState from "@/components/EmptyState";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  BarChart3,
+  GitCompare,
+  AlertTriangle,
+  Tag,
+  CheckCircle2,
+  ChevronDown,
+  Shield,
+  CreditCard,
+  Lock,
+  Database,
+  Globe,
+  Key,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
-// ── Config ─────────────────────────────────────────────
-
-const severityConfig = {
-  HIGH: { color: "#ef4444", bg: "#ef444418", label: "🔴 HIGH", border: "#ef444444" },
-  MEDIUM: { color: "#f59e0b", bg: "#f59e0b18", label: "🟡 MEDIUM", border: "#f59e0b44" },
-  LOW: { color: "#3b82f6", bg: "#3b82f618", label: "🔵 LOW", border: "#3b82f644" },
-};
-
-const complianceColors: Record<string, { bg: string; color: string; border: string }> = {
-  payments: { bg: "#22c55e18", color: "#22c55e", border: "#22c55e44" },
-  auth: { bg: "#6366f118", color: "#6366f1", border: "#6366f144" },
-  pii: { bg: "#ef444418", color: "#ef4444", border: "#ef444444" },
-  external_api: { bg: "#f59e0b18", color: "#f59e0b", border: "#f59e0b44" },
-  security: { bg: "#ec489918", color: "#ec4899", border: "#ec489944" },
-  data_retention: { bg: "#8b5cf618", color: "#8b5cf6", border: "#8b5cf644" },
+const severityStyle: Record<
+  string,
+  { color: string; bg: string; border: string }
+> = {
+  HIGH: { color: "#ef4444", bg: "#ef444418", border: "#ef444444" },
+  MEDIUM: { color: "#f59e0b", bg: "#f59e0b18", border: "#f59e0b44" },
+  LOW: { color: "#3b82f6", bg: "#3b82f618", border: "#3b82f644" },
 };
 
 const complianceLabels: Record<string, string> = {
-  payments: "💳 Payments",
-  auth: "🔐 Auth",
-  pii: "🛡️ PII",
-  external_api: "🔗 External API",
-  security: "🔒 Security",
-  data_retention: "📦 Data Retention",
+  payments: "Payments",
+  auth: "Authentication",
+  pii: "PII",
+  external_api: "External API",
+  security: "Security",
+  data_retention: "Data Retention",
 };
 
-// ── Quality Gauge Component ────────────────────────────
+const complianceIcons: Record<string, LucideIcon> = {
+  payments: CreditCard,
+  auth: Key,
+  pii: Shield,
+  external_api: Globe,
+  security: Lock,
+  data_retention: Database,
+};
 
-function QualityGauge({ score, label }: { score: number; label: string }) {
-  const getColor = (s: number) => {
-    if (s >= 80) return "#22c55e";
-    if (s >= 60) return "#f59e0b";
-    return "#ef4444";
-  };
-
-  const color = getColor(score);
-  const circumference = 2 * Math.PI * 54;
-  const strokeDashoffset = circumference - (score / 100) * circumference;
-
-  return (
-    <div style={{ textAlign: "center" }}>
-      <div style={{ position: "relative", width: "140px", height: "140px", margin: "0 auto" }}>
-        <svg viewBox="0 0 120 120" width="140" height="140">
-          {/* Background circle */}
-          <circle
-            cx="60"
-            cy="60"
-            r="54"
-            fill="none"
-            stroke="var(--bg-tertiary)"
-            strokeWidth="8"
-          />
-          {/* Progress circle */}
-          <circle
-            cx="60"
-            cy="60"
-            r="54"
-            fill="none"
-            stroke={color}
-            strokeWidth="8"
-            strokeLinecap="round"
-            strokeDasharray={circumference}
-            strokeDashoffset={strokeDashoffset}
-            transform="rotate(-90 60 60)"
-            style={{ transition: "stroke-dashoffset 1s ease, stroke 0.5s ease" }}
-          />
-        </svg>
-        <div style={{
-          position: "absolute",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          textAlign: "center",
-        }}>
-          <div style={{
-            fontSize: "2rem",
-            fontWeight: 800,
-            color: color,
-            lineHeight: 1,
-          }}>
-            {Math.round(score)}
-          </div>
-          <div style={{
-            fontSize: "0.65rem",
-            color: "var(--text-muted)",
-            fontWeight: 600,
-            letterSpacing: "0.05em",
-            textTransform: "uppercase",
-            marginTop: "2px",
-          }}>
-            / 100
-          </div>
-        </div>
-      </div>
-      <div style={{
-        marginTop: "8px",
-        fontSize: "0.85rem",
-        fontWeight: 600,
-        color: "var(--text-secondary)",
-      }}>
-        {label}
-      </div>
-    </div>
-  );
+function sectionRef(index: number) {
+  return `Section ${index + 1}`;
 }
 
-// ── Sub Score Bar Component ────────────────────────────
-
-function SubScoreBar({ label, score, icon }: { label: string; score: number; icon: string }) {
-  const getColor = (s: number) => {
-    if (s >= 80) return "#22c55e";
-    if (s >= 60) return "#f59e0b";
-    return "#ef4444";
-  };
-
-  const color = getColor(score);
-
-  return (
-    <div style={{
-      background: "var(--bg-card)",
-      border: "1px solid var(--border-subtle)",
-      borderRadius: "12px",
-      padding: "16px 20px",
-    }}>
-      <div style={{
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        marginBottom: "10px",
-      }}>
-        <span style={{
-          fontSize: "0.88rem",
-          fontWeight: 600,
-          color: "var(--text-primary)",
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-        }}>
-          {icon} {label}
-        </span>
-        <span style={{
-          fontSize: "1.1rem",
-          fontWeight: 700,
-          color: color,
-        }}>
-          {score.toFixed(1)}%
-        </span>
-      </div>
-      <div style={{
-        height: "6px",
-        background: "var(--bg-tertiary)",
-        borderRadius: "3px",
-        overflow: "hidden",
-      }}>
-        <div style={{
-          height: "100%",
-          width: `${Math.min(score, 100)}%`,
-          background: color,
-          borderRadius: "3px",
-          transition: "width 0.8s ease",
-        }} />
-      </div>
-    </div>
-  );
+function severityVariant(
+  level: string
+): "error" | "warning" | "info" {
+  if (level === "HIGH") return "error";
+  if (level === "LOW") return "info";
+  return "warning";
 }
-
-// ── Resolve Button Component ───────────────────────────
-
-function ResolveButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: "4px 14px",
-        borderRadius: "6px",
-        fontSize: "0.78rem",
-        fontWeight: 600,
-        background: "rgba(34, 197, 94, 0.1)",
-        color: "#22c55e",
-        border: "1px solid rgba(34, 197, 94, 0.3)",
-        cursor: "pointer",
-        transition: "all 0.15s ease",
-      }}
-      onMouseEnter={(e) => {
-        (e.target as HTMLButtonElement).style.background = "rgba(34, 197, 94, 0.2)";
-      }}
-      onMouseLeave={(e) => {
-        (e.target as HTMLButtonElement).style.background = "rgba(34, 197, 94, 0.1)";
-      }}
-    >
-      ✓ Mark Resolved
-    </button>
-  );
-}
-
-// ── Main Page Component ────────────────────────────────
 
 export default function QualityDashboardPage() {
   const params = useParams();
@@ -216,7 +89,9 @@ export default function QualityDashboardPage() {
   const [dashboard, setDashboard] = useState<QualityDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"contradictions" | "edge_cases" | "compliance">("contradictions");
+  const [activeTab, setActiveTab] = useState<"contradictions" | "edge_cases" | "compliance">(
+    "contradictions"
+  );
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -247,6 +122,7 @@ export default function QualityDashboardPage() {
           ),
         };
       });
+      fetchDashboard();
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "Failed to resolve");
     }
@@ -264,8 +140,95 @@ export default function QualityDashboardPage() {
           ),
         };
       });
+      fetchDashboard();
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "Failed to resolve");
+    }
+  };
+
+  const handleAcceptEdgeCase = async (edgeCaseId: string) => {
+    try {
+      await acceptEdgeCaseSuggestion(docId, edgeCaseId);
+      setDashboard((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          edge_cases: prev.edge_cases.map((e) =>
+            e.id === edgeCaseId ? { ...e, resolved: true } : e
+          ),
+        };
+      });
+      fetchDashboard();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Failed to accept suggestion");
+    }
+  };
+
+  const handleAcceptContradiction = async (contradictionId: string) => {
+    try {
+      await acceptContradictionSuggestion(docId, contradictionId);
+      setDashboard((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          contradictions: prev.contradictions.map((c) =>
+            c.id === contradictionId ? { ...c, resolved: true } : c
+          ),
+        };
+      });
+      fetchDashboard();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Failed to accept resolution");
+    }
+  };
+
+  const [bulkLoading, setBulkLoading] = useState(false);
+
+  const handleBulkAcceptEdgeCases = async () => {
+    setBulkLoading(true);
+    try {
+      await bulkAcceptEdgeCases(docId);
+      await fetchDashboard();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Bulk accept failed");
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const handleBulkResolveEdgeCases = async () => {
+    setBulkLoading(true);
+    try {
+      await bulkResolveEdgeCases(docId);
+      await fetchDashboard();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Bulk resolve failed");
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const handleBulkAcceptContradictions = async () => {
+    setBulkLoading(true);
+    try {
+      await bulkAcceptContradictions(docId);
+      await fetchDashboard();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Bulk accept failed");
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const handleBulkResolveContradictions = async () => {
+    setBulkLoading(true);
+    try {
+      await bulkResolveContradictions(docId);
+      await fetchDashboard();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Bulk resolve failed");
+    } finally {
+      setBulkLoading(false);
     }
   };
 
@@ -280,482 +243,588 @@ export default function QualityDashboardPage() {
 
   if (error || !dashboard) {
     return (
-      <div className="empty-state">
-        <div className="empty-state-icon">📊</div>
-        <h3>Quality Dashboard</h3>
-        <p>{error || "Run analysis first to see quality metrics."}</p>
-        <Link href={`/documents/${docId}`} className="btn btn-secondary btn-sm">
-          ← Back to Document
-        </Link>
-      </div>
+      <PageShell backHref={`/documents/${docId}`} title="Quality Dashboard" maxWidth={960}>
+        <FadeIn>
+          <EmptyStateWrap
+            title="Unable to load dashboard"
+            description={error || "Run analysis first to see quality metrics."}
+            docId={docId}
+          />
+        </FadeIn>
+      </PageShell>
     );
   }
 
   const { quality_score, contradictions, edge_cases, compliance_tags } = dashboard;
 
-  // Group compliance tags by tag
   const tagGroups: Record<string, ComplianceTag[]> = {};
   for (const ct of compliance_tags) {
     if (!tagGroups[ct.tag]) tagGroups[ct.tag] = [];
     tagGroups[ct.tag].push(ct);
   }
 
+  const tabItems = [
+    { key: "contradictions", label: "Contradictions", count: contradictions.length },
+    { key: "edge_cases", label: "Edge Cases", count: edge_cases.length },
+    { key: "compliance", label: "Compliance", count: compliance_tags.length },
+  ];
+
   return (
-    <div style={{ maxWidth: "960px" }}>
-      <Link href={`/documents/${docId}`} className="back-link">
-        ← Back to Document
-      </Link>
-
-      {/* Header */}
-      <div style={{ marginBottom: "2rem" }}>
-        <h1 style={{ fontSize: "1.8rem", fontWeight: 700, marginBottom: "0.25rem" }}>
-          📊 Quality Dashboard
-        </h1>
-        <p style={{ color: "var(--text-secondary)", fontSize: "0.95rem" }}>
-          {dashboard.filename} — Deep analysis results
-        </p>
-      </div>
-
-      {/* Overall Score + Sub-scores */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr",
-        gap: "1.5rem",
-        marginBottom: "2rem",
-      }}>
-        {/* Large Overall Gauge */}
-        <div style={{
-          background: "var(--bg-card)",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "16px",
-          padding: "2rem",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          boxShadow: "var(--shadow-glow)",
-        }}>
-          <QualityGauge score={quality_score.overall} label="Overall Quality" />
-        </div>
-
-        {/* Sub-scores */}
-        <div style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "12px",
-        }}>
-          <SubScoreBar label="Completeness" score={quality_score.completeness} icon="📋" />
-          <SubScoreBar label="Clarity" score={quality_score.clarity} icon="💡" />
-          <SubScoreBar label="Consistency" score={quality_score.consistency} icon="🔗" />
-        </div>
-      </div>
-
-      {/* Summary Stats */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-        gap: "1rem",
-        marginBottom: "2rem",
-      }}>
-        <div className="info-item" style={{ borderLeft: "3px solid #ef4444" }}>
-          <div className="info-label">Contradictions</div>
-          <div className="info-value" style={{ color: contradictions.length > 0 ? "#ef4444" : "#22c55e" }}>
-            {contradictions.length}
-          </div>
-        </div>
-        <div className="info-item" style={{ borderLeft: "3px solid #f59e0b" }}>
-          <div className="info-label">Edge Case Gaps</div>
-          <div className="info-value" style={{ color: edge_cases.length > 0 ? "#f59e0b" : "#22c55e" }}>
-            {edge_cases.length}
-          </div>
-        </div>
-        <div className="info-item" style={{ borderLeft: "3px solid #6366f1" }}>
-          <div className="info-label">Compliance Tags</div>
-          <div className="info-value" style={{ color: "#6366f1" }}>
-            {compliance_tags.length}
-          </div>
-        </div>
-      </div>
-
-      {/* Compliance Tag Pills */}
-      {compliance_tags.length > 0 && (
-        <div style={{ marginBottom: "2rem" }}>
-          <h2 style={{
-            fontSize: "1.1rem",
-            fontWeight: 700,
-            marginBottom: "12px",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-          }}>
-            🏷️ Compliance Areas Detected
-          </h2>
-          <div style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "8px",
-          }}>
-            {Object.entries(tagGroups).map(([tag, items]) => {
-              const cfg = complianceColors[tag] || complianceColors.security;
-              const label = complianceLabels[tag] || tag;
-              return (
-                <span
-                  key={tag}
+    <PageShell
+      backHref={`/documents/${docId}`}
+      title="Quality Dashboard"
+      subtitle={`${dashboard.filename} — Deep analysis results`}
+      maxWidth={960}
+    >
+      <StaggerList className="quality-dashboard-stagger">
+        <StaggerItem>
+          <FadeIn>
+            <div className="section-card" style={{ marginBottom: "1.5rem" }}>
+              <div className="section-card-header">
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <BarChart3 size={18} aria-hidden />
+                  Scores
+                </span>
+              </div>
+              <div className="section-card-body">
+                <div
                   style={{
-                    display: "inline-flex",
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: "1.5rem",
                     alignItems: "center",
-                    gap: "6px",
-                    padding: "6px 14px",
-                    borderRadius: "20px",
-                    fontSize: "0.82rem",
-                    fontWeight: 600,
-                    background: cfg.bg,
-                    color: cfg.color,
-                    border: `1px solid ${cfg.border}`,
                   }}
                 >
-                  {label}
-                  <span style={{
-                    background: cfg.color,
-                    color: "#fff",
-                    borderRadius: "10px",
-                    padding: "0 6px",
-                    fontSize: "0.7rem",
-                    fontWeight: 700,
-                    minWidth: "18px",
-                    textAlign: "center",
-                  }}>
-                    {items.length}
-                  </span>
-                </span>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Tabbed Content */}
-      <div style={{ marginBottom: "1rem" }}>
-        <div style={{
-          display: "flex",
-          gap: "0",
-          borderBottom: "1px solid var(--border-subtle)",
-          marginBottom: "1.5rem",
-        }}>
-          {[
-            { key: "contradictions" as const, label: `⚔️ Contradictions (${contradictions.length})` },
-            { key: "edge_cases" as const, label: `🔍 Edge Cases (${edge_cases.length})` },
-            { key: "compliance" as const, label: `🏷️ Compliance (${compliance_tags.length})` },
-          ].map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              style={{
-                padding: "10px 20px",
-                fontSize: "0.88rem",
-                fontWeight: 600,
-                background: "none",
-                border: "none",
-                borderBottom: activeTab === tab.key ? "2px solid var(--accent-primary)" : "2px solid transparent",
-                color: activeTab === tab.key ? "var(--accent-primary)" : "var(--text-secondary)",
-                cursor: "pointer",
-                transition: "all 0.2s ease",
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Contradictions Tab */}
-        {activeTab === "contradictions" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            {contradictions.length === 0 ? (
-              <div className="empty-state" style={{ padding: "2rem" }}>
-                <div className="empty-state-icon">✅</div>
-                <h3>No contradictions detected</h3>
-                <p>All sections are consistent with each other.</p>
-              </div>
-            ) : (
-              contradictions.map((c) => {
-                const sev = severityConfig[c.severity] || severityConfig.MEDIUM;
-                return (
                   <div
-                    key={c.id}
                     style={{
-                      background: "var(--bg-card)",
-                      border: `1px solid ${c.resolved ? "var(--border-subtle)" : sev.border}`,
-                      borderRadius: "12px",
-                      padding: "20px",
-                      opacity: c.resolved ? 0.6 : 1,
-                      transition: "all 0.2s ease",
-                      borderLeft: `4px solid ${c.resolved ? "#22c55e" : sev.color}`,
-                    }}
-                  >
-                    {/* Header */}
-                    <div style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      marginBottom: "12px",
-                    }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                        <span style={{
-                          padding: "3px 10px",
-                          borderRadius: "8px",
-                          fontSize: "0.72rem",
-                          fontWeight: 700,
-                          background: sev.bg,
-                          color: sev.color,
-                          border: `1px solid ${sev.border}`,
-                        }}>
-                          {sev.label}
-                        </span>
-                        <span style={{ fontSize: "0.82rem", color: "var(--text-muted)", fontWeight: 500 }}>
-                          §{c.section_a_index + 1} ↔ §{c.section_b_index + 1}
-                        </span>
-                      </div>
-                      {c.resolved ? (
-                        <span style={{ fontSize: "0.78rem", color: "#22c55e", fontWeight: 600 }}>
-                          ✓ Resolved
-                        </span>
-                      ) : (
-                        c.id && <ResolveButton onClick={() => handleResolveContradiction(c.id!)} />
-                      )}
-                    </div>
-
-                    {/* Conflicting sections side-by-side */}
-                    <div style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: "8px",
-                      marginBottom: "12px",
-                    }}>
-                      <div style={{
-                        background: "var(--bg-tertiary)",
-                        padding: "10px 14px",
-                        borderRadius: "8px",
-                        borderLeft: "3px solid var(--accent-primary)",
-                      }}>
-                        <div style={{
-                          fontSize: "0.72rem",
-                          color: "var(--text-muted)",
-                          fontWeight: 600,
-                          textTransform: "uppercase",
-                          letterSpacing: "0.05em",
-                          marginBottom: "4px",
-                        }}>
-                          Section A
-                        </div>
-                        <div style={{ fontSize: "0.88rem", fontWeight: 600, color: "var(--text-primary)" }}>
-                          §{c.section_a_index + 1} · {c.section_a_heading}
-                        </div>
-                      </div>
-                      <div style={{
-                        background: "var(--bg-tertiary)",
-                        padding: "10px 14px",
-                        borderRadius: "8px",
-                        borderLeft: "3px solid var(--accent-secondary, #a855f7)",
-                      }}>
-                        <div style={{
-                          fontSize: "0.72rem",
-                          color: "var(--text-muted)",
-                          fontWeight: 600,
-                          textTransform: "uppercase",
-                          letterSpacing: "0.05em",
-                          marginBottom: "4px",
-                        }}>
-                          Section B
-                        </div>
-                        <div style={{ fontSize: "0.88rem", fontWeight: 600, color: "var(--text-primary)" }}>
-                          §{c.section_b_index + 1} · {c.section_b_heading}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Description */}
-                    <p style={{
-                      fontSize: "0.88rem",
-                      color: "var(--text-secondary)",
-                      lineHeight: 1.6,
-                      marginBottom: "10px",
-                    }}>
-                      <strong>Conflict:</strong> {c.description}
-                    </p>
-
-                    {/* Suggested resolution */}
-                    <div style={{
-                      background: "rgba(34, 197, 94, 0.08)",
-                      padding: "10px 14px",
-                      borderRadius: "8px",
-                      fontSize: "0.85rem",
-                      lineHeight: 1.6,
-                      color: "#22c55e",
-                      fontWeight: 500,
-                    }}>
-                      💡 {c.suggested_resolution}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        )}
-
-        {/* Edge Cases Tab */}
-        {activeTab === "edge_cases" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            {edge_cases.length === 0 ? (
-              <div className="empty-state" style={{ padding: "2rem" }}>
-                <div className="empty-state-icon">✅</div>
-                <h3>No edge case gaps detected</h3>
-                <p>All scenarios appear to be well-covered.</p>
-              </div>
-            ) : (
-              edge_cases.map((ec) => {
-                const sev = severityConfig[ec.impact] || severityConfig.MEDIUM;
-                return (
-                  <div
-                    key={ec.id}
-                    style={{
-                      background: "var(--bg-card)",
-                      border: `1px solid ${ec.resolved ? "var(--border-subtle)" : sev.border}`,
-                      borderRadius: "12px",
-                      padding: "20px",
-                      opacity: ec.resolved ? 0.6 : 1,
-                      transition: "all 0.2s ease",
-                      borderLeft: `4px solid ${ec.resolved ? "#22c55e" : sev.color}`,
-                    }}
-                  >
-                    <div style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      marginBottom: "12px",
-                    }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                        <span style={{
-                          padding: "3px 10px",
-                          borderRadius: "8px",
-                          fontSize: "0.72rem",
-                          fontWeight: 700,
-                          background: sev.bg,
-                          color: sev.color,
-                          border: `1px solid ${sev.border}`,
-                        }}>
-                          {sev.label}
-                        </span>
-                        <span style={{ fontSize: "0.82rem", color: "var(--text-muted)", fontWeight: 500 }}>
-                          §{ec.section_index + 1} · {ec.section_heading}
-                        </span>
-                      </div>
-                      {ec.resolved ? (
-                        <span style={{ fontSize: "0.78rem", color: "#22c55e", fontWeight: 600 }}>
-                          ✓ Resolved
-                        </span>
-                      ) : (
-                        ec.id && <ResolveButton onClick={() => handleResolveEdgeCase(ec.id!)} />
-                      )}
-                    </div>
-
-                    <p style={{
-                      fontSize: "0.88rem",
-                      color: "var(--text-secondary)",
-                      lineHeight: 1.6,
-                      marginBottom: "10px",
-                    }}>
-                      <strong>Missing scenario:</strong> {ec.scenario_description}
-                    </p>
-
-                    <div style={{
-                      background: "var(--bg-tertiary)",
-                      padding: "10px 14px",
-                      borderRadius: "8px",
-                      fontSize: "0.85rem",
-                      lineHeight: 1.6,
-                      color: "var(--accent-primary)",
-                      fontWeight: 500,
-                    }}>
-                      ➕ {ec.suggested_addition}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        )}
-
-        {/* Compliance Tags Tab */}
-        {activeTab === "compliance" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            {compliance_tags.length === 0 ? (
-              <div className="empty-state" style={{ padding: "2rem" }}>
-                <div className="empty-state-icon">🏷️</div>
-                <h3>No compliance areas detected</h3>
-                <p>No sections flagged for payments, auth, PII, or external APIs.</p>
-              </div>
-            ) : (
-              Object.entries(tagGroups).map(([tag, items]) => {
-                const cfg = complianceColors[tag] || complianceColors.security;
-                const label = complianceLabels[tag] || tag;
-                return (
-                  <div key={tag}>
-                    <h3 style={{
-                      fontSize: "0.95rem",
-                      fontWeight: 700,
-                      marginBottom: "10px",
-                      color: cfg.color,
                       display: "flex",
                       alignItems: "center",
-                      gap: "8px",
-                    }}>
-                      {label}
-                      <span style={{
-                        background: cfg.bg,
-                        border: `1px solid ${cfg.border}`,
-                        borderRadius: "10px",
-                        padding: "1px 8px",
-                        fontSize: "0.72rem",
-                      }}>
-                        {items.length} section{items.length > 1 ? "s" : ""}
-                      </span>
-                    </h3>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" }}>
-                      {items.map((ct) => (
-                        <div
-                          key={ct.id}
-                          style={{
-                            background: "var(--bg-card)",
-                            border: `1px solid ${cfg.border}`,
-                            borderRadius: "10px",
-                            padding: "14px 18px",
-                            borderLeft: `3px solid ${cfg.color}`,
-                          }}
-                        >
-                          <div style={{
-                            fontSize: "0.85rem",
-                            fontWeight: 600,
-                            marginBottom: "6px",
-                            color: "var(--text-primary)",
-                          }}>
-                            §{ct.section_index + 1} · {ct.section_heading}
-                          </div>
-                          <div style={{
-                            fontSize: "0.82rem",
-                            color: "var(--text-secondary)",
-                            lineHeight: 1.5,
-                          }}>
-                            {ct.reason}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                      justifyContent: "center",
+                      minHeight: 200,
+                    }}
+                  >
+                    <QualityGauge
+                      score={quality_score.overall}
+                      size={180}
+                      label="Overall Quality"
+                    />
                   </div>
-                );
-              })
-            )}
-          </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                    <ScoreBar label="Completeness" value={quality_score.completeness} />
+                    <ScoreBar label="Clarity" value={quality_score.clarity} />
+                    <ScoreBar label="Consistency" value={quality_score.consistency} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </FadeIn>
+        </StaggerItem>
+
+        <StaggerItem>
+          <FadeIn delay={0.05}>
+            <div className="kpi-row">
+              <KpiCard
+                label="Contradictions"
+                value={contradictions.length}
+                icon={<GitCompare size={22} strokeWidth={2} aria-hidden />}
+                iconBg={contradictions.length > 0 ? "var(--well-red)" : "var(--well-green)"}
+                delay={0}
+              />
+              <KpiCard
+                label="Edge Case Gaps"
+                value={edge_cases.length}
+                icon={<AlertTriangle size={22} strokeWidth={2} aria-hidden />}
+                iconBg={edge_cases.length > 0 ? "var(--well-amber)" : "var(--well-green)"}
+                delay={0.05}
+              />
+              <KpiCard
+                label="Compliance Tags"
+                value={compliance_tags.length}
+                icon={<Tag size={22} strokeWidth={2} aria-hidden />}
+                iconBg="var(--well-blue)"
+                delay={0.1}
+              />
+            </div>
+          </FadeIn>
+        </StaggerItem>
+
+        {compliance_tags.length > 0 && (
+          <StaggerItem>
+            <FadeIn delay={0.1}>
+              <div className="section-card" style={{ marginBottom: "1.5rem" }}>
+                <div className="section-card-header">
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Tag size={18} aria-hidden />
+                    Compliance Areas
+                  </span>
+                  <ChevronDown size={16} style={{ opacity: 0.45 }} aria-hidden />
+                </div>
+                <div className="section-card-body">
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {Object.entries(tagGroups).map(([tag, items]) => {
+                      const label = complianceLabels[tag] ?? tag.replace(/_/g, " ");
+                      return (
+                        <Badge key={tag} variant="neutral" className="compliance-tag-pill">
+                          {label}
+                          <span style={{ opacity: 0.85, fontWeight: 700 }}>{items.length}</span>
+                        </Badge>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </FadeIn>
+          </StaggerItem>
         )}
-      </div>
-    </div>
+
+        <StaggerItem>
+          <FadeIn delay={0.12}>
+            <Tabs
+              items={tabItems}
+              active={activeTab}
+              onChange={(key) =>
+                setActiveTab(key as "contradictions" | "edge_cases" | "compliance")
+              }
+              className="quality-tabs"
+            />
+            <div style={{ marginTop: "1.25rem" }}>
+              <AnimatePresence mode="wait">
+                {activeTab === "contradictions" && (
+                  <motion.div
+                    key="contradictions"
+                    role="tabpanel"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    {contradictions.length === 0 ? (
+                      <EmptyState
+                        icon={<CheckCircle2 size={40} strokeWidth={1.5} aria-hidden />}
+                        title="No contradictions detected"
+                        description="All sections are consistent with each other."
+                      />
+                    ) : (
+                      <>
+                        {contradictions.some((c) => !c.resolved) && (
+                          <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+                            <button type="button" className="btn btn-sm btn-primary" onClick={handleBulkAcceptContradictions} disabled={bulkLoading}>
+                              {bulkLoading ? "Processing…" : "Accept All Resolutions"}
+                            </button>
+                            <button type="button" className="btn btn-sm btn-success" onClick={handleBulkResolveContradictions} disabled={bulkLoading}>
+                              {bulkLoading ? "Processing…" : "Mark All Resolved"}
+                            </button>
+                          </div>
+                        )}
+                      <StaggerList>
+                        {contradictions.map((c) => {
+                          const sev = severityStyle[c.severity] ?? severityStyle.MEDIUM;
+                          return (
+                            <StaggerItem key={c.id ?? `${c.section_a_index}-${c.section_b_index}`}>
+                              <div
+                                className="card card-flat quality-issue-card"
+                                style={{
+                                  marginBottom: "0.75rem",
+                                  borderLeft: `4px solid ${c.resolved ? "var(--success)" : sev.color}`,
+                                  borderColor: c.resolved ? "var(--border-subtle)" : sev.border,
+                                  opacity: c.resolved ? 0.72 : 1,
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "flex-start",
+                                    gap: 12,
+                                    marginBottom: 12,
+                                    flexWrap: "wrap",
+                                  }}
+                                >
+                                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                                    <Badge variant={severityVariant(c.severity)}>{c.severity}</Badge>
+                                    <span
+                                      style={{
+                                        fontSize: "0.8125rem",
+                                        color: "var(--text-muted)",
+                                        fontWeight: 500,
+                                      }}
+                                    >
+                                      {sectionRef(c.section_a_index)} ↔ {sectionRef(c.section_b_index)}
+                                    </span>
+                                  </div>
+                                  {c.resolved ? (
+                                    <Badge variant="success">
+                                      <CheckCircle2 size={12} aria-hidden />
+                                      Resolved
+                                    </Badge>
+                                  ) : (
+                                    c.id && (
+                                      <div style={{ display: "flex", gap: "0.35rem", flexShrink: 0 }}>
+                                        {c.suggested_resolution && (
+                                          <button
+                                            type="button"
+                                            className="btn btn-sm btn-primary"
+                                            onClick={() => handleAcceptContradiction(c.id!)}
+                                          >
+                                            Accept resolution
+                                          </button>
+                                        )}
+                                        <button
+                                          type="button"
+                                          className="btn btn-sm btn-success"
+                                          onClick={() => handleResolveContradiction(c.id!)}
+                                        >
+                                          Mark resolved
+                                        </button>
+                                      </div>
+                                    )
+                                  )}
+                                </div>
+
+                                <div
+                                  style={{
+                                    display: "grid",
+                                    gridTemplateColumns: "1fr 1fr",
+                                    gap: 10,
+                                    marginBottom: 12,
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      background: "var(--bg-tertiary)",
+                                      padding: "10px 14px",
+                                      borderRadius: "var(--radius-md)",
+                                      borderLeft: "3px solid var(--accent-primary)",
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        fontSize: "0.6875rem",
+                                        color: "var(--text-muted)",
+                                        fontWeight: 600,
+                                        textTransform: "uppercase",
+                                        letterSpacing: "0.06em",
+                                        marginBottom: 4,
+                                      }}
+                                    >
+                                      Section A
+                                    </div>
+                                    <div
+                                      style={{
+                                        fontSize: "0.875rem",
+                                        fontWeight: 600,
+                                        color: "var(--text-primary)",
+                                      }}
+                                    >
+                                      {sectionRef(c.section_a_index)} · {c.section_a_heading}
+                                    </div>
+                                  </div>
+                                  <div
+                                    style={{
+                                      background: "var(--bg-tertiary)",
+                                      padding: "10px 14px",
+                                      borderRadius: "var(--radius-md)",
+                                      borderLeft: "3px solid var(--accent-secondary, #a855f7)",
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        fontSize: "0.6875rem",
+                                        color: "var(--text-muted)",
+                                        fontWeight: 600,
+                                        textTransform: "uppercase",
+                                        letterSpacing: "0.06em",
+                                        marginBottom: 4,
+                                      }}
+                                    >
+                                      Section B
+                                    </div>
+                                    <div
+                                      style={{
+                                        fontSize: "0.875rem",
+                                        fontWeight: 600,
+                                        color: "var(--text-primary)",
+                                      }}
+                                    >
+                                      {sectionRef(c.section_b_index)} · {c.section_b_heading}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <p
+                                  style={{
+                                    fontSize: "0.875rem",
+                                    color: "var(--text-secondary)",
+                                    lineHeight: 1.6,
+                                    marginBottom: 10,
+                                  }}
+                                >
+                                  <strong>Conflict:</strong> {c.description}
+                                </p>
+
+                                <div
+                                  style={{
+                                    background: "var(--bg-success-subtle)",
+                                    padding: "10px 14px",
+                                    borderRadius: "var(--radius-md)",
+                                    fontSize: "0.8125rem",
+                                    lineHeight: 1.6,
+                                    color: "var(--success)",
+                                    fontWeight: 500,
+                                  }}
+                                >
+                                  {c.suggested_resolution}
+                                </div>
+                              </div>
+                            </StaggerItem>
+                          );
+                        })}
+                      </StaggerList>
+                      </>
+                    )}
+                  </motion.div>
+                )}
+
+                {activeTab === "edge_cases" && (
+                  <motion.div
+                    key="edge_cases"
+                    role="tabpanel"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    {edge_cases.length === 0 ? (
+                      <EmptyState
+                        icon={<CheckCircle2 size={40} strokeWidth={1.5} aria-hidden />}
+                        title="No edge case gaps detected"
+                        description="All scenarios appear to be well-covered."
+                      />
+                    ) : (
+                      <>
+                        {edge_cases.some((ec) => !ec.resolved) && (
+                          <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+                            <button type="button" className="btn btn-sm btn-primary" onClick={handleBulkAcceptEdgeCases} disabled={bulkLoading}>
+                              {bulkLoading ? "Processing…" : "Accept All Suggestions"}
+                            </button>
+                            <button type="button" className="btn btn-sm btn-success" onClick={handleBulkResolveEdgeCases} disabled={bulkLoading}>
+                              {bulkLoading ? "Processing…" : "Mark All Resolved"}
+                            </button>
+                          </div>
+                        )}
+                      <StaggerList>
+                        {edge_cases.map((ec) => {
+                          const sev = severityStyle[ec.impact] ?? severityStyle.MEDIUM;
+                          return (
+                            <StaggerItem key={ec.id ?? `${ec.section_index}-${ec.scenario_description.slice(0, 24)}`}>
+                              <div
+                                className="card card-flat quality-issue-card"
+                                style={{
+                                  marginBottom: "0.75rem",
+                                  borderLeft: `4px solid ${ec.resolved ? "var(--success)" : sev.color}`,
+                                  borderColor: ec.resolved ? "var(--border-subtle)" : sev.border,
+                                  opacity: ec.resolved ? 0.72 : 1,
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "flex-start",
+                                    gap: 12,
+                                    marginBottom: 12,
+                                    flexWrap: "wrap",
+                                  }}
+                                >
+                                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                                    <Badge variant={severityVariant(ec.impact)}>{ec.impact} impact</Badge>
+                                    <span
+                                      style={{
+                                        fontSize: "0.8125rem",
+                                        color: "var(--text-muted)",
+                                        fontWeight: 500,
+                                      }}
+                                    >
+                                      {sectionRef(ec.section_index)} · {ec.section_heading}
+                                    </span>
+                                  </div>
+                                  {ec.resolved ? (
+                                    <Badge variant="success">
+                                      <CheckCircle2 size={12} aria-hidden />
+                                      Resolved
+                                    </Badge>
+                                  ) : (
+                                    ec.id && (
+                                      <div style={{ display: "flex", gap: "0.35rem", flexShrink: 0 }}>
+                                        {ec.suggested_addition && (
+                                          <button
+                                            type="button"
+                                            className="btn btn-sm btn-primary"
+                                            onClick={() => handleAcceptEdgeCase(ec.id!)}
+                                          >
+                                            Accept suggestion
+                                          </button>
+                                        )}
+                                        <button
+                                          type="button"
+                                          className="btn btn-sm btn-success"
+                                          onClick={() => handleResolveEdgeCase(ec.id!)}
+                                        >
+                                          Mark resolved
+                                        </button>
+                                      </div>
+                                    )
+                                  )}
+                                </div>
+
+                                <p
+                                  style={{
+                                    fontSize: "0.875rem",
+                                    color: "var(--text-secondary)",
+                                    lineHeight: 1.6,
+                                    marginBottom: 10,
+                                  }}
+                                >
+                                  <strong>Missing scenario:</strong> {ec.scenario_description}
+                                </p>
+
+                                <div
+                                  style={{
+                                    background: "var(--bg-accent-subtle)",
+                                    padding: "10px 14px",
+                                    borderRadius: "var(--radius-md)",
+                                    fontSize: "0.8125rem",
+                                    lineHeight: 1.6,
+                                    color: "var(--accent-primary)",
+                                    fontWeight: 500,
+                                  }}
+                                >
+                                  {ec.suggested_addition}
+                                </div>
+                              </div>
+                            </StaggerItem>
+                          );
+                        })}
+                      </StaggerList>
+                      </>
+                    )}
+                  </motion.div>
+                )}
+
+                {activeTab === "compliance" && (
+                  <motion.div
+                    key="compliance"
+                    role="tabpanel"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    {compliance_tags.length === 0 ? (
+                      <EmptyState
+                        icon={<Tag size={40} strokeWidth={1.5} aria-hidden />}
+                        title="No compliance areas detected"
+                        description="No sections flagged for payments, auth, PII, or external APIs."
+                      />
+                    ) : (
+                      <StaggerList>
+                        {Object.entries(tagGroups).map(([tag, items]) => {
+                          const Icon = complianceIcons[tag] ?? Shield;
+                          const label = complianceLabels[tag] ?? tag.replace(/_/g, " ");
+                          return (
+                            <StaggerItem key={tag}>
+                              <div style={{ marginBottom: "1.25rem" }}>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 10,
+                                    marginBottom: 12,
+                                    flexWrap: "wrap",
+                                  }}
+                                >
+                                  <Icon size={18} aria-hidden style={{ color: "var(--accent-primary)" }} />
+                                  <h3
+                                    style={{
+                                      fontSize: "0.9375rem",
+                                      fontWeight: 700,
+                                      margin: 0,
+                                      color: "var(--text-primary)",
+                                    }}
+                                  >
+                                    {label}
+                                  </h3>
+                                  <Badge variant="neutral">{items.length}</Badge>
+                                </div>
+                                <StaggerList>
+                                  {items.map((ct) => (
+                                    <StaggerItem key={ct.id ?? `${tag}-${ct.section_index}`}>
+                                      <div
+                                        className="card card-flat"
+                                        style={{
+                                          marginBottom: 8,
+                                          borderLeft: "3px solid var(--accent-primary)",
+                                        }}
+                                      >
+                                        <div
+                                          style={{
+                                            fontSize: "0.8125rem",
+                                            fontWeight: 600,
+                                            marginBottom: 6,
+                                            color: "var(--text-primary)",
+                                          }}
+                                        >
+                                          {sectionRef(ct.section_index)} · {ct.section_heading}
+                                        </div>
+                                        <div
+                                          style={{
+                                            fontSize: "0.8125rem",
+                                            color: "var(--text-secondary)",
+                                            lineHeight: 1.5,
+                                          }}
+                                        >
+                                          {ct.reason}
+                                        </div>
+                                      </div>
+                                    </StaggerItem>
+                                  ))}
+                                </StaggerList>
+                              </div>
+                            </StaggerItem>
+                          );
+                        })}
+                      </StaggerList>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </FadeIn>
+        </StaggerItem>
+      </StaggerList>
+    </PageShell>
+  );
+}
+
+function EmptyStateWrap({
+  title,
+  description,
+  docId,
+}: {
+  title: string;
+  description: string;
+  docId: string;
+}) {
+  return (
+    <EmptyState
+      icon={<BarChart3 size={40} strokeWidth={1.5} aria-hidden />}
+      title={title}
+      description={description}
+      action={
+        <Link href={`/documents/${docId}`} className="btn btn-secondary btn-sm">
+          Back to document
+        </Link>
+      }
+    />
   );
 }

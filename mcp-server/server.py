@@ -6,13 +6,21 @@ from fastmcp import FastMCP
 
 from prompts import agent_loop
 from resources import fs_document, task_board
-from tools import analysis, collaboration, documents, exports, impact, reverse, tasks
+from tools import analysis, build, collaboration, documents, exports, impact, reverse, tasks
 
 mcp = FastMCP(
     name="fs-intelligence-platform",
     instructions=(
-        "You are connected to the FS Intelligence Platform. "
-        "Follow an audit-first loop: discover, analyze, plan, execute, verify, repeat."
+        "You are connected to the FS Intelligence Platform — an enterprise system that "
+        "analyzes Functional Specifications, decomposes them into tasks, and orchestrates "
+        "autonomous product builds. Follow the audit-first protocol: "
+        "(1) DISCOVER — fetch document, sections, quality score, and blockers. "
+        "(2) ANALYZE — resolve ambiguities, contradictions, and edge cases until quality >= 90. "
+        "(3) PLAN — decompose into tasks, build dependency graph, check library for reuse. "
+        "(4) EXECUTE — implement each task in dependency order, register files, verify completion. "
+        "(5) VERIFY — run post_build_check, confirm traceability, export artifacts. "
+        "Never skip a phase. Never mark a task complete without calling verify_task_completion. "
+        "If quality drops below 90 at any checkpoint, stop and fix before continuing."
     ),
 )
 
@@ -23,6 +31,7 @@ impact.register(mcp)
 collaboration.register(mcp)
 exports.register(mcp)
 reverse.register(mcp)
+build.register(mcp)
 
 fs_document.register(mcp)
 task_board.register(mcp)

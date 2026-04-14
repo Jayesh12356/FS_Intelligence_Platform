@@ -1,158 +1,972 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { getActivityLog, getMCPSessions, getMCPSessionEvents, getMCPSession } from "@/lib/api";
+import type { MCPSession, MCPSessionEvent, ActivityLogEntry } from "@/lib/api";
 import {
-  getMcpSession,
-  listMcpSessionEvents,
-  listMcpSessions,
-  MCPSession,
-  MCPSessionEvent,
-} from "@/lib/api";
+  PageShell,
+  KpiCard,
+  Tabs,
+  FadeIn,
+  StaggerList,
+  StaggerItem,
+  EmptyState,
+} from "@/components/index";
+import Badge from "@/components/Badge";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Activity,
+  Zap,
+  Clock,
+  Radio,
+  ChevronDown,
+  RefreshCw,
+  CheckCircle2,
+  AlertTriangle,
+  Terminal,
+  FileText,
+  Search,
+  Upload,
+  BarChart3,
+  Edit3,
+  PlusCircle,
+  XCircle,
+} from "lucide-react";
+import Link from "next/link";
+
+type MainTab = "activity" | "sessions";
 
 function formatTime(ts: string | null): string {
   if (!ts) return "—";
-  return new Date(ts).toLocaleString();
+  return new Date(ts).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+function formatDuration(ms: number | null): string {
+  if (ms == null || ms < 0) return "—";
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  if (m < 60) return `${m}m ${r}s`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return `${h}h ${rm}m`;
+}
+
+function isSessionActive(s: MCPSession): boolean {
+  return s.status === "RUNNING";
+}
+
+function truncateId(id: string, keep = 10): string {
+  if (id.length <= keep) return id;
+  return `${id.slice(0, keep)}…`;
+}
+
+function activityBorderColor(eventType: string): string {
+  const t = eventType.toUpperCase();
+  if (
+    t.includes("REJECT") ||
+    t.includes("FAIL") ||
+    t.includes("ERROR") ||
+    t === "ANALYSIS_CANCELLED"
+  ) {
+    return "var(--error)";
+  }
+  if (t === "ANALYZED" || t === "APPROVED") return "var(--success)";
+  if (t === "UPLOADED" || t === "PARSED") return "var(--accent-primary)";
+  if (t === "SECTION_EDITED" || t === "SECTION_ADDED") return "var(--warning)";
+  return "var(--accent-primary)";
+}
+
+function ActivityTypeIcon({ eventType }: { eventType: string }) {
+  const t = eventType.toUpperCase();
+  if (t === "UPLOADED") return <Upload size={18} aria-hidden />;
+  if (t === "PARSED") return <FileText size={18} aria-hidden />;
+  if (t === "ANALYZED") return <BarChart3 size={18} aria-hidden />;
+  if (t === "SECTION_EDITED") return <Edit3 size={18} aria-hidden />;
+  if (t === "SECTION_ADDED") return <PlusCircle size={18} aria-hidden />;
+  if (t === "ANALYSIS_CANCELLED") return <XCircle size={18} aria-hidden />;
+  if (t === "APPROVED") return <CheckCircle2 size={18} aria-hidden />;
+  return <Activity size={18} aria-hidden />;
+}
+
+function humanizeEventType(eventType: string): string {
+  return eventType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function eventDotClass(e: MCPSessionEvent): string {
+  const blob = `${e.event_type} ${e.status} ${e.message || ""}`.toLowerCase();
+  if (blob.includes("fail") || blob.includes("error")) return "timeline-dot error";
+  if (blob.includes("pass") || blob.includes("ok") || blob.includes("success"))
+    return "timeline-dot success";
+  return "timeline-dot active";
+}
+
+function EventTypeIcon({ e }: { e: MCPSessionEvent }) {
+  const blob = `${e.event_type} ${e.status} ${e.message || ""}`.toLowerCase();
+  if (blob.includes("fail") || blob.includes("error"))
+    return <AlertTriangle size={14} aria-hidden />;
+  if (blob.includes("pass") || blob.includes("ok") || blob.includes("success"))
+    return <CheckCircle2 size={14} aria-hidden />;
+  return <Terminal size={14} aria-hidden />;
+}
+
+function mcpEventTitle(e: MCPSessionEvent): string {
+  const msg = e.message?.trim();
+  if (msg) return msg;
+  return humanizeEventType(e.event_type);
+}
+
+function mcpEventSubtitle(e: MCPSessionEvent): string {
+  const bits: string[] = [formatTime(e.created_at)];
+  bits.push(`Phase ${e.phase}`);
+  if (e.status && e.status.toUpperCase() !== "OK") bits.push(e.status);
+  return bits.join(" · ");
 }
 
 export default function MonitoringPage() {
+  const [mainTab, setMainTab] = useState<MainTab>("activity");
+
+  const [activityEvents, setActivityEvents] = useState<ActivityLogEntry[]>([]);
+  const [activityTotal, setActivityTotal] = useState(0);
+  const [activityLoading, setActivityLoading] = useState(true);
+  const [activityRefreshing, setActivityRefreshing] = useState(false);
+  const [activityError, setActivityError] = useState<string | null>(null);
+  const [docSearch, setDocSearch] = useState("");
+  const [eventTypeFilter, setEventTypeFilter] = useState("");
+  const [knownEventTypes, setKnownEventTypes] = useState<string[]>([]);
+
   const [sessions, setSessions] = useState<MCPSession[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selected, setSelected] = useState<MCPSession | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [selectedSession, setSelectedSession] = useState<MCPSession | null>(null);
   const [events, setEvents] = useState<MCPSessionEvent[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [listRefreshing, setListRefreshing] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [eventCounts, setEventCounts] = useState<Record<string, number>>({});
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
+  const selectedIdRef = useRef<string | null>(null);
   useEffect(() => {
-    let mounted = true;
-    async function loadSessions() {
+    selectedIdRef.current = selectedSessionId;
+  }, [selectedSessionId]);
+
+  const timelineEndRef = useRef<HTMLDivElement>(null);
+
+  const fetchActivity = useCallback(
+    async (opts?: { manual?: boolean }) => {
+      if (opts?.manual) setActivityRefreshing(true);
+      else setActivityLoading(true);
       try {
-        const res = await listMcpSessions(100);
-        if (!mounted) return;
-        const rows = res.data?.sessions || [];
-        setSessions(rows);
-        if (!selectedId && rows.length > 0) {
-          setSelectedId(rows[0].id);
+        const res = await getActivityLog(
+          50,
+          0,
+          eventTypeFilter || undefined,
+          undefined
+        );
+        const rows = res.data?.events ?? [];
+        setActivityEvents(rows);
+        setActivityTotal(res.data?.total ?? rows.length);
+        if (!eventTypeFilter) {
+          const types = Array.from(
+            new Set(rows.map((r) => r.event_type).filter(Boolean))
+          ).sort() as string[];
+          setKnownEventTypes(types);
         }
+        setActivityError(null);
       } catch (e) {
-        if (!mounted) return;
-        setError(e instanceof Error ? e.message : "Failed to load sessions");
+        setActivityError(e instanceof Error ? e.message : "Failed to load activity");
       } finally {
-        if (mounted) setLoading(false);
+        setActivityLoading(false);
+        if (opts?.manual) setActivityRefreshing(false);
       }
-    }
-    loadSessions();
-    const timer = setInterval(loadSessions, 5000);
-    return () => {
-      mounted = false;
-      clearInterval(timer);
-    };
-  }, [selectedId]);
+    },
+    [eventTypeFilter]
+  );
 
   useEffect(() => {
-    if (!selectedId) return;
-    const sid = selectedId;
+    void fetchActivity();
+  }, [fetchActivity]);
+
+  const fetchSessions = useCallback(async (opts?: { isManual?: boolean }) => {
+    if (opts?.isManual) setListRefreshing(true);
+    try {
+      const res = await getMCPSessions(100);
+      const rows = res.data?.sessions || [];
+      setSessions(rows);
+      if (!selectedIdRef.current && rows.length > 0) {
+        setSelectedSessionId(rows[0].id);
+      }
+      setSessionsError(null);
+    } catch (e) {
+      setSessionsError(e instanceof Error ? e.message : "Failed to load sessions");
+    } finally {
+      setSessionsLoading(false);
+      if (opts?.isManual) setListRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (mainTab !== "sessions") return;
+    setSessionsLoading(true);
+    void fetchSessions();
+  }, [mainTab, fetchSessions]);
+
+  useEffect(() => {
+    if (mainTab !== "sessions" || !autoRefresh) return;
+    const timer = setInterval(() => void fetchSessions(), 5000);
+    return () => clearInterval(timer);
+  }, [mainTab, autoRefresh, fetchSessions]);
+
+  useEffect(() => {
+    if (mainTab !== "sessions" || !selectedSessionId) return;
+    const sid = selectedSessionId;
     let cancelled = false;
     async function loadDetails() {
+      setEventsLoading(true);
       try {
         const [sessionRes, eventRes] = await Promise.all([
-          getMcpSession(sid),
-          listMcpSessionEvents(sid, 300),
+          getMCPSession(sid),
+          getMCPSessionEvents(sid, 300),
         ]);
         if (cancelled) return;
-        setSelected(sessionRes.data || null);
-        setEvents(eventRes.data?.events || []);
+        setSelectedSession(sessionRes.data || null);
+        const evs = eventRes.data?.events || [];
+        setEvents(evs);
+        setEventCounts((prev) => ({ ...prev, [sid]: evs.length }));
+        setSessionsError(null);
       } catch (e) {
         if (cancelled) return;
-        setError(e instanceof Error ? e.message : "Failed to load session details");
+        setSessionsError(
+          e instanceof Error ? e.message : "Failed to load session details"
+        );
+      } finally {
+        if (!cancelled) setEventsLoading(false);
       }
     }
-    loadDetails();
+    void loadDetails();
+    if (!autoRefresh) {
+      return () => {
+        cancelled = true;
+      };
+    }
     const timer = setInterval(loadDetails, 2000);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [selectedId]);
+  }, [mainTab, selectedSessionId, autoRefresh]);
 
-  const fsChecks = useMemo(() => {
-    return events.filter((e) =>
-      e.event_type.includes("check") || e.event_type.includes("manifest")
+  const sortedActivity = useMemo(() => {
+    const q = docSearch.trim().toLowerCase();
+    let rows = [...activityEvents];
+    if (q) {
+      rows = rows.filter((e) => e.document_name.toLowerCase().includes(q));
+    }
+    rows.sort((a, b) => {
+      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return tb - ta;
+    });
+    return rows;
+  }, [activityEvents, docSearch]);
+
+  const documentsActiveCount = useMemo(() => {
+    const ids = new Set<string>();
+    for (const e of activityEvents) {
+      if (e.fs_id) ids.add(e.fs_id);
+    }
+    return ids.size;
+  }, [activityEvents]);
+
+  const latestActivityTime = useMemo(() => {
+    let best: string | null = null;
+    let bestT = 0;
+    for (const e of activityEvents) {
+      if (!e.created_at) continue;
+      const t = new Date(e.created_at).getTime();
+      if (t > bestT) {
+        bestT = t;
+        best = e.created_at;
+      }
+    }
+    return best;
+  }, [activityEvents]);
+
+  const sortedEvents = useMemo(() => {
+    return [...events].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     );
   }, [events]);
 
+  const activeCount = useMemo(
+    () => sessions.filter((s) => isSessionActive(s)).length,
+    [sessions]
+  );
+
+  const latestSessionDuration = useMemo(() => {
+    const s = sessions[0];
+    if (!s) return null;
+    const start = new Date(s.started_at).getTime();
+    const end = s.ended_at ? new Date(s.ended_at).getTime() : Date.now();
+    return end - start;
+  }, [sessions]);
+
+  useEffect(() => {
+    if (sortedEvents.length === 0) return;
+    timelineEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [sortedEvents, mainTab]);
+
+  const handleSessionsManualRefresh = () => {
+    void fetchSessions({ isManual: true });
+    if (!selectedSessionId) return;
+    const sid = selectedSessionId;
+    void (async () => {
+      setEventsLoading(true);
+      try {
+        const [sessionRes, eventRes] = await Promise.all([
+          getMCPSession(sid),
+          getMCPSessionEvents(sid, 300),
+        ]);
+        setSelectedSession(sessionRes.data || null);
+        const evs = eventRes.data?.events || [];
+        setEvents(evs);
+        setEventCounts((prev) => ({ ...prev, [sid]: evs.length }));
+        setSessionsError(null);
+      } catch (e) {
+        setSessionsError(
+          e instanceof Error ? e.message : "Failed to load session details"
+        );
+      } finally {
+        setEventsLoading(false);
+      }
+    })();
+  };
+
+  const combinedError = activityError || sessionsError;
+
   return (
-    <section>
-      <h1 style={{ marginBottom: "0.5rem" }}>Live MCP Monitoring</h1>
-      <p style={{ color: "var(--text-muted)", marginBottom: "1rem" }}>
-        Observe active MCP sessions, current phase, compliance checks, and errors in near real time.
-      </p>
-      {error && (
-        <div className="card" style={{ borderLeft: "3px solid #ef4444", marginBottom: "1rem" }}>
-          {error}
-        </div>
-      )}
-      <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: "1rem" }}>
-        <div className="card">
-          <h3>Sessions</h3>
-          {loading && <p>Loading...</p>}
-          {!loading && sessions.length === 0 && <p>No MCP sessions yet.</p>}
-          <div style={{ display: "grid", gap: "0.5rem" }}>
-            {sessions.map((s) => (
+    <>
+      <PageShell
+        title="Monitoring"
+        subtitle="See recent document activity and live MCP build sessions"
+        actions={
+          <>
+            {mainTab === "sessions" && (
               <button
-                key={s.id}
-                onClick={() => setSelectedId(s.id)}
+                type="button"
+                className={`tab ${autoRefresh ? "active" : ""}`}
+                onClick={() => setAutoRefresh((v) => !v)}
+                title={autoRefresh ? "Auto-refresh on" : "Auto-refresh off"}
+                style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}
+              >
+                <Radio size={14} aria-hidden />
+                Auto-refresh
+              </button>
+            )}
+            {mainTab === "activity" && (
+              <button
+                type="button"
+                className="tab"
+                onClick={() => void fetchActivity({ manual: true })}
+                disabled={activityRefreshing || activityLoading}
+                style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}
+              >
+                <RefreshCw
+                  size={14}
+                  aria-hidden
+                  style={{
+                    animation: activityRefreshing ? "spin 0.8s linear infinite" : undefined,
+                  }}
+                />
+                Refresh
+              </button>
+            )}
+            {mainTab === "sessions" && (
+              <button
+                type="button"
+                className="tab"
+                onClick={handleSessionsManualRefresh}
+                disabled={listRefreshing || sessionsLoading}
+                style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}
+              >
+                <RefreshCw
+                  size={14}
+                  aria-hidden
+                  style={{
+                    animation: listRefreshing ? "spin 0.8s linear infinite" : undefined,
+                  }}
+                />
+                Refresh
+              </button>
+            )}
+          </>
+        }
+      >
+        {combinedError && (
+          <FadeIn>
+            <div
+              className="card"
+              style={{
+                borderLeft: "3px solid var(--error)",
+                marginBottom: "1rem",
+                padding: "0.75rem 1rem",
+              }}
+            >
+              {combinedError}
+            </div>
+          </FadeIn>
+        )}
+
+        <div style={{ marginBottom: "1.25rem" }}>
+          <Tabs
+            items={[
+              { key: "activity", label: "Activity Log" },
+              { key: "sessions", label: "Build Sessions" },
+            ]}
+            active={mainTab}
+            onChange={(k) => setMainTab(k as MainTab)}
+          />
+        </div>
+
+        <AnimatePresence mode="wait">
+          {mainTab === "activity" && (
+            <motion.div
+              key="activity"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+            >
+              <div className="kpi-row" style={{ marginBottom: "1.25rem" }}>
+                <KpiCard
+                  label="Total events"
+                  value={activityTotal}
+                  icon={<Activity size={20} />}
+                  iconBg="var(--accent-primary)"
+                  delay={0}
+                />
+                <KpiCard
+                  label="Documents active"
+                  value={documentsActiveCount}
+                  icon={<FileText size={20} />}
+                  iconBg="var(--well-green)"
+                  delay={0.05}
+                />
+                <KpiCard
+                  label="Latest event"
+                  valueText={formatTime(latestActivityTime)}
+                  icon={<Clock size={20} />}
+                  iconBg="var(--warning)"
+                  delay={0.1}
+                />
+              </div>
+
+              <div
                 style={{
-                  textAlign: "left",
-                  border: selectedId === s.id ? "1px solid var(--color-primary)" : "1px solid var(--border-color)",
-                  background: "transparent",
-                  borderRadius: "8px",
-                  padding: "0.6rem",
-                  cursor: "pointer",
-                  color: "inherit",
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "0.75rem",
+                  marginBottom: "1rem",
+                  alignItems: "flex-end",
                 }}
               >
-                <div style={{ fontWeight: 600 }}>{s.target_stack || "Unknown stack"}</div>
-                <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>{s.status} - phase {s.phase}/{s.total_phases || "?"}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="card">
-          <h3>Session Details</h3>
-          {!selected && <p>Select a session.</p>}
-          {selected && (
-            <>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(120px,1fr))", gap: "0.75rem", marginBottom: "1rem" }}>
-                <div><strong>Status</strong><div>{selected.status}</div></div>
-                <div><strong>Phase</strong><div>{selected.phase}/{selected.total_phases || "?"}</div></div>
-                <div><strong>Started</strong><div>{formatTime(selected.started_at)}</div></div>
-                <div><strong>Ended</strong><div>{formatTime(selected.ended_at)}</div></div>
-              </div>
-              <h4>FS Compliance / Guardrail Events</h4>
-              <div style={{ maxHeight: 160, overflow: "auto", marginBottom: "1rem" }}>
-                {fsChecks.length === 0 && <p style={{ color: "var(--text-muted)" }}>No compliance events yet.</p>}
-                {fsChecks.map((e) => (
-                  <div key={e.id} style={{ fontSize: "0.85rem", marginBottom: "0.4rem" }}>
-                    [{e.status}] {e.message}
+                <div style={{ flex: "1 1 220px", minWidth: 200 }}>
+                  <label className="form-label" htmlFor="activity-doc-search">
+                    Filter by document
+                  </label>
+                  <div style={{ position: "relative" }}>
+                    <Search
+                      size={16}
+                      style={{
+                        position: "absolute",
+                        left: 12,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        color: "var(--text-muted)",
+                      }}
+                      aria-hidden
+                    />
+                    <input
+                      id="activity-doc-search"
+                      type="search"
+                      className="form-input"
+                      placeholder="Search document name…"
+                      value={docSearch}
+                      onChange={(ev) => setDocSearch(ev.target.value)}
+                      style={{ paddingLeft: "2.25rem", width: "100%" }}
+                    />
                   </div>
-                ))}
+                </div>
+                <div style={{ flex: "0 1 200px" }}>
+                  <label className="form-label" htmlFor="activity-event-type">
+                    Event type
+                  </label>
+                  <select
+                    id="activity-event-type"
+                    className="form-select"
+                    value={eventTypeFilter}
+                    onChange={(ev) => setEventTypeFilter(ev.target.value)}
+                    style={{ width: "100%" }}
+                  >
+                    <option value="">All types</option>
+                    {knownEventTypes.map((t) => (
+                      <option key={t} value={t}>
+                        {humanizeEventType(t)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-              <h4>Timeline</h4>
-              <div style={{ maxHeight: 360, overflow: "auto" }}>
-                {events.map((e) => (
-                  <div key={e.id} style={{ borderBottom: "1px solid var(--border-color)", padding: "0.45rem 0" }}>
-                    <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                      {formatTime(e.created_at)} - phase {e.phase} - {e.event_type}
-                    </div>
-                    <div style={{ fontSize: "0.9rem" }}>{e.message || "(no message)"}</div>
-                  </div>
-                ))}
-              </div>
-            </>
+
+              {activityLoading ? (
+                <div className="card" style={{ padding: "2.5rem", textAlign: "center" }}>
+                  <div className="spinner" style={{ margin: "0 auto 0.75rem" }} aria-hidden />
+                  <p className="page-subtitle" style={{ margin: 0 }}>
+                    Loading activity…
+                  </p>
+                </div>
+              ) : sortedActivity.length === 0 ? (
+                <EmptyState
+                  icon={<Activity size={40} strokeWidth={1.25} />}
+                  title="No activity yet"
+                  description="Upload or analyze a document to see events here."
+                />
+              ) : (
+                <StaggerList
+                  style={{ display: "flex", flexDirection: "column", gap: "0.65rem" }}
+                >
+                  {sortedActivity.map((e) => {
+                    const border = activityBorderColor(e.event_type);
+                    const docHref = `/documents/${e.fs_id}`;
+                    return (
+                      <StaggerItem key={e.id ?? `${e.fs_id}-${e.created_at}-${e.event_type}`}>
+                        <motion.div
+                          className="card card-flat"
+                          initial={{ opacity: 0, x: -6 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          style={{
+                            padding: "0.85rem 1rem",
+                            borderLeft: `4px solid ${border}`,
+                            display: "grid",
+                            gridTemplateColumns: "auto 1fr",
+                            gap: "0.65rem 0.85rem",
+                            alignItems: "start",
+                          }}
+                        >
+                          <div
+                            style={{
+                              color: "var(--text-secondary)",
+                              marginTop: 2,
+                              display: "flex",
+                              alignItems: "center",
+                            }}
+                          >
+                            <ActivityTypeIcon eventType={e.event_type} />
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <div
+                              style={{
+                                display: "flex",
+                                flexWrap: "wrap",
+                                alignItems: "baseline",
+                                justifyContent: "space-between",
+                                gap: "0.35rem 0.75rem",
+                              }}
+                            >
+                              <span style={{ fontWeight: 600, fontSize: "0.9375rem" }}>
+                                {e.event_label || humanizeEventType(e.event_type)}
+                              </span>
+                              <span className="timeline-time" style={{ marginTop: 0 }}>
+                                {formatTime(e.created_at)}
+                              </span>
+                            </div>
+                            <div style={{ marginTop: "0.35rem" }}>
+                              <Link
+                                href={docHref}
+                                className="timeline-desc"
+                                style={{
+                                  fontWeight: 500,
+                                  color: "var(--accent-primary)",
+                                  textDecoration: "none",
+                                }}
+                              >
+                                {e.document_name || "Untitled document"}
+                              </Link>
+                            </div>
+                            {e.detail ? (
+                              <p
+                                className="timeline-desc"
+                                style={{ margin: "0.4rem 0 0", lineHeight: 1.5 }}
+                              >
+                                {e.detail}
+                              </p>
+                            ) : null}
+                          </div>
+                        </motion.div>
+                      </StaggerItem>
+                    );
+                  })}
+                </StaggerList>
+              )}
+            </motion.div>
           )}
-        </div>
-      </div>
-    </section>
+
+          {mainTab === "sessions" && (
+            <motion.div
+              key="sessions"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+            >
+              <div className="kpi-row" style={{ marginBottom: "1.25rem" }}>
+                <KpiCard
+                  label="Active sessions"
+                  value={activeCount}
+                  icon={<Zap size={20} />}
+                  iconBg="var(--well-green)"
+                  delay={0}
+                />
+                <KpiCard
+                  label="Events (selected)"
+                  valueText={selectedSessionId ? String(events.length) : "—"}
+                  icon={<Activity size={20} />}
+                  iconBg="var(--accent-primary)"
+                  delay={0.05}
+                />
+                <KpiCard
+                  label="Latest session duration"
+                  valueText={formatDuration(latestSessionDuration)}
+                  icon={<Clock size={20} />}
+                  iconBg="var(--warning)"
+                  delay={0.1}
+                />
+              </div>
+
+              {sessionsLoading && sessions.length === 0 ? (
+                <div className="card" style={{ padding: "2.5rem", textAlign: "center" }}>
+                  <div className="spinner" style={{ margin: "0 auto 0.75rem" }} aria-hidden />
+                  <p className="page-subtitle" style={{ margin: 0 }}>
+                    Loading sessions…
+                  </p>
+                </div>
+              ) : sessions.length === 0 ? (
+                <EmptyState
+                  icon={<Terminal size={40} strokeWidth={1.25} />}
+                  title="No MCP sessions yet"
+                  description="When a build session starts, it will appear here with a live event timeline."
+                />
+              ) : (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(280px, 320px) 1fr",
+                    gap: "1rem",
+                    alignItems: "stretch",
+                  }}
+                >
+                  <div className="card" style={{ padding: "1rem", minHeight: 420 }}>
+                    <h3 style={{ margin: "0 0 0.75rem", fontSize: "1rem" }}>Sessions</h3>
+                    <StaggerList
+                      style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
+                    >
+                      {sessions.map((s) => {
+                        const active = isSessionActive(s);
+                        const selected = selectedSessionId === s.id;
+                        const count =
+                          eventCounts[s.id] !== undefined
+                            ? eventCounts[s.id]
+                            : selected
+                              ? events.length
+                              : undefined;
+                        return (
+                          <StaggerItem key={s.id}>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedSessionId(s.id)}
+                              className="card"
+                              style={{
+                                width: "100%",
+                                textAlign: "left",
+                                padding: "0.75rem",
+                                cursor: "pointer",
+                                border: selected
+                                  ? "1px solid var(--accent-primary)"
+                                  : "1px solid var(--border-subtle)",
+                                background: selected
+                                  ? "var(--bg-tertiary)"
+                                  : "var(--bg-card)",
+                                borderRadius: "var(--radius-lg)",
+                                color: "inherit",
+                                display: "grid",
+                                gap: "0.35rem",
+                              }}
+                            >
+                              <div
+                                style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+                              >
+                                <span
+                                  title={active ? "Active" : "Inactive"}
+                                  aria-hidden
+                                  style={{
+                                    width: 8,
+                                    height: 8,
+                                    borderRadius: "50%",
+                                    flexShrink: 0,
+                                    background: active ? "var(--success)" : "var(--text-muted)",
+                                    opacity: active ? 1 : 0.45,
+                                    animation: active
+                                      ? "pulse 2s ease-in-out infinite"
+                                      : undefined,
+                                  }}
+                                />
+                                <span
+                                  style={{
+                                    fontFamily: "var(--font-mono, ui-monospace, monospace)",
+                                    fontSize: "0.8125rem",
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  {truncateId(s.id)}
+                                </span>
+                                {count !== undefined && (
+                                  <Badge variant="neutral" style={{ marginLeft: "auto" }}>
+                                    {count} events
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="timeline-time" style={{ marginTop: 0 }}>
+                                Started {formatTime(s.started_at)}
+                              </div>
+                              <div
+                                style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}
+                              >
+                                {s.target_stack || "Unknown stack"} · {s.status} · phase{" "}
+                                {s.phase}/{s.total_phases || "?"}
+                              </div>
+                            </button>
+                          </StaggerItem>
+                        );
+                      })}
+                    </StaggerList>
+                  </div>
+
+                  <div
+                    className="card"
+                    style={{
+                      padding: "1rem",
+                      minHeight: 420,
+                      display: "flex",
+                      flexDirection: "column",
+                    }}
+                  >
+                    <AnimatePresence mode="wait">
+                      {!selectedSessionId ? (
+                        <motion.div
+                          key="empty"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          style={{
+                            flex: 1,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <EmptyState
+                            icon={<Radio size={36} strokeWidth={1.25} />}
+                            title="Select a session"
+                            description="Choose a session on the left to view its event timeline."
+                          />
+                        </motion.div>
+                      ) : (
+                        <motion.div
+                          key={selectedSessionId}
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -6 }}
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            flex: 1,
+                            minHeight: 0,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "flex-start",
+                              justifyContent: "space-between",
+                              gap: "0.75rem",
+                              marginBottom: "0.75rem",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <div>
+                              <h3 style={{ margin: 0, fontSize: "1rem" }}>Event timeline</h3>
+                              <p
+                                className="page-subtitle"
+                                style={{ margin: "0.25rem 0 0", fontSize: "0.8125rem" }}
+                              >
+                                Session{" "}
+                                <span
+                                  style={{
+                                    fontFamily: "var(--font-mono, ui-monospace, monospace)",
+                                  }}
+                                >
+                                  {truncateId(selectedSessionId, 14)}
+                                </span>
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setDetailsOpen((o) => !o)}
+                              className="tab"
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "0.35rem",
+                              }}
+                              aria-expanded={detailsOpen}
+                            >
+                              Session details
+                              <ChevronDown
+                                size={14}
+                                aria-hidden
+                                style={{
+                                  transform: detailsOpen ? "rotate(180deg)" : undefined,
+                                  transition: "transform 0.2s ease",
+                                }}
+                              />
+                            </button>
+                          </div>
+
+                          <AnimatePresence>
+                            {detailsOpen && selectedSession && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                style={{ overflow: "hidden", marginBottom: "0.75rem" }}
+                              >
+                                <div className="info-grid" style={{ marginBottom: 0 }}>
+                                  <div className="info-item">
+                                    <div className="info-label">Status</div>
+                                    <div className="info-value">{selectedSession.status}</div>
+                                  </div>
+                                  <div className="info-item">
+                                    <div className="info-label">Phase</div>
+                                    <div className="info-value">
+                                      {selectedSession.phase}/
+                                      {selectedSession.total_phases || "?"}
+                                    </div>
+                                  </div>
+                                  <div className="info-item">
+                                    <div className="info-label">Stack</div>
+                                    <div className="info-value">
+                                      {selectedSession.target_stack || "—"}
+                                    </div>
+                                  </div>
+                                  <div className="info-item">
+                                    <div className="info-label">Current step</div>
+                                    <div className="info-value">
+                                      {selectedSession.current_step || "—"}
+                                    </div>
+                                  </div>
+                                  <div className="info-item">
+                                    <div className="info-label">Started</div>
+                                    <div className="info-value">
+                                      {formatTime(selectedSession.started_at)}
+                                    </div>
+                                  </div>
+                                  <div className="info-item">
+                                    <div className="info-label">Ended</div>
+                                    <div className="info-value">
+                                      {formatTime(selectedSession.ended_at)}
+                                    </div>
+                                  </div>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+
+                          <div
+                            style={{
+                              flex: 1,
+                              minHeight: 280,
+                              maxHeight: 520,
+                              overflowY: "auto",
+                              position: "relative",
+                            }}
+                          >
+                            {eventsLoading && sortedEvents.length === 0 ? (
+                              <div style={{ padding: "2rem", textAlign: "center" }}>
+                                <div
+                                  className="spinner"
+                                  style={{ margin: "0 auto 0.5rem" }}
+                                  aria-hidden
+                                />
+                                <span className="page-subtitle">Loading events…</span>
+                              </div>
+                            ) : sortedEvents.length === 0 ? (
+                              <div style={{ padding: "1.5rem", textAlign: "center" }}>
+                                <Terminal size={32} style={{ color: "var(--text-muted)", marginBottom: "0.75rem" }} aria-hidden />
+                                <p className="page-subtitle" style={{ margin: "0 0 0.35rem", fontWeight: 600 }}>
+                                  No events recorded
+                                </p>
+                                <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", margin: 0, maxWidth: "24rem", marginLeft: "auto", marginRight: "auto" }}>
+                                  This session has no logged events. Events are recorded when a build runs through the MCP server. Manual or external builds do not generate event logs here.
+                                </p>
+                              </div>
+                            ) : (
+                              <div className="timeline">
+                                {sortedEvents.map((ev) => (
+                                  <div key={ev.id} className="timeline-item">
+                                    <div className={eventDotClass(ev)} aria-hidden />
+                                    <div className="timeline-content">
+                                      <div
+                                        className="timeline-title"
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: "0.35rem",
+                                          flexWrap: "wrap",
+                                        }}
+                                      >
+                                        <EventTypeIcon e={ev} />
+                                        <span>{mcpEventTitle(ev)}</span>
+                                        <Badge variant="neutral">{ev.status}</Badge>
+                                      </div>
+                                      <div className="timeline-time">{mcpEventSubtitle(ev)}</div>
+                                      <div className="timeline-desc" style={{ marginTop: "0.25rem" }}>
+                                        <span style={{ color: "var(--text-muted)" }}>
+                                          {humanizeEventType(ev.event_type)}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                                <div ref={timelineEndRef} />
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </PageShell>
+    </>
   );
 }
-

@@ -14,52 +14,51 @@ logger = logging.getLogger(__name__)
 
 # ── Prompt Templates ────────────────────────────────────
 
-EDGE_CASE_SYSTEM_PROMPT = """You are an expert requirements analyst and QA engineer reviewing Functional Specification (FS) documents.
+EDGE_CASE_SYSTEM_PROMPT = """You are a senior QA architect who writes test plans for mission-critical enterprise systems. You find the scenarios that cause production incidents — the cases the FS author forgot to specify.
 
-Your task is to identify MISSING EDGE CASES and uncovered scenarios in a given section. Focus on:
+TASK: Read the FS section and identify scenarios where the specification is SILENT — where a real user or system event would occur but the FS does not define what the system should do. Only flag gaps that are ACTUALLY MISSING from the text — do not flag scenarios already covered.
 
-1. **Error states**: What happens when things go wrong? (network failure, invalid data, timeouts)
-2. **Empty / null inputs**: Behavior when required fields are empty, null, or missing
-3. **Permission boundaries**: What happens when unauthorized users attempt actions?
-4. **Concurrent operations**: Race conditions, simultaneous edits, parallel processing
-5. **Data validation boundaries**: Min/max values, overflow, special characters, Unicode
-6. **Resource limits**: What happens at capacity limits (disk full, memory exhaustion, rate limits)?
-7. **State transitions**: Invalid state changes, interrupted operations, rollback scenarios
-8. **Integration failures**: What if an external API is down, returns unexpected data, or times out?
+DETECTION CATEGORIES (apply only those relevant to the section's domain):
 
-For each edge case gap found, provide:
-- A clear description of the uncovered scenario
-- Impact: HIGH (could cause data loss or security breach), MEDIUM (causes degraded user experience), LOW (minor inconvenience)
-- A suggested addition: what should be added to the FS to cover this scenario
+1. FAILURE PATHS — The FS describes the happy path but not: network timeout, service unavailable, partial failure, corrupted input, disk full, rate limit exceeded.
+2. BOUNDARY CONDITIONS — The FS mentions a field or value but not: minimum, maximum, empty, null, zero, negative, overflow, special characters, Unicode, extremely long input.
+3. AUTHORIZATION GAPS — The FS describes an action but not: what happens when an unauthorized user attempts it, when a session expires mid-operation, when permissions change during execution.
+4. CONCURRENCY — The FS describes operations but not: two users editing the same record simultaneously, duplicate form submissions, race conditions between dependent operations.
+5. STATE MACHINE GAPS — The FS describes states but not: invalid transitions, interrupted operations (browser closed mid-save, network drops mid-transaction), rollback behavior.
+6. DATA INTEGRITY — The FS describes data operations but not: referential integrity on deletion, orphaned records, data migration from legacy state.
+7. INTEGRATION BOUNDARIES — The FS references external systems but not: what happens when they return unexpected formats, when they are deprecated, when response schemas change.
 
-Return your analysis as a JSON array. If no edge case gaps found, return an empty array [].
+IMPACT CALIBRATION:
+- HIGH: Could cause data loss, financial discrepancy, security breach, or system crash in production. MUST be addressed before implementation.
+- MEDIUM: Causes user confusion, degraded experience, or requires manual intervention. Should be addressed.
+- LOW: Minor inconvenience with a reasonable default behavior. Nice to specify but not blocking.
 
-Example output format:
-```json
+PRECISION RULES:
+- Each gap must be SPECIFIC to this section's content — not generic best practices
+- "suggested_addition" must be a COMPLETE, implementable requirement (use "shall" language, include specific numbers/behaviors)
+- Do NOT suggest additions for scenarios already covered elsewhere in the section
+- Limit output to the 3-7 MOST impactful gaps — quality over quantity
+
+Return a JSON array. Empty array [] if the section thoroughly covers all relevant scenarios.
+
+Example:
 [
   {
-    "scenario_description": "No behavior defined for when the payment gateway returns a timeout after the user has been charged but before confirmation is received.",
+    "scenario_description": "The section specifies payment processing via the gateway but does not define behavior when the gateway returns a timeout AFTER the charge has been initiated but BEFORE confirmation is received. This creates a potential double-charge or lost-payment scenario.",
     "impact": "HIGH",
-    "suggested_addition": "Add requirement: If payment gateway times out after charge initiation, the system shall retry confirmation up to 3 times, then queue for manual reconciliation and notify the user with a pending status."
-  },
-  {
-    "scenario_description": "No validation specified for the maximum length of the user's name field.",
-    "impact": "LOW",
-    "suggested_addition": "Add requirement: User name field shall accept 1-100 characters and reject inputs exceeding this range with a clear error message."
+    "suggested_addition": "The system shall implement idempotent payment processing. If the payment gateway does not respond within 30 seconds after charge initiation, the system shall: (1) retry the confirmation request up to 3 times with exponential backoff, (2) if still unconfirmed, queue the transaction for manual reconciliation, (3) display a 'Payment Pending' status to the user, and (4) send an email notification within 5 minutes."
   }
 ]
-```
 
-IMPORTANT: Return ONLY a valid JSON array. No markdown, no explanations outside the JSON."""
+Return ONLY a valid JSON array. No markdown fences, no prose outside the array."""
 
-EDGE_CASE_USER_PROMPT = """Analyze the following FS document section for missing edge cases and uncovered scenarios:
+EDGE_CASE_USER_PROMPT = """Read this FS section carefully. For every requirement, ask: "What happens when this goes wrong, gets unexpected input, or encounters a boundary condition?" Flag only scenarios the section is genuinely silent on.
 
-## Section: {heading}
+Section: "{heading}"
 
 {content}
 
----
-Return a JSON array of edge case gaps. If no gaps are found, return []."""
+Return a JSON array of the most impactful missing edge cases. If the section thoroughly covers failure paths and boundaries, return []."""
 
 
 # ── Detection Function ──────────────────────────────────
