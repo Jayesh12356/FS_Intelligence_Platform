@@ -11,7 +11,8 @@ import logging
 from typing import List, Tuple
 
 from app.config import get_settings
-from app.llm import get_llm_client
+from app.llm.client import LLMError
+from app.orchestration.pipeline_llm import pipeline_call_llm, pipeline_call_llm_json
 from app.pipeline.state import ReverseGenState
 
 logger = logging.getLogger(__name__)
@@ -138,7 +139,6 @@ async def _generate_module_summaries(
     files: List[dict],
 ) -> List[dict]:
     """Step 1: Generate module-level summaries for each file."""
-    client = get_llm_client()
     settings = get_settings()
     summaries: List[dict] = []
     max_entities = max(1, settings.REVERSE_MAX_ENTITIES_PER_FILE)
@@ -166,7 +166,7 @@ async def _generate_module_summaries(
         )
 
         try:
-            result = await client.call_llm_json(
+            result = await pipeline_call_llm_json(
                 prompt=prompt,
                 system=MODULE_SUMMARY_SYSTEM,
                 temperature=0.0,
@@ -185,6 +185,8 @@ async def _generate_module_summaries(
                     "key_components": [],
                     "dependencies": [],
                 })
+        except LLMError:
+            raise
         except Exception as exc:
             logger.warning("Module summary failed for %s: %s", f.get("path", "?"), exc)
             summaries.append({
@@ -231,8 +233,6 @@ async def _identify_user_flows(
     snapshot: dict,
 ) -> List[str]:
     """Step 2: Identify main user flows from module summaries."""
-    client = get_llm_client()
-
     summaries_str = "\n\n".join([
         f"### {s.get('module_name', '?')} ({s.get('file_path', '')})\n"
         f"Purpose: {s.get('purpose', 'unknown')}\n"
@@ -249,7 +249,7 @@ async def _identify_user_flows(
     )
 
     try:
-        result = await client.call_llm_json(
+        result = await pipeline_call_llm_json(
             prompt=prompt,
             system=USER_FLOW_SYSTEM,
             temperature=0.0,
@@ -259,6 +259,8 @@ async def _identify_user_flows(
         if isinstance(result, list):
             return result
         return []
+    except LLMError:
+        raise
     except Exception as exc:
         logger.error("User flow identification failed: %s", exc)
         return []
@@ -269,7 +271,6 @@ async def _generate_fs_sections(
     summaries: List[dict],
 ) -> List[dict]:
     """Step 3: Generate FS sections for each identified flow."""
-    client = get_llm_client()
     sections: List[dict] = []
 
     # Build module lookup
@@ -308,7 +309,7 @@ async def _generate_fs_sections(
         )
 
         try:
-            result = await client.call_llm(
+            result = await pipeline_call_llm(
                 prompt=prompt,
                 system=FS_SECTION_SYSTEM,
                 temperature=0.1,
@@ -320,6 +321,8 @@ async def _generate_fs_sections(
                 "content": result.strip(),
                 "section_index": i,
             })
+        except LLMError:
+            raise
         except Exception as exc:
             logger.error("FS section generation failed for flow '%s': %s", flow_name, exc)
             sections.append({

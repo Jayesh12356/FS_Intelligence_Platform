@@ -628,10 +628,10 @@ class TestImpactNode:
             },
         ]
 
-        mock_client = MagicMock()
-        mock_client.call_llm_json = AsyncMock(return_value=mock_response)
-
-        with patch("app.pipeline.nodes.impact_node.get_llm_client", return_value=mock_client):
+        with patch(
+            "app.pipeline.nodes.impact_node.pipeline_call_llm_json",
+            new=AsyncMock(return_value=mock_response),
+        ):
             from app.pipeline.nodes.impact_node import impact_node
 
             state: FSImpactState = {
@@ -665,10 +665,10 @@ class TestImpactNode:
     @pytest.mark.asyncio
     async def test_impact_node_llm_failure(self):
         """LLM failure should produce errors but not crash."""
-        mock_client = MagicMock()
-        mock_client.call_llm_json = AsyncMock(side_effect=Exception("LLM error"))
-
-        with patch("app.pipeline.nodes.impact_node.get_llm_client", return_value=mock_client):
+        with patch(
+            "app.pipeline.nodes.impact_node.pipeline_call_llm_json",
+            new=AsyncMock(side_effect=Exception("LLM error")),
+        ):
             from app.pipeline.nodes.impact_node import impact_node
 
             state: FSImpactState = {
@@ -704,10 +704,10 @@ class TestImpactNode:
                     {"task_id": "t1", "task_title": "Shared Task", "impact_type": "INVALIDATED", "reason": "Reason 2"},
                 ]
 
-        mock_client = MagicMock()
-        mock_client.call_llm_json = AsyncMock(side_effect=mock_llm_json)
-
-        with patch("app.pipeline.nodes.impact_node.get_llm_client", return_value=mock_client):
+        with patch(
+            "app.pipeline.nodes.impact_node.pipeline_call_llm_json",
+            new=AsyncMock(side_effect=mock_llm_json),
+        ):
             from app.pipeline.nodes.impact_node import impact_node
 
             state: FSImpactState = {
@@ -789,7 +789,10 @@ class TestImpactPipelineGraph:
         import app.pipeline.graph as graph_mod
         graph_mod._compiled_impact_graph = None
 
-        with patch("app.pipeline.nodes.impact_node.get_llm_client"):
+        with patch(
+            "app.pipeline.nodes.impact_node.pipeline_call_llm_json",
+            new=AsyncMock(return_value=[]),
+        ):
             graph = graph_mod.build_impact_graph()
             assert graph is not None
 
@@ -800,7 +803,10 @@ class TestImpactPipelineGraph:
         import app.pipeline.graph as graph_mod
         graph_mod._compiled_impact_graph = None
 
-        with patch("app.pipeline.nodes.impact_node.get_llm_client"):
+        with patch(
+            "app.pipeline.nodes.impact_node.pipeline_call_llm_json",
+            new=AsyncMock(return_value=[]),
+        ):
             g1 = graph_mod.get_compiled_impact_graph()
             g2 = graph_mod.get_compiled_impact_graph()
             assert g1 is g2
@@ -816,10 +822,10 @@ class TestImpactPipelineGraph:
         mock_llm_response = [
             {"task_id": "t1", "task_title": "Auth Task", "impact_type": "INVALIDATED", "reason": "Auth changed"},
         ]
-        mock_client = MagicMock()
-        mock_client.call_llm_json = AsyncMock(return_value=mock_llm_response)
-
-        with patch("app.pipeline.nodes.impact_node.get_llm_client", return_value=mock_client):
+        with patch(
+            "app.pipeline.nodes.impact_node.pipeline_call_llm_json",
+            new=AsyncMock(return_value=mock_llm_response),
+        ):
             result = await graph_mod.run_impact_pipeline(
                 fs_id="test-e2e",
                 version_id="v2",

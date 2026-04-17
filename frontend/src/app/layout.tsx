@@ -4,16 +4,27 @@ import "./globals.css";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
-import { Upload, FileText, RotateCcw, BookOpen, Activity, FolderOpen, Sun, Moon, Menu, X, Zap } from "lucide-react";
+import { Upload, FileText, RotateCcw, BookOpen, Activity, FolderOpen, Sun, Moon, Menu, X, Zap, Sparkles, Settings } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { ToastProvider } from "../components/Toaster";
+
+const THEME_INIT = `
+try {
+  var t = localStorage.getItem('fsp-theme');
+  if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', t);
+} catch (e) {}
+`;
 
 const NAV_ITEMS = [
+  { label: "Create", href: "/create", icon: Sparkles },
   { label: "Upload", href: "/upload", icon: Upload },
   { label: "Documents", href: "/documents", icon: FileText },
   { label: "Projects", href: "/projects", icon: FolderOpen },
   { label: "Reverse FS", href: "/reverse", icon: RotateCcw },
   { label: "Library", href: "/library", icon: BookOpen },
   { label: "Monitoring", href: "/monitoring", icon: Activity },
+  { label: "Settings", href: "/settings", icon: Settings },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -22,10 +33,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem("fsp-theme") as "dark" | "light" | null;
-    const t = saved ?? "light";
+    const attr = document.documentElement.getAttribute("data-theme");
+    const t: "dark" | "light" = attr === "dark" ? "dark" : "light";
     setTheme(t);
-    document.documentElement.setAttribute("data-theme", t);
   }, []);
 
   useEffect(() => { setMobileOpen(false); }, [pathname]);
@@ -47,9 +57,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>FS Intelligence Platform</title>
         <meta name="description" content="AI-powered platform that transforms Functional Specification documents into dev-ready task breakdowns" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet" />
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
       </head>
       <body>
+        <ToastProvider>
         <div className="app-container">
           <nav className="nav">
             <div className="nav-inner">
@@ -123,6 +137,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
           <main className="main-content">{children}</main>
         </div>
+        </ToastProvider>
 
         <style>{`
           @media (max-width: 768px) {

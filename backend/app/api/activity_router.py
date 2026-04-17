@@ -86,10 +86,14 @@ async def get_activity_log(
         count_query = count_query.where(AuditEventDB.event_type == event_type)
 
     if document_name:
-        query = query.where(FSDocument.filename.ilike(f"%{document_name}%"))
+        escaped = (
+            document_name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
+        like_pattern = f"%{escaped}%"
+        query = query.where(FSDocument.filename.ilike(like_pattern, escape="\\"))
         count_query = count_query.join(
             FSDocument, AuditEventDB.fs_id == FSDocument.id
-        ).where(FSDocument.filename.ilike(f"%{document_name}%"))
+        ).where(FSDocument.filename.ilike(like_pattern, escape="\\"))
 
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0

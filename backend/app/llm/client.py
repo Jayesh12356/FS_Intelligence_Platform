@@ -118,17 +118,17 @@ class LLMClient:
         """Lazy-initialize the appropriate SDK client."""
         if self._client is None:
             api_key = self._get_api_key()
+            settings = get_settings()
+            timeout_s = float(getattr(settings, "LLM_TIMEOUT_S", 120.0) or 120.0)
 
             if self._provider == PROVIDER_ANTHROPIC:
                 import anthropic
-                self._client = anthropic.AsyncAnthropic(api_key=api_key)
+                self._client = anthropic.AsyncAnthropic(api_key=api_key, timeout=timeout_s)
             else:
-                # OpenAI, Groq, OpenRouter all use the OpenAI SDK
                 from openai import AsyncOpenAI
-                kwargs = {"api_key": api_key}
+                kwargs = {"api_key": api_key, "timeout": timeout_s}
                 if self._provider in _BASE_URLS:
                     kwargs["base_url"] = _BASE_URLS[self._provider]
-                # OpenRouter recommends setting extra headers
                 if self._provider == PROVIDER_OPENROUTER:
                     kwargs["default_headers"] = {
                         "HTTP-Referer": "https://fs-intelligence-platform.app",

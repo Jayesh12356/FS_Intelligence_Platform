@@ -391,9 +391,9 @@ class TestTestcaseNode:
         import app.pipeline.nodes.testcase_node as tc_mod
         from app.pipeline.nodes.testcase_node import testcase_node
 
-        # Ensure call_llm is None (no-LLM fallback)
-        original = tc_mod.call_llm
-        tc_mod.call_llm = None
+        # Ensure pipeline_call_llm is None (no-LLM fallback)
+        original = tc_mod.pipeline_call_llm
+        tc_mod.pipeline_call_llm = None
         try:
             state = {
                 "tasks": [{
@@ -412,7 +412,7 @@ class TestTestcaseNode:
             assert result["test_cases"][0]["test_type"] == "INTEGRATION"
             assert "Verify:" in result["test_cases"][0]["title"]
         finally:
-            tc_mod.call_llm = original
+            tc_mod.pipeline_call_llm = original
 
     @pytest.mark.asyncio
     async def test_task_with_criteria_llm_success(self):
@@ -442,17 +442,16 @@ class TestTestcaseNode:
             "errors": [],
         }
 
-        # Set module-level call_llm to async mock
         mock_llm = AsyncMock(return_value=mock_response)
-        original = tc_mod.call_llm
-        tc_mod.call_llm = mock_llm
+        original = tc_mod.pipeline_call_llm
+        tc_mod.pipeline_call_llm = mock_llm
         try:
             result = await testcase_node(state)
             assert len(result["test_cases"]) == 1
             assert result["test_cases"][0]["title"] == "Test login flow"
             assert result["test_cases"][0]["test_type"] == "E2E"
         finally:
-            tc_mod.call_llm = original
+            tc_mod.pipeline_call_llm = original
 
     @pytest.mark.asyncio
     async def test_task_with_criteria_llm_json_error(self):
@@ -474,14 +473,14 @@ class TestTestcaseNode:
 
         # LLM returns invalid JSON — should fallback to criterion-based test cases
         mock_llm = AsyncMock(return_value="not valid json")
-        original = tc_mod.call_llm
-        tc_mod.call_llm = mock_llm
+        original = tc_mod.pipeline_call_llm
+        tc_mod.pipeline_call_llm = mock_llm
         try:
             result = await testcase_node(state)
             assert len(result["test_cases"]) == 2  # One per criterion
             assert result["test_cases"][0]["test_type"] == "ACCEPTANCE"
         finally:
-            tc_mod.call_llm = original
+            tc_mod.pipeline_call_llm = original
 
     @pytest.mark.asyncio
     async def test_llm_not_available(self):
@@ -501,14 +500,13 @@ class TestTestcaseNode:
             "errors": [],
         }
 
-        # Explicitly set call_llm to None
-        original = tc_mod.call_llm
-        tc_mod.call_llm = None
+        original = tc_mod.pipeline_call_llm
+        tc_mod.pipeline_call_llm = None
         try:
             result = await testcase_node(state)
             assert len(result["test_cases"]) == 1
         finally:
-            tc_mod.call_llm = original
+            tc_mod.pipeline_call_llm = original
 
     @pytest.mark.asyncio
     async def test_multiple_tasks(self):
@@ -524,13 +522,13 @@ class TestTestcaseNode:
             "errors": [],
         }
 
-        original = tc_mod.call_llm
-        tc_mod.call_llm = None
+        original = tc_mod.pipeline_call_llm
+        tc_mod.pipeline_call_llm = None
         try:
             result = await testcase_node(state)
             assert len(result["test_cases"]) == 2
         finally:
-            tc_mod.call_llm = original
+            tc_mod.pipeline_call_llm = original
 
 
 # ── Export Router Tests ────────────────────────────────

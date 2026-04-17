@@ -5,9 +5,10 @@ import asyncio as _asyncio
 import hashlib
 import logging
 import uuid
+from datetime import datetime, timezone
 from uuid import UUID as _UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +35,7 @@ from app.db.models import (
 )
 from app.models.schemas import (
     AmbiguityFlagSchema,
+    AmbiguityResolveRequest,
     AnalysisResponse,
     APIResponse,
     ComplianceTagSchema,
@@ -269,12 +271,20 @@ async def analyze_document(
     sections_filter: str = Query(None, alias="sections", description="Comma-separated section indices to re-analyze selectively"),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[AnalysisResponse]:
-    """Trigger LangGraph analysis pipeline on a parsed document.
+    """Trigger the full 11-node LangGraph analysis pipeline on a parsed document.
 
-    Pipeline (L4): parse_node → ambiguity_node → contradiction_node
-                   → edge_case_node → quality_node → END
-    Persists all results to PostgreSQL.
-    Updates document status: PARSED → ANALYZING → COMPLETE (or ERROR).
+    Pipeline order:
+        parse_node → ambiguity_node → debate_node → contradiction_node →
+        edge_case_node → quality_node → task_decomposition_node →
+        dependency_node → traceability_node → duplicate_node → testcase_node
+
+    Passing ``?sections=1,3`` runs only the per-section nodes (ambiguity,
+    contradiction, edge_case, task_decomposition, traceability, duplicate,
+    testcase) over the specified section indices and keeps existing results
+    for all other sections.
+
+    Persists all results to PostgreSQL. Transitions document status
+    PARSED → ANALYZING → COMPLETE (or ERROR on failure).
     """
     from app.pipeline.graph import run_analysis_pipeline
 
@@ -333,19 +343,30 @@ async def analyze_document(
     doc.status = FSDocumentStatus.ANALYZING
     await db.commit()
 
-    # Load parsed sections from the parse result
-    from app.parsers.router import parse_document as do_parse
-    parsed = await do_parse(str(doc.id), db)
+    # Load parsed sections — either from disk (uploaded) or from stored text (idea-generated)
+    if doc.file_path:
+        from app.parsers.router import parse_document as do_parse
+        parsed = await do_parse(str(doc.id), db)
+        sections = [
+            {"heading": s.heading, "content": s.content, "section_index": s.section_index}
+            for s in parsed.sections
+        ]
+    elif doc.parsed_text:
+        from app.parsers.section_extractor import extract_sections_from_text
+        extracted = extract_sections_from_text(doc.parsed_text)
+        sections = [
+            {"heading": s.heading, "content": s.content, "section_index": s.section_index}
+            for s in extracted
+        ]
+    else:
+        doc.status = FSDocumentStatus.ERROR
+        await db.commit()
+        raise HTTPException(
+            status_code=400,
+            detail="Document has neither a file path nor parsed text. Re-upload or re-generate.",
+        )
 
-    sections = [
-        {
-            "heading": s.heading,
-            "content": s.content,
-            "section_index": s.section_index,
-        }
-        for s in parsed.sections
-    ]
-
+    changed_indices: "set[int] | None" = None
     if sections_filter:
         try:
             changed_indices = {int(x.strip()) for x in sections_filter.split(",") if x.strip()}
@@ -356,8 +377,6 @@ async def analyze_document(
             logger.info("Selective analysis for sections %s (cache cleared)", changed_indices)
         except (ValueError, TypeError):
             changed_indices = None
-    else:
-        changed_indices = None
 
     # Run the LangGraph pipeline
     cancel_evt = _asyncio.Event()
@@ -365,7 +384,8 @@ async def analyze_document(
     try:
         try:
             pipeline_result = await run_analysis_pipeline(
-                str(doc.id), sections, db=db, cancel_event=cancel_evt
+                str(doc.id), sections, db=db, cancel_event=cancel_evt,
+                changed_indices=changed_indices,
             )
         except Exception as exc:
             doc.status = FSDocumentStatus.ERROR
@@ -403,12 +423,34 @@ async def analyze_document(
         )
 
     # ── Delete existing results for this document (re-analysis) ──
-    for model_class in [AmbiguityFlagDB, ContradictionDB, EdgeCaseGapDB, ComplianceTagDB, FSTaskDB, TraceabilityEntryDB, DebateResultDB, DuplicateFlagDB, TestCaseDB]:
-        existing = await db.execute(
-            select(model_class).where(model_class.fs_id == doc_id)
-        )
-        for row in existing.scalars().all():
-            await db.delete(row)
+    if changed_indices:
+        # Selective: only replace per-section rows for the listed indices.
+        # Cross-cutting results (tasks, quality, dependencies, traceability,
+        # duplicates, test cases) are preserved.
+        per_section_models = [
+            (AmbiguityFlagDB, "section_index"),
+            (EdgeCaseGapDB, "section_index"),
+            (DebateResultDB, "section_index"),
+        ]
+        for model_class, col in per_section_models:
+            existing = await db.execute(
+                select(model_class).where(
+                    model_class.fs_id == doc_id,
+                    getattr(model_class, col).in_(list(changed_indices)),
+                )
+            )
+            for row in existing.scalars().all():
+                await db.delete(row)
+    else:
+        for model_class in [
+            AmbiguityFlagDB, ContradictionDB, EdgeCaseGapDB, ComplianceTagDB,
+            FSTaskDB, TraceabilityEntryDB, DebateResultDB, DuplicateFlagDB, TestCaseDB,
+        ]:
+            existing = await db.execute(
+                select(model_class).where(model_class.fs_id == doc_id)
+            )
+            for row in existing.scalars().all():
+                await db.delete(row)
 
     # ── Persist ambiguity flags ──
     ambiguity_dicts = pipeline_result.get("ambiguities", [])
@@ -801,6 +843,8 @@ async def list_ambiguities(
             severity=f.severity.value,
             clarification_question=f.clarification_question,
             resolved=f.resolved,
+            resolution_text=f.resolution_text,
+            resolved_at=f.resolved_at,
         )
         for f in flags
     ]
@@ -812,9 +856,10 @@ async def list_ambiguities(
 async def resolve_ambiguity(
     doc_id: uuid.UUID,
     flag_id: uuid.UUID,
+    body: AmbiguityResolveRequest | None = Body(None),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[AmbiguityFlagSchema]:
-    """Mark an ambiguity flag as resolved."""
+    """Mark an ambiguity flag as resolved, optionally with a resolution note."""
     result = await db.execute(
         select(AmbiguityFlagDB).where(
             AmbiguityFlagDB.id == flag_id,
@@ -826,7 +871,18 @@ async def resolve_ambiguity(
     if not flag:
         raise HTTPException(status_code=404, detail="Ambiguity flag not found")
 
-    flag.resolved = True
+    resolution_text: str | None = None
+    target_resolved = True
+    if body is not None:
+        resolution_text = (body.resolution_text or "").strip() or None
+        target_resolved = bool(body.resolved)
+
+    flag.resolved = target_resolved
+    if target_resolved:
+        flag.resolution_text = resolution_text
+        flag.resolved_at = datetime.now(timezone.utc)
+    else:
+        flag.resolved_at = None
     await db.commit()
     await db.refresh(flag)
     await _refresh_quality_score_internal(doc_id, db)
@@ -841,6 +897,8 @@ async def resolve_ambiguity(
             severity=flag.severity.value,
             clarification_question=flag.clarification_question,
             resolved=flag.resolved,
+            resolution_text=flag.resolution_text,
+            resolved_at=flag.resolved_at,
         ),
     )
 

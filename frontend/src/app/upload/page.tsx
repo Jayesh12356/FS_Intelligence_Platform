@@ -3,12 +3,36 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Upload, FileUp, CheckCircle2, AlertCircle } from "lucide-react";
+import { Upload, FileUp, CheckCircle2, AlertCircle, X } from "lucide-react";
 import { PageShell, FadeIn } from "@/components/index";
 import { uploadFile, listProjects, uploadFileToProject } from "@/lib/api";
 import type { FSProject } from "@/lib/api";
 
 type UploadState = "idle" | "uploading" | "success" | "error";
+
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+const ALLOWED_EXT = [".pdf", ".docx", ".txt"];
+const ALLOWED_MIME = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/plain",
+  "",
+]);
+
+function validateFile(file: File): string | null {
+  const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
+  if (!ALLOWED_EXT.includes(ext)) {
+    return `Unsupported file type '${ext}'. Allowed: ${ALLOWED_EXT.join(", ")}`;
+  }
+  if (file.type && !ALLOWED_MIME.has(file.type)) {
+    return `Unexpected content type '${file.type}' for ${ext} file.`;
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    const mb = (file.size / 1024 / 1024).toFixed(1);
+    return `File is ${mb} MB — exceeds the 20 MB limit.`;
+  }
+  return null;
+}
 
 export default function UploadPage() {
   const router = useRouter();
@@ -19,6 +43,8 @@ export default function UploadPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [projects, setProjects] = useState<FSProject[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  const [progress, setProgress] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     listProjects()
@@ -28,9 +54,21 @@ export default function UploadPage() {
 
   const handleFile = useCallback(
     async (file: File) => {
+      const validationError = validateFile(file);
+      if (validationError) {
+        setSelectedFile(file);
+        setUploadState("error");
+        setStatusMessage(validationError);
+        return;
+      }
+
       setSelectedFile(file);
       setUploadState("uploading");
       setStatusMessage(`Uploading ${file.name}…`);
+      setProgress(0);
+
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
 
       try {
         const result = selectedProjectId
@@ -38,19 +76,31 @@ export default function UploadPage() {
           : await uploadFile(file);
         setUploadState("success");
         setStatusMessage(`Uploaded successfully: ${result.data.filename}`);
+        setProgress(100);
 
         setTimeout(() => {
           router.push(`/documents/${result.data.id}`);
         }, 1200);
       } catch (err: unknown) {
+        if ((err as Error)?.name === "AbortError") {
+          setUploadState("idle");
+          setStatusMessage("Upload cancelled.");
+          return;
+        }
         setUploadState("error");
         const message =
           err instanceof Error ? err.message : "Upload failed. Please try again.";
         setStatusMessage(message);
+      } finally {
+        abortRef.current = null;
       }
     },
-    [router]
+    [router, selectedProjectId]
   );
+
+  const cancelUpload = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
@@ -177,15 +227,26 @@ export default function UploadPage() {
                   <motion.div
                     className="upload-progress-bar"
                     initial={{ width: "0%" }}
-                    animate={{ width: ["0%", "70%", "40%", "90%", "65%"] }}
+                    animate={{
+                      width: progress > 0 ? `${progress}%` : ["0%", "70%", "40%", "90%", "65%"],
+                    }}
                     transition={{
-                      duration: 2.2,
-                      repeat: Infinity,
+                      duration: progress > 0 ? 0.3 : 2.2,
+                      repeat: progress > 0 ? 0 : Infinity,
                       ease: "easeInOut",
                     }}
                   />
                 </div>
               </div>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={cancelUpload}
+                aria-label="Cancel upload"
+                style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem" }}
+              >
+                <X size={14} /> Cancel
+              </button>
             </motion.div>
           )}
 

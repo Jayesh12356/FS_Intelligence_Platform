@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useRef, useId } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface ModalProps {
@@ -12,12 +12,68 @@ interface ModalProps {
 }
 
 export default function Modal({ open, onClose, title, children, footer }: ModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const titleId = useId();
+
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    returnFocusRef.current = (document.activeElement as HTMLElement) || null;
+    return () => {
+      if (returnFocusRef.current && typeof returnFocusRef.current.focus === "function") {
+        try {
+          returnFocusRef.current.focus();
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open) return;
+    const el = dialogRef.current;
+    if (!el) return;
+
+    const getFocusable = () =>
+      Array.from(
+        el.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((node) => !node.hasAttribute("inert"));
+
+    const initial = getFocusable();
+    if (initial.length > 0) initial[0].focus();
+
+    const trap = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const focusable = getFocusable();
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey) {
+        if (active === first || !el.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", trap);
+    return () => window.removeEventListener("keydown", trap);
+  }, [open]);
 
   return (
     <AnimatePresence>
@@ -36,6 +92,10 @@ export default function Modal({ open, onClose, title, children, footer }: ModalP
           }}
         >
           <motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={title ? titleId : undefined}
             initial={{ opacity: 0, scale: 0.95, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 8 }}
@@ -48,7 +108,7 @@ export default function Modal({ open, onClose, title, children, footer }: ModalP
             }}
           >
             {title && (
-              <div style={{
+              <div id={titleId} style={{
                 padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--border-subtle)",
                 fontWeight: 600, fontSize: "1.0625rem",
               }}>

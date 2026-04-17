@@ -21,6 +21,7 @@ import {
 } from "@/components/index";
 import { StatusBadge } from "@/components/Badge";
 import Modal from "@/components/Modal";
+import { useToast } from "@/components/Toaster";
 import { listDocuments, deleteDocument, type FSDocumentResponse } from "@/lib/api";
 
 function formatDate(dateStr: string): string {
@@ -42,6 +43,7 @@ function formatSize(bytes: number | null): string {
 
 export default function DocumentsPage() {
   const router = useRouter();
+  const { error: toastError } = useToast();
   const [documents, setDocuments] = useState<FSDocumentResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -87,11 +89,11 @@ export default function DocumentsPage() {
       setRemovingId(null);
       router.refresh();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Delete failed");
+      toastError("Delete failed", err instanceof Error ? err.message : undefined);
     } finally {
       setDeleteBusy(false);
     }
-  }, [deleteTarget, deleteBusy, router]);
+  }, [deleteTarget, deleteBusy, router, toastError]);
 
   const requestDelete = (e: React.MouseEvent, doc: FSDocumentResponse) => {
     e.preventDefault();

@@ -131,41 +131,65 @@ async def suggest_requirements(
         logger.error("Failed to load sections for %s: %s", doc_id, exc)
         raise HTTPException(status_code=500, detail=f"Failed to load sections: {exc}")
 
-    # Search library for each section
-    all_suggestions = []
-    seen_ids = set()
+    import anyio
 
-    try:
-        from app.vector.fs_store import search_library
+    all_suggestions: list[LibraryItemSchema] = []
+    seen_ids: set[str] = set()
+    failed_sections: list[dict] = []
 
-        for section in sections:
-            content = section.content if hasattr(section, 'content') else section.get("content", "")
-            if not content or len(content.strip()) < 20:
+    from app.vector.fs_store import search_library
+
+    def _search(content: str) -> list[dict]:
+        return search_library(query_text=content, limit=3, threshold=0.75)
+
+    sem = anyio.Semaphore(4)
+
+    async def _worker(idx: int, content: str, heading: str) -> tuple[int, list[dict] | None, str | None]:
+        async with sem:
+            try:
+                res = await anyio.to_thread.run_sync(_search, content)
+                return (idx, res, None)
+            except Exception as exc:
+                logger.warning("Library search failed for section %d (%s): %s", idx, heading, exc)
+                return (idx, None, str(exc))
+
+    tasks: list[tuple[int, str, str]] = []
+    for idx, section in enumerate(sections):
+        content = section.content if hasattr(section, "content") else section.get("content", "")
+        heading = section.heading if hasattr(section, "heading") else section.get("heading", "")
+        if not content or len(content.strip()) < 20:
+            continue
+        tasks.append((idx, content, heading))
+
+    collected: list = []
+
+    async def _run(t):
+        out = await _worker(*t)
+        collected.append(out)
+
+    async with anyio.create_task_group() as tg:
+        for t in tasks:
+            tg.start_soon(_run, t)
+
+    for idx, res, err in collected:
+        if res is None:
+            failed_sections.append({"section_index": idx, "error": err})
+            continue
+        for r in res:
+            if r["fs_id"] == str(doc_id) or r["id"] in seen_ids:
                 continue
-
-            results = search_library(query_text=content, limit=3, threshold=0.75)
-            for r in results:
-                # Skip if from the same document or already seen
-                if r["fs_id"] == str(doc_id) or r["id"] in seen_ids:
-                    continue
-                seen_ids.add(r["id"])
-                all_suggestions.append(
-                    LibraryItemSchema(
-                        id=r["id"],
-                        fs_id=r["fs_id"],
-                        section_index=r["section_index"],
-                        section_heading=r["section_heading"],
-                        text=r["text"],
-                        score=r.get("score"),
-                    )
+            seen_ids.add(r["id"])
+            all_suggestions.append(
+                LibraryItemSchema(
+                    id=r["id"],
+                    fs_id=r["fs_id"],
+                    section_index=r["section_index"],
+                    section_heading=r["section_heading"],
+                    text=r["text"],
+                    score=r.get("score"),
                 )
+            )
 
-    except Exception as exc:
-        logger.error("Suggestion search failed for %s: %s", doc_id, exc)
-        # Non-fatal — return empty suggestions
-        return APIResponse(data=SuggestionResponse(suggestions=[], total=0))
-
-    # Sort by score descending
     all_suggestions.sort(key=lambda s: s.score or 0, reverse=True)
 
     return APIResponse(
@@ -173,4 +197,10 @@ async def suggest_requirements(
             suggestions=all_suggestions[:20],
             total=len(all_suggestions[:20]),
         ),
+        meta={
+            "diagnostics": {
+                "total_sections": len(tasks),
+                "failed_sections": failed_sections,
+            }
+        },
     )

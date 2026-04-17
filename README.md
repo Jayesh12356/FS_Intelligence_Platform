@@ -6,7 +6,7 @@ AI-powered platform that transforms Functional Specification (FS) documents into
 
 ## What It Does
 
-Upload a specification document. The platform runs an 12-node AI pipeline that detects ambiguities, contradictions, and edge-case gaps; scores quality; decomposes the spec into atomic developer tasks with effort estimates and acceptance criteria; maps every task back to its source section; generates test cases; and flags duplicate requirements across documents.
+Upload a specification document. The platform runs an 11-node AI pipeline that detects ambiguities, contradictions, and edge-case gaps; scores quality; decomposes the spec into atomic developer tasks with effort estimates and acceptance criteria; maps every task back to its source section; generates test cases; and flags duplicate requirements across documents.
 
 When the spec changes, upload a new version and get instant impact analysis showing which tasks break and how much rework is needed. For legacy systems with no documentation, upload a codebase ZIP and get a generated functional specification from the code.
 
@@ -49,7 +49,7 @@ An MCP (Model Context Protocol) server wraps the entire platform so AI coding ag
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | Backend | FastAPI, Python 3.11+ | Async API layer, 16 routers, 90+ endpoints |
-| Pipeline | LangGraph | Stateful 12-node analysis pipeline + impact + reverse + refinement pipelines |
+| Pipeline | LangGraph | Stateful 11-node analysis pipeline + impact + reverse + refinement pipelines |
 | LLM Interface | Direct SDKs (Anthropic, OpenAI-compat) | Multi-provider model abstraction |
 | Adversarial Agents | CrewAI | Multi-agent debate on ambiguities |
 | Semantic Search | Qdrant | Duplicate detection, requirement library, embeddings |
@@ -57,7 +57,7 @@ An MCP (Model Context Protocol) server wraps the entire platform so AI coding ag
 | Frontend | Next.js 14, TypeScript, Tailwind CSS | 20+ page App Router UI with Framer Motion |
 | Embeddings | OpenAI / Groq / OpenRouter | Configurable embedding provider |
 | Reports | reportlab, python-docx | PDF and Word export |
-| MCP Server | Python MCP SDK | 20+ tools for AI coding agents |
+| MCP Server | Python MCP SDK | 90+ tools for AI coding agents |
 | Deployment | Docker Compose | 4-service containerization |
 
 ### Supported LLM Providers
@@ -70,6 +70,10 @@ An MCP (Model Context Protocol) server wraps the entire platform so AI coding ag
 | OpenRouter | `anthropic/claude-sonnet-4-20250514` | `OPENROUTER_API_KEY` |
 
 OpenRouter supports role-based model routing: separate models for reasoning, build, long-context, and fallback tasks.
+
+### Tool orchestration (Settings → LLM provider)
+
+When `ORCHESTRATION_ENABLED=true`, automatic analysis routes LLM calls through the provider chosen in the web UI (`ToolConfigDB`), typically **Direct API** (your configured `LLM_PROVIDER` / API keys) or **Claude Code** (local `claude` CLI with subscription auth). Set `ORCHESTRATION_STRICT_LLM=true` (default) so a failing non-API provider does not silently fall back to Direct API. **Cursor** remains for MCP-driven build workflows, not synchronous server-side LLM from FastAPI. See `.env.example` for `ORCHESTRATION_ENABLED`, `ORCHESTRATION_STRICT_LLM`, and `CLAUDE_CODE_CLI_PATH`.
 
 ---
 
@@ -139,7 +143,7 @@ Backend: `http://localhost:8000` | Frontend: `http://localhost:3001`
 
 ## Analysis Pipeline
 
-The core analysis runs a 12-node LangGraph pipeline:
+The core analysis runs a 11-node LangGraph pipeline:
 
 ```text
 parse -> ambiguity -> debate -> contradiction -> edge_case -> quality ->
@@ -205,7 +209,7 @@ fs_intelligence_platform/
 │
 ├── mcp-server/
 │   ├── server.py                  # MCP server entrypoint
-│   ├── tools/                     # 20+ MCP tool modules
+│   ├── tools/                     # 90+ MCP tools across 15 modules
 │   ├── resources/                 # MCP resource providers
 │   ├── prompts/                   # Autonomous build loop prompt
 │   └── README.md                  # MCP setup guide

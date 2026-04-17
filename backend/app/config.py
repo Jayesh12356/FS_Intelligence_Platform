@@ -77,6 +77,21 @@ class Settings(BaseSettings):
     CONFLUENCE_API_TOKEN: str = ""
     CONFLUENCE_SPACE_KEY: str = "FSP"
 
+    # ── Phase 2: Orchestration ────────────────────────
+    ORCHESTRATION_ENABLED: bool = False
+    # When True (default), a failing non-api LLM provider does not fall back
+    # to Direct API. Set to False explicitly to allow silent cross-provider
+    # failover when you don't care which provider answered.
+    ORCHESTRATION_STRICT_LLM: bool = True
+    CLAUDE_CODE_CLI_PATH: str = "claude"
+    # Request timeout for individual LLM invocations (seconds).
+    LLM_TIMEOUT_S: float = 120.0
+    # Retry count for transient LLM failures (network / 5xx).
+    LLM_RETRY_ATTEMPTS: int = 3
+    # URL the backend can use to reach itself (used e.g. by CursorProvider
+    # health check which pings /api/mcp/sessions). Override in deployed envs.
+    BACKEND_SELF_URL: str = "http://localhost:8000"
+
     # ── MCP monitoring + safety guards ─────────────────
     MCP_MONITORING_ENABLED: bool = True
     MCP_REQUIRE_ZERO_HIGH_AMBIGUITIES: bool = True
@@ -127,3 +142,8 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return a cached Settings singleton."""
     return Settings()
+
+
+def clear_settings_cache() -> None:
+    """Invalidate the settings cache so the next call re-reads from .env."""
+    get_settings.cache_clear()

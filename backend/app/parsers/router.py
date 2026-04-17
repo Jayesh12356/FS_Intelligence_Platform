@@ -11,6 +11,7 @@ import logging
 import uuid
 from pathlib import Path
 
+import anyio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -97,7 +98,7 @@ async def parse_document(
     logger.info("Parsing document %s (%s) with %s parser", fs_id, doc.filename, ext)
 
     try:
-        parsed = parser_fn(filepath)
+        parsed = await anyio.to_thread.run_sync(parser_fn, filepath)
     except Exception as exc:
         logger.error("Parsing failed for document %s: %s", fs_id, exc)
         doc.status = FSDocumentStatus.ERROR

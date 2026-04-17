@@ -101,8 +101,16 @@ class AmbiguityFlagSchema(BaseModel):
     severity: str  # LOW, MEDIUM, HIGH
     clarification_question: str
     resolved: bool = False
+    resolution_text: Optional[str] = None
+    resolved_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+
+class AmbiguityResolveRequest(BaseModel):
+    """Optional body for PATCH /{doc_id}/ambiguities/{flag_id}."""
+    resolution_text: Optional[str] = None
+    resolved: bool = True
 
 
 class AnalysisResponse(BaseModel):
@@ -811,3 +819,52 @@ class MCPSessionListResponse(BaseModel):
 class MCPSessionEventListResponse(BaseModel):
     events: List[MCPSessionEventSchema]
     total: int
+
+
+# ── Phase 2: Idea + Orchestration Schemas ─────────────
+
+
+class IdeaQuickRequest(BaseModel):
+    idea: str
+    industry: Optional[str] = None
+    complexity: Optional[str] = None
+
+
+class IdeaGuidedRequest(BaseModel):
+    session_id: Optional[str] = None
+    idea: str = ""
+    step: int = 0
+    answers: Optional[dict] = None
+    industry: Optional[str] = None
+    complexity: Optional[str] = None
+
+
+class IdeaSessionResponse(BaseModel):
+    id: UUID
+    idea_text: str
+    industry: str
+    complexity: str
+    mode: str
+    generated_fs_id: Optional[UUID] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ToolConfigSchema(BaseModel):
+    id: UUID
+    llm_provider: str
+    build_provider: str
+    frontend_provider: str
+    fallback_chain: List[str]
+    cursor_config: Optional[dict] = None
+    claude_code_config: Optional[dict] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ProviderHealthSchema(BaseModel):
+    name: str
+    display_name: str
+    capabilities: List[str]
+    healthy: Optional[bool] = None

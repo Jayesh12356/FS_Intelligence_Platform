@@ -15,12 +15,13 @@ def register(mcp: FastMCP) -> None:
 
     @mcp.tool()
     async def resolve_ambiguity(document_id: str, flag_id: str, resolution: str) -> dict:
-        """Use after deciding a concrete resolution for one ambiguity flag."""
-        # Backend currently marks as resolved directly; resolution text is returned for agent log symmetry.
-        result = await request_json("PATCH", f"/api/fs/{document_id}/ambiguities/{flag_id}")
-        if "error" in result:
-            return result
-        return {"data": {"resolution": resolution, "backend_result": result.get("data", result)}}
+        """Use after deciding a concrete resolution for one ambiguity flag. Persists the resolution note."""
+        result = await request_json(
+            "PATCH",
+            f"/api/fs/{document_id}/ambiguities/{flag_id}",
+            json={"resolution_text": resolution, "resolved": True},
+        )
+        return result
 
     @mcp.tool()
     async def get_contradictions(document_id: str) -> dict:
@@ -158,4 +159,59 @@ def register(mcp: FastMCP) -> None:
     async def get_debate_results(document_id: str) -> dict:
         """Use for HIGH-severity ambiguity adjudication context before resolving."""
         return await request_json("GET", f"/api/fs/{document_id}/debate-results")
+
+    @mcp.tool()
+    async def resolve_contradiction(document_id: str, contradiction_id: str) -> dict:
+        """Mark a contradiction as resolved without merging suggested text."""
+        return await request_json("PATCH", f"/api/fs/{document_id}/contradictions/{contradiction_id}")
+
+    @mcp.tool()
+    async def accept_contradiction_suggestion(document_id: str, contradiction_id: str) -> dict:
+        """Accept a contradiction resolution and merge the fix into the FS text."""
+        return await request_json("POST", f"/api/fs/{document_id}/contradictions/{contradiction_id}/accept")
+
+    @mcp.tool()
+    async def resolve_edge_case(document_id: str, edge_case_id: str) -> dict:
+        """Mark an edge case as resolved without merging suggested text."""
+        return await request_json("PATCH", f"/api/fs/{document_id}/edge-cases/{edge_case_id}")
+
+    @mcp.tool()
+    async def accept_edge_case_suggestion(document_id: str, edge_case_id: str) -> dict:
+        """Accept an edge case suggestion and merge the addition into the FS text."""
+        return await request_json("POST", f"/api/fs/{document_id}/edge-cases/{edge_case_id}/accept")
+
+    @mcp.tool()
+    async def bulk_resolve_ambiguities(document_id: str) -> dict:
+        """Resolve all open ambiguities in one call."""
+        return await request_json("POST", f"/api/fs/{document_id}/ambiguities/bulk-resolve")
+
+    @mcp.tool()
+    async def bulk_resolve_contradictions(document_id: str) -> dict:
+        """Resolve all open contradictions without merging text."""
+        return await request_json("POST", f"/api/fs/{document_id}/contradictions/bulk-resolve")
+
+    @mcp.tool()
+    async def bulk_accept_contradictions(document_id: str) -> dict:
+        """Accept all contradiction resolutions and merge fixes into FS text."""
+        return await request_json("POST", f"/api/fs/{document_id}/contradictions/bulk-accept")
+
+    @mcp.tool()
+    async def bulk_resolve_edge_cases(document_id: str) -> dict:
+        """Resolve all open edge cases without merging text."""
+        return await request_json("POST", f"/api/fs/{document_id}/edge-cases/bulk-resolve")
+
+    @mcp.tool()
+    async def bulk_accept_edge_cases(document_id: str) -> dict:
+        """Accept all edge case suggestions and merge additions into FS text."""
+        return await request_json("POST", f"/api/fs/{document_id}/edge-cases/bulk-accept")
+
+    @mcp.tool()
+    async def get_analysis_progress(document_id: str) -> dict:
+        """Poll analysis pipeline progress and logs."""
+        return await request_json("GET", f"/api/fs/{document_id}/analysis-progress")
+
+    @mcp.tool()
+    async def cancel_analysis(document_id: str) -> dict:
+        """Cancel an in-flight analysis pipeline run."""
+        return await request_json("POST", f"/api/fs/{document_id}/cancel-analysis")
 

@@ -9,6 +9,7 @@ from itertools import combinations
 from typing import List
 
 from app.llm import get_llm_client
+from app.orchestration.pipeline_llm import pipeline_call_llm_json
 from app.pipeline.state import Contradiction, FSAnalysisState, Severity
 
 logger = logging.getLogger(__name__)
@@ -93,7 +94,6 @@ async def detect_contradictions_between_sections(
     if len(content_a.strip()) < 20 or len(content_b.strip()) < 20:
         return []
 
-    client = get_llm_client()
     prompt = CONTRADICTION_USER_PROMPT.format(
         heading_a=heading_a,
         content_a=content_a,
@@ -104,7 +104,7 @@ async def detect_contradictions_between_sections(
     )
 
     try:
-        result = await client.call_llm_json(
+        result = await pipeline_call_llm_json(
             prompt=prompt,
             system=CONTRADICTION_SYSTEM_PROMPT,
             temperature=0.0,

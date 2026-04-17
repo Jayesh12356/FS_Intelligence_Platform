@@ -9,7 +9,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -155,23 +155,35 @@ async def upload_file(
 
 @router.get("/", response_model=APIResponse[FSDocumentListResponse])
 async def list_documents(
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[FSDocumentListResponse]:
-    """List all non-deleted documents."""
+    """List non-deleted documents with pagination.
+
+    Query params: ``limit`` (1-500, default 50) and ``offset`` (default 0).
+    """
+    base_filter = FSDocument.status != FSDocumentStatus.DELETED
+
+    total_result = await db.execute(
+        select(func.count()).select_from(FSDocument).where(base_filter)
+    )
+    total = int(total_result.scalar_one() or 0)
+
     result = await db.execute(
         select(FSDocument)
-        .where(FSDocument.status != FSDocumentStatus.DELETED)
+        .where(base_filter)
         .order_by(FSDocument.created_at.desc())
+        .limit(limit)
+        .offset(offset)
     )
     documents = result.scalars().all()
 
-    doc_list = [
-        FSDocumentResponse.model_validate(doc)
-        for doc in documents
-    ]
+    doc_list = [FSDocumentResponse.model_validate(doc) for doc in documents]
 
     return APIResponse(
-        data=FSDocumentListResponse(documents=doc_list, total=len(doc_list)),
+        data=FSDocumentListResponse(documents=doc_list, total=total),
+        meta={"limit": limit, "offset": offset, "count": len(doc_list)},
     )
 
 

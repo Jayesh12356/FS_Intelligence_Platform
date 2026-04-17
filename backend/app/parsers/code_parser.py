@@ -110,6 +110,34 @@ def _preflight_zip(zip_path: str) -> Tuple[int, int]:
         return len(infos), total_uncompressed
 
 
+def _safe_extractall(zip_path: str, dest: str) -> None:
+    """Extract a ZIP archive guarding against "zip-slip" path traversal.
+
+    Each member's resolved target path must live inside ``dest``. Absolute
+    paths, drive letters, and ``..`` segments are all rejected. Symlinks and
+    hard links are skipped entirely.
+    """
+    dest_path = Path(dest).resolve()
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for member in zf.infolist():
+            name = member.filename
+            if not name or name.endswith("/"):
+                # Directories are created implicitly by extractall below
+                continue
+            # Reject symlinks / hard links outright (mode bits)
+            mode = (member.external_attr >> 16) & 0xFFFF
+            if (mode & 0xA000) == 0xA000:  # S_IFLNK
+                raise ValueError(f"Zip archive contains a symlink entry: {name}")
+            if name.startswith("/") or name.startswith("\\"):
+                raise ValueError(f"Zip archive contains absolute path: {name}")
+            if ".." in Path(name).parts:
+                raise ValueError(f"Zip archive contains traversal segment: {name}")
+            target = (dest_path / name).resolve()
+            if dest_path not in target.parents and target != dest_path:
+                raise ValueError(f"Zip archive path escapes extraction dir: {name}")
+        zf.extractall(dest_path)
+
+
 # ── Python AST Extraction ───────────────────────────────
 
 
@@ -488,11 +516,10 @@ def parse_codebase(zip_path: str) -> CodebaseSnapshot:
     archive_file_count, archive_uncompressed_bytes = _preflight_zip(zip_path)
     filter_cfg = _build_filter_config()
 
-    # Extract to temp directory
+    # Extract to temp directory — with per-member path safety ("zip-slip" mitigation)
     extract_dir = tempfile.mkdtemp(prefix="codeparse_")
     try:
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(extract_dir)
+        _safe_extractall(zip_path, extract_dir)
 
         extract_path = Path(extract_dir)
 

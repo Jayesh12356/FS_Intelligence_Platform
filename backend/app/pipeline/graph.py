@@ -22,6 +22,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import threading
 import uuid as _uuid_mod
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List
@@ -73,39 +74,50 @@ ANALYSIS_NODE_LABELS: dict[str, str] = {
 }
 
 _analysis_progress: dict[str, dict] = {}
+_analysis_progress_lock = threading.Lock()
 
 
 def get_analysis_progress(fs_id: str) -> dict | None:
-    return _analysis_progress.get(fs_id)
+    with _analysis_progress_lock:
+        entry = _analysis_progress.get(fs_id)
+        if entry is None:
+            return None
+        return {
+            "completed_nodes": list(entry.get("completed_nodes", [])),
+            "current_node": entry.get("current_node"),
+            "total_nodes": entry.get("total_nodes", 0),
+            "logs": list(entry.get("logs", [])),
+        }
 
 
 def _update_progress(fs_id: str, *, node: str, phase: str, log: str | None = None) -> None:
-    entry = _analysis_progress.setdefault(fs_id, {
-        "completed_nodes": [],
-        "current_node": None,
-        "total_nodes": len(ANALYSIS_NODE_ORDER),
-        "logs": [],
-    })
-    if phase == "start":
-        entry["current_node"] = node
-        msg = f"Started: {ANALYSIS_NODE_LABELS.get(node, node)}"
-    elif phase == "complete":
-        if node not in entry["completed_nodes"]:
-            entry["completed_nodes"].append(node)
-        entry["current_node"] = None
-        msg = f"Completed: {ANALYSIS_NODE_LABELS.get(node, node)}"
-    elif phase == "cached":
-        if node not in entry["completed_nodes"]:
-            entry["completed_nodes"].append(node)
-        entry["current_node"] = None
-        msg = f"Cached: {ANALYSIS_NODE_LABELS.get(node, node)}"
-    else:
-        msg = log or phase
+    with _analysis_progress_lock:
+        entry = _analysis_progress.setdefault(fs_id, {
+            "completed_nodes": [],
+            "current_node": None,
+            "total_nodes": len(ANALYSIS_NODE_ORDER),
+            "logs": [],
+        })
+        if phase == "start":
+            entry["current_node"] = node
+            msg = f"Started: {ANALYSIS_NODE_LABELS.get(node, node)}"
+        elif phase == "complete":
+            if node not in entry["completed_nodes"]:
+                entry["completed_nodes"].append(node)
+            entry["current_node"] = None
+            msg = f"Completed: {ANALYSIS_NODE_LABELS.get(node, node)}"
+        elif phase == "cached":
+            if node not in entry["completed_nodes"]:
+                entry["completed_nodes"].append(node)
+            entry["current_node"] = None
+            msg = f"Cached: {ANALYSIS_NODE_LABELS.get(node, node)}"
+        else:
+            msg = log or phase
 
-    ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
-    entry["logs"].append(f"[{ts}] {msg}")
-    if len(entry["logs"]) > 100:
-        entry["logs"] = entry["logs"][-80:]
+        ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        entry["logs"].append(f"[{ts}] {msg}")
+        if len(entry["logs"]) > 100:
+            entry["logs"] = entry["logs"][-80:]
 
 
 # ── Parse Node (populates sections into state) ──────────
@@ -397,11 +409,20 @@ async def _load_project_context(fs_id: str, db: AsyncSession) -> List[Dict[str, 
     return context
 
 
+SELECTIVE_NODE_SET = {
+    "parse_node",
+    "ambiguity_node",
+    "debate_node",
+    "edge_case_node",
+}
+
+
 async def run_analysis_pipeline(
     fs_id: str,
     sections: List[Dict[str, Any]],
     db: AsyncSession | None = None,
     cancel_event: "asyncio.Event | None" = None,
+    changed_indices: "set[int] | None" = None,
 ) -> FSAnalysisState:
     """Run the full analysis pipeline on a parsed document.
 
@@ -413,11 +434,22 @@ async def run_analysis_pipeline(
         sections: List of parsed section dicts with heading, content, section_index.
         db: Optional async DB session for pipeline caching.
         cancel_event: When set, the pipeline stops before the next node.
+        changed_indices: When provided, only per-section nodes (ambiguity,
+            debate, edge-case) run, and only on the listed section indices.
+            Cross-cutting nodes (contradiction, quality, tasks, etc.) are
+            skipped so existing results are preserved.
 
     Returns:
         Final pipeline state with all analysis results populated.
     """
     graph = get_compiled_graph()
+
+    if changed_indices:
+        sections = [s for s in sections if s.get("section_index") in changed_indices]
+        logger.info(
+            "Selective analysis: restricted to %d sections (%s)",
+            len(sections), sorted(changed_indices),
+        )
 
     project_context: List[Dict[str, Any]] = []
     if db is not None:
@@ -448,11 +480,14 @@ async def run_analysis_pipeline(
         fs_id, len(sections), len(project_context),
     )
 
-    _analysis_progress.pop(fs_id, None)
+    with _analysis_progress_lock:
+        _analysis_progress.pop(fs_id, None)
     _update_progress(fs_id, node="", phase="log", log="Pipeline starting")
 
     if db is not None:
         node_order = ANALYSIS_NODE_ORDER
+        if changed_indices:
+            node_order = [n for n in ANALYSIS_NODE_ORDER if n in SELECTIVE_NODE_SET]
         node_fns: dict[str, Callable] = {
             "parse_node": parse_node,
             "ambiguity_node": ambiguity_node,

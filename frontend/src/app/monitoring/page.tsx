@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { getActivityLog, getMCPSessions, getMCPSessionEvents, getMCPSession } from "@/lib/api";
+import { getActivityLog, getMCPSessions, getMCPSessionEvents, getMCPSession, listProviders, type ProviderInfo } from "@/lib/api";
 import type { MCPSession, MCPSessionEvent, ActivityLogEntry } from "@/lib/api";
 import {
   PageShell,
@@ -31,10 +31,13 @@ import {
   Edit3,
   PlusCircle,
   XCircle,
+  Cpu,
+  Hammer,
+  Monitor,
 } from "lucide-react";
 import Link from "next/link";
 
-type MainTab = "activity" | "sessions";
+type MainTab = "activity" | "sessions" | "tools";
 
 function formatTime(ts: string | null): string {
   if (!ts) return "—";
@@ -150,6 +153,8 @@ export default function MonitoringPage() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [eventCounts, setEventCounts] = useState<Record<string, number>>({});
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [toolProviders, setToolProviders] = useState<ProviderInfo[]>([]);
+  const [toolsLoading, setToolsLoading] = useState(false);
 
   const selectedIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -163,16 +168,17 @@ export default function MonitoringPage() {
       if (opts?.manual) setActivityRefreshing(true);
       else setActivityLoading(true);
       try {
+        const trimmedSearch = docSearch.trim();
         const res = await getActivityLog(
           50,
           0,
           eventTypeFilter || undefined,
-          undefined
+          trimmedSearch || undefined,
         );
         const rows = res.data?.events ?? [];
         setActivityEvents(rows);
         setActivityTotal(res.data?.total ?? rows.length);
-        if (!eventTypeFilter) {
+        if (!eventTypeFilter && !trimmedSearch) {
           const types = Array.from(
             new Set(rows.map((r) => r.event_type).filter(Boolean))
           ).sort() as string[];
@@ -186,12 +192,13 @@ export default function MonitoringPage() {
         if (opts?.manual) setActivityRefreshing(false);
       }
     },
-    [eventTypeFilter]
+    [eventTypeFilter, docSearch]
   );
 
   useEffect(() => {
-    void fetchActivity();
-  }, [fetchActivity]);
+    const handle = setTimeout(() => void fetchActivity(), docSearch ? 250 : 0);
+    return () => clearTimeout(handle);
+  }, [fetchActivity, docSearch]);
 
   const fetchSessions = useCallback(async (opts?: { isManual?: boolean }) => {
     if (opts?.isManual) setListRefreshing(true);
@@ -262,19 +269,31 @@ export default function MonitoringPage() {
     };
   }, [mainTab, selectedSessionId, autoRefresh]);
 
-  const sortedActivity = useMemo(() => {
-    const q = docSearch.trim().toLowerCase();
-    let rows = [...activityEvents];
-    if (q) {
-      rows = rows.filter((e) => e.document_name.toLowerCase().includes(q));
+  const fetchToolProviders = useCallback(async () => {
+    setToolsLoading(true);
+    try {
+      const res = await listProviders();
+      setToolProviders(res.data ?? []);
+    } catch { /* ignore */ } finally {
+      setToolsLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    if (mainTab === "tools") {
+      void fetchToolProviders();
+    }
+  }, [mainTab, fetchToolProviders]);
+
+  const sortedActivity = useMemo(() => {
+    const rows = [...activityEvents];
     rows.sort((a, b) => {
       const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
       const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
       return tb - ta;
     });
     return rows;
-  }, [activityEvents, docSearch]);
+  }, [activityEvents]);
 
   const documentsActiveCount = useMemo(() => {
     const ids = new Set<string>();
@@ -428,6 +447,7 @@ export default function MonitoringPage() {
             items={[
               { key: "activity", label: "Activity Log" },
               { key: "sessions", label: "Build Sessions" },
+              { key: "tools", label: "Tool Execution" },
             ]}
             active={mainTab}
             onChange={(k) => setMainTab(k as MainTab)}
@@ -963,6 +983,146 @@ export default function MonitoringPage() {
                   </div>
                 </div>
               )}
+            </motion.div>
+          )}
+          {mainTab === "tools" && (
+            <motion.div
+              key="tools"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+            >
+              <div className="kpi-row" style={{ marginBottom: "1.25rem" }}>
+                <KpiCard
+                  label="Total Providers"
+                  value={toolProviders.length}
+                  icon={<Cpu size={20} />}
+                  iconBg="var(--well-blue)"
+                  delay={0}
+                />
+                <KpiCard
+                  label="Healthy"
+                  value={toolProviders.filter((p) => p.healthy === true).length}
+                  icon={<CheckCircle2 size={20} />}
+                  iconBg="var(--well-green)"
+                  delay={0.05}
+                />
+                <KpiCard
+                  label="Capabilities"
+                  value={Array.from(new Set(toolProviders.flatMap((p) => p.capabilities))).length}
+                  icon={<Hammer size={20} />}
+                  iconBg="var(--well-amber)"
+                  delay={0.1}
+                />
+              </div>
+
+              {toolsLoading && toolProviders.length === 0 ? (
+                <div className="card" style={{ padding: "2.5rem", textAlign: "center" }}>
+                  <div className="spinner" style={{ margin: "0 auto 0.75rem" }} aria-hidden />
+                  <p className="page-subtitle" style={{ margin: 0 }}>Loading providers…</p>
+                </div>
+              ) : toolProviders.length === 0 ? (
+                <EmptyState
+                  icon={<Cpu size={40} strokeWidth={1.25} />}
+                  title="No providers configured"
+                  description="Configure tool providers in Settings to see execution activity here."
+                />
+              ) : (
+                <StaggerList style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                  {toolProviders.map((p) => {
+                    const capIcons: Record<string, typeof Cpu> = {
+                      llm: Cpu,
+                      build: Hammer,
+                      frontend: Monitor,
+                      fullstack: Zap,
+                    };
+
+                    return (
+                      <StaggerItem key={p.name}>
+                        <div
+                          className="card card-flat"
+                          style={{
+                            padding: "1rem 1.25rem",
+                            borderLeft: `4px solid ${p.healthy === true ? "var(--success)" : p.healthy === false ? "var(--error)" : "var(--border-strong)"}`,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "1rem",
+                          }}
+                        >
+                          <div style={{
+                            width: 40, height: 40, borderRadius: "0.625rem",
+                            background: p.healthy === true ? "var(--well-green)" : "var(--well-gray)",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            flexShrink: 0,
+                          }}>
+                            {p.healthy === true ? (
+                              <CheckCircle2 size={20} style={{ color: "var(--success)" }} />
+                            ) : p.healthy === false ? (
+                              <XCircle size={20} style={{ color: "var(--error)" }} />
+                            ) : (
+                              <AlertTriangle size={20} style={{ color: "var(--text-muted)" }} />
+                            )}
+                          </div>
+
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, fontSize: "0.9375rem" }}>{p.display_name}</div>
+                            <div style={{ fontSize: "0.8rem", color: "var(--text-tertiary)", marginTop: "0.25rem" }}>
+                              {p.healthy === true ? "Connected & healthy" : p.healthy === false ? "Not available" : "Status unknown"}
+                            </div>
+                          </div>
+
+                          <div style={{ display: "flex", gap: "0.375rem", flexShrink: 0 }}>
+                            {p.capabilities.map((cap) => {
+                              const CapIcon = capIcons[cap] || Activity;
+                              return (
+                                <span
+                                  key={cap}
+                                  title={cap}
+                                  style={{
+                                    display: "inline-flex", alignItems: "center", gap: "0.25rem",
+                                    padding: "0.2rem 0.5rem", borderRadius: "0.25rem",
+                                    background: "var(--well-blue)", fontSize: "0.7rem",
+                                    fontWeight: 500, color: "var(--text-secondary)",
+                                    textTransform: "uppercase",
+                                  }}
+                                >
+                                  <CapIcon size={10} />
+                                  {cap}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </StaggerItem>
+                    );
+                  })}
+                </StaggerList>
+              )}
+
+              <div className="card" style={{ padding: "1.25rem", marginTop: "1rem" }}>
+                <h3 style={{ margin: "0 0 0.75rem", fontSize: "1rem", fontWeight: 600 }}>
+                  Execution Cost Comparison
+                </h3>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                  <div style={{
+                    padding: "1rem", borderRadius: "0.75rem",
+                    background: "var(--well-peach)", textAlign: "center",
+                  }}>
+                    <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>Direct API</div>
+                    <div style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--text-primary)" }}>Pay-per-token</div>
+                    <div style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", marginTop: "0.25rem" }}>Usage-based pricing</div>
+                  </div>
+                  <div style={{
+                    padding: "1rem", borderRadius: "0.75rem",
+                    background: "var(--well-green)", textAlign: "center",
+                  }}>
+                    <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>Subscription Tools</div>
+                    <div style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--success)" }}>Included</div>
+                    <div style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", marginTop: "0.25rem" }}>Cursor / Claude Code</div>
+                  </div>
+                </div>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

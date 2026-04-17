@@ -9,6 +9,7 @@ import {
   resolveAmbiguity,
   getDebateResults,
   bulkResolveAmbiguities,
+  getDocument,
 } from "@/lib/api";
 import type { AmbiguityFlag, DebateResult } from "@/lib/api";
 import {
@@ -22,6 +23,7 @@ import {
   EmptyState,
 } from "@/components/index";
 import Badge from "@/components/Badge";
+import { useToast } from "@/components/Toaster";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search,
@@ -207,6 +209,7 @@ function DebateTranscript({ debate }: { debate: DebateResult }) {
 export default function AmbiguitiesPage() {
   const params = useParams();
   const docId = params.id as string;
+  const { error: toastError, success: toastSuccess } = useToast();
   const [flags, setFlags] = useState<AmbiguityFlag[]>([]);
   const [debates, setDebates] = useState<DebateResult[]>([]);
   const [loading, setLoading] = useState(true);
@@ -216,10 +219,21 @@ export default function AmbiguitiesPage() {
   const [filterTab, setFilterTab] = useState<string>("all");
 
   const fetchFlags = useCallback(async () => {
+    setError(null);
     try {
+      let analyzedByStatus = false;
+      try {
+        const docResp = await getDocument(docId);
+        const status = docResp.data?.status;
+        analyzedByStatus = status === "COMPLETE";
+      } catch {
+        // non-fatal; fall back to flag count heuristic below
+      }
+
       const result = await listAmbiguities(docId);
-      setFlags(result.data || []);
-      setHasAnalyzed(result.data && result.data.length > 0);
+      const list = result.data || [];
+      setFlags(list);
+      setHasAnalyzed(analyzedByStatus || list.length > 0);
 
       try {
         const debateResult = await getDebateResults(docId);
@@ -227,8 +241,9 @@ export default function AmbiguitiesPage() {
       } catch {
         setDebates([]);
       }
-    } catch {
+    } catch (err: unknown) {
       setFlags([]);
+      setError(err instanceof Error ? err.message : "Could not load ambiguities.");
     } finally {
       setLoading(false);
     }
@@ -242,16 +257,8 @@ export default function AmbiguitiesPage() {
     setAnalyzing(true);
     setError(null);
     try {
-      const result = await analyzeDocument(docId);
-      setFlags(result.data.ambiguities);
-      setHasAnalyzed(true);
-
-      try {
-        const debateResult = await getDebateResults(docId);
-        setDebates(debateResult.data?.results || []);
-      } catch {
-        setDebates([]);
-      }
+      await analyzeDocument(docId);
+      await fetchFlags();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Analysis failed");
     } finally {
@@ -259,14 +266,30 @@ export default function AmbiguitiesPage() {
     }
   };
 
-  const handleResolve = async (flagId: string) => {
+  const handleResolve = async (flagId: string, resolutionText?: string) => {
     try {
-      await resolveAmbiguity(docId, flagId);
+      const res = await resolveAmbiguity(
+        docId,
+        flagId,
+        resolutionText !== undefined
+          ? { resolution_text: resolutionText, resolved: true }
+          : undefined
+      );
+      const updated = res.data;
       setFlags((prev) =>
-        prev.map((f) => (f.id === flagId ? { ...f, resolved: true } : f))
+        prev.map((f) =>
+          f.id === flagId
+            ? {
+                ...f,
+                resolved: true,
+                resolution_text: updated?.resolution_text ?? resolutionText ?? f.resolution_text,
+                resolved_at: updated?.resolved_at ?? new Date().toISOString(),
+              }
+            : f
+        )
       );
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Failed to resolve");
+      toastError("Failed to resolve", err instanceof Error ? err.message : undefined);
     }
   };
 
@@ -276,8 +299,9 @@ export default function AmbiguitiesPage() {
     try {
       await bulkResolveAmbiguities(docId);
       setFlags((prev) => prev.map((f) => ({ ...f, resolved: true })));
+      toastSuccess("Ambiguities resolved", "All outstanding flags marked as resolved.");
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Bulk resolve failed");
+      toastError("Bulk resolve failed", err instanceof Error ? err.message : undefined);
     } finally {
       setBulkLoading(false);
     }
@@ -379,9 +403,42 @@ export default function AmbiguitiesPage() {
       maxWidth={900}
     >
       {error && (
-        <div className="alert alert-error" style={{ marginBottom: "1.25rem" }}>
-          {error}
+        <div
+          className="alert alert-error"
+          style={{
+            marginBottom: "1.25rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "1rem",
+          }}
+        >
+          <span>{error}</span>
+          <button
+            type="button"
+            className="btn btn-sm btn-secondary"
+            onClick={() => {
+              setError(null);
+              setLoading(true);
+              fetchFlags();
+            }}
+          >
+            Retry
+          </button>
         </div>
+      )}
+
+      {flags.length === 0 && !hasAnalyzed && (
+        <EmptyState
+          icon={<AlertTriangle size={40} strokeWidth={1.25} aria-hidden />}
+          title="No ambiguity data yet"
+          description="Run the analysis pipeline first to detect ambiguities, contradictions, and edge cases in your document."
+          action={
+            <button type="button" className="btn btn-primary" onClick={handleAnalyze} disabled={analyzing} style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}>
+              {analyzing ? <><span className="spinner" style={{ width: 16, height: 16 }} />Analyzing…</> : <><Zap size={18} />Run Analysis</>}
+            </button>
+          }
+        />
       )}
 
       {flags.length > 0 && (
@@ -553,7 +610,16 @@ export default function AmbiguitiesPage() {
                         <button
                           type="button"
                           className="btn btn-success btn-sm"
-                          onClick={() => flag.id && handleResolve(flag.id)}
+                          onClick={() => {
+                            if (!flag.id) return;
+                            const note = window.prompt(
+                              "How was this resolved? (optional)",
+                              ""
+                            );
+                            // Cancel == null → bail; empty string still resolves without a note
+                            if (note === null) return;
+                            handleResolve(flag.id, note.trim());
+                          }}
                           disabled={!flag.id}
                         >
                           <CheckCircle2 size={14} />
@@ -601,6 +667,23 @@ export default function AmbiguitiesPage() {
                     >
                       {flag.clarification_question}
                     </div>
+
+                    {flag.resolved && flag.resolution_text && (
+                      <div
+                        style={{
+                          marginTop: "0.5rem",
+                          padding: "0.5rem 0.75rem",
+                          borderRadius: "var(--radius-md)",
+                          fontSize: "0.8125rem",
+                          color: "var(--text-secondary)",
+                          background: "var(--bg-success-subtle, rgba(34,197,94,0.08))",
+                          borderLeft: "3px solid var(--success, #16a34a)",
+                        }}
+                      >
+                        <strong style={{ color: "var(--success, #16a34a)" }}>Resolution:</strong>{" "}
+                        {flag.resolution_text}
+                      </div>
+                    )}
 
                     {debate && <DebateTranscript debate={debate} />}
                   </motion.div>

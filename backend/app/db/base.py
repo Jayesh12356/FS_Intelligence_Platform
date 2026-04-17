@@ -57,11 +57,17 @@ async_session_factory = async_sessionmaker(
 
 
 async def get_db() -> AsyncSession:
-    """Dependency — yields an async DB session."""
+    """Dependency — yields an async DB session.
+
+    Auto-commits only when the session has uncommitted changes (new, dirty,
+    or deleted objects). This avoids issuing empty COMMITs on read-only GETs
+    and reduces contention on hot read paths.
+    """
     async with async_session_factory() as session:
         try:
             yield session
-            await session.commit()
+            if session.new or session.dirty or session.deleted:
+                await session.commit()
         except Exception:
             await session.rollback()
             raise

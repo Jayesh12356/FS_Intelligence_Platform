@@ -16,6 +16,7 @@ import {
   ScanSearch,
   Upload,
   FolderOpen,
+  Sparkles,
 } from "lucide-react";
 import {
   FadeIn,
@@ -80,6 +81,13 @@ const FEATURES = [
     icon: Boxes,
     well: "var(--well-gray)" as const,
   },
+  {
+    title: "Idea to Product",
+    description:
+      "Describe your product idea and generate a professional FS document ready for analysis.",
+    icon: Sparkles,
+    well: "var(--well-blue)" as const,
+  },
 ];
 
 function formatDate(dateStr: string): string {
@@ -109,11 +117,14 @@ function recentUploadsCount(docs: FSDocumentResponse[]): number {
 export default function HomePage() {
   const [docs, setDocs] = useState<FSDocumentResponse[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     listDocuments()
       .then((res) => setDocs(res.data?.documents ?? []))
-      .catch(() => {})
+      .catch((err: unknown) => {
+        setFetchError(err instanceof Error ? err.message : "Could not connect to backend");
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -148,7 +159,11 @@ export default function HomePage() {
           prose to structured tasks, quality scores, and build-ready output.
         </p>
         <div className="hero-actions">
-          <Link href="/upload" className="btn btn-primary" id="hero-upload-btn">
+          <Link href="/create" className="btn btn-primary" id="hero-create-btn">
+            <Sparkles size={20} />
+            Create from Idea
+          </Link>
+          <Link href="/upload" className="btn btn-secondary" id="hero-upload-btn">
             <Upload size={20} />
             Upload FS
           </Link>
@@ -162,6 +177,15 @@ export default function HomePage() {
           </Link>
         </div>
       </section>
+
+      {fetchError && (
+        <FadeIn delay={0.06}>
+          <div className="alert alert-error" style={{ marginBottom: "1rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+            {fetchError}
+          </div>
+        </FadeIn>
+      )}
 
       {!loading && docs.length > 0 && (
         <FadeIn delay={0.08}>

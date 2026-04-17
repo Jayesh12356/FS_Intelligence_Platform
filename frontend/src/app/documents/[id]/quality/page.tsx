@@ -27,6 +27,7 @@ import {
 } from "@/components/index";
 import Badge from "@/components/Badge";
 import EmptyState from "@/components/EmptyState";
+import { useToast } from "@/components/Toaster";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BarChart3,
@@ -86,6 +87,7 @@ function severityVariant(
 export default function QualityDashboardPage() {
   const params = useParams();
   const docId = params.id as string;
+  const { error: toastError, success: toastSuccess } = useToast();
   const [dashboard, setDashboard] = useState<QualityDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -124,7 +126,7 @@ export default function QualityDashboardPage() {
       });
       fetchDashboard();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Failed to resolve");
+      toastError("Failed to resolve", err instanceof Error ? err.message : undefined);
     }
   };
 
@@ -142,7 +144,7 @@ export default function QualityDashboardPage() {
       });
       fetchDashboard();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Failed to resolve");
+      toastError("Failed to resolve", err instanceof Error ? err.message : undefined);
     }
   };
 
@@ -160,7 +162,10 @@ export default function QualityDashboardPage() {
       });
       fetchDashboard();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Failed to accept suggestion");
+      toastError(
+        "Failed to accept suggestion",
+        err instanceof Error ? err.message : undefined,
+      );
     }
   };
 
@@ -178,7 +183,10 @@ export default function QualityDashboardPage() {
       });
       fetchDashboard();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Failed to accept resolution");
+      toastError(
+        "Failed to accept resolution",
+        err instanceof Error ? err.message : undefined,
+      );
     }
   };
 
@@ -189,8 +197,9 @@ export default function QualityDashboardPage() {
     try {
       await bulkAcceptEdgeCases(docId);
       await fetchDashboard();
+      toastSuccess("Edge cases accepted");
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Bulk accept failed");
+      toastError("Bulk accept failed", err instanceof Error ? err.message : undefined);
     } finally {
       setBulkLoading(false);
     }
@@ -201,8 +210,9 @@ export default function QualityDashboardPage() {
     try {
       await bulkResolveEdgeCases(docId);
       await fetchDashboard();
+      toastSuccess("Edge cases resolved");
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Bulk resolve failed");
+      toastError("Bulk resolve failed", err instanceof Error ? err.message : undefined);
     } finally {
       setBulkLoading(false);
     }
@@ -213,8 +223,9 @@ export default function QualityDashboardPage() {
     try {
       await bulkAcceptContradictions(docId);
       await fetchDashboard();
+      toastSuccess("Contradictions accepted");
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Bulk accept failed");
+      toastError("Bulk accept failed", err instanceof Error ? err.message : undefined);
     } finally {
       setBulkLoading(false);
     }
@@ -225,8 +236,9 @@ export default function QualityDashboardPage() {
     try {
       await bulkResolveContradictions(docId);
       await fetchDashboard();
+      toastSuccess("Contradictions resolved");
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Bulk resolve failed");
+      toastError("Bulk resolve failed", err instanceof Error ? err.message : undefined);
     } finally {
       setBulkLoading(false);
     }

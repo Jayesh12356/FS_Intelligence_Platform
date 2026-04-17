@@ -14,8 +14,8 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -63,11 +63,14 @@ async def upload_codebase(
             detail=f"Only .zip files are accepted (got '{ext}')",
         )
 
-    # Save zip file
+    # Save zip file — sanitize filename to avoid path-traversal on disk write
     upload_id = uuid.uuid4()
     save_dir = settings.upload_path / "code" / str(upload_id)
     save_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = save_dir / file.filename
+    safe_name = Path(file.filename).name or f"upload_{upload_id}.zip"
+    if ".." in safe_name or "/" in safe_name or "\\" in safe_name:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    zip_path = save_dir / safe_name
 
     file_size = 0
     with open(zip_path, "wb") as f:
@@ -110,13 +113,14 @@ async def upload_codebase(
     await db.refresh(code_upload)
 
     # Parse codebase immediately
+    import anyio
     from app.parsers.code_parser import parse_codebase
 
     try:
         code_upload.status = CodeUploadStatus.PARSING
         await db.flush()
 
-        snapshot = parse_codebase(str(zip_path))
+        snapshot = await anyio.to_thread.run_sync(parse_codebase, str(zip_path))
         snapshot_dict = snapshot.model_dump()
 
         # Remove content from snapshot_data to save DB space
@@ -190,8 +194,9 @@ async def generate_fs(
     await db.flush()
 
     # Re-parse to get full snapshot with content (DB version has content stripped)
+    import anyio
     try:
-        snapshot = parse_codebase(upload.zip_path)
+        snapshot = await anyio.to_thread.run_sync(parse_codebase, upload.zip_path)
         snapshot_dict = snapshot.model_dump()
     except Exception as exc:
         upload.status = CodeUploadStatus.ERROR
@@ -376,18 +381,27 @@ async def get_report(
 
 @router.get("/uploads", response_model=APIResponse[CodeUploadListResponse])
 async def list_uploads(
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[CodeUploadListResponse]:
-    """List all code uploads."""
+    """List code uploads with pagination."""
+    total_result = await db.execute(select(func.count()).select_from(CodeUploadDB))
+    total = int(total_result.scalar_one() or 0)
+
     result = await db.execute(
-        select(CodeUploadDB).order_by(CodeUploadDB.created_at.desc())
+        select(CodeUploadDB)
+        .order_by(CodeUploadDB.created_at.desc())
+        .limit(limit)
+        .offset(offset)
     )
     uploads = result.scalars().all()
 
     schemas = [CodeUploadResponse.model_validate(u) for u in uploads]
 
     return APIResponse(
-        data=CodeUploadListResponse(uploads=schemas, total=len(schemas)),
+        data=CodeUploadListResponse(uploads=schemas, total=total),
+        meta={"limit": limit, "offset": offset, "count": len(schemas)},
     )
 
 

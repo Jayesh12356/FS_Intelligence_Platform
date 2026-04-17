@@ -10,6 +10,7 @@ from collections import defaultdict, deque
 from typing import Dict, List, Set, Tuple
 
 from app.llm import get_llm_client
+from app.orchestration.pipeline_llm import pipeline_call_llm_json
 from app.pipeline.state import FSAnalysisState
 
 logger = logging.getLogger(__name__)
@@ -216,8 +217,7 @@ async def dependency_node(state: FSAnalysisState) -> FSAnalysisState:
     all_task_ids = {t["task_id"] for t in tasks}
 
     try:
-        client = get_llm_client()
-        result = await client.call_llm_json(
+        result = await pipeline_call_llm_json(
             prompt=prompt,
             system=DEPENDENCY_SYSTEM_PROMPT,
             temperature=0.0,

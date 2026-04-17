@@ -15,7 +15,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AmbiguityFlagDB, ContradictionDB, EdgeCaseGapDB, FSDocument
-from app.llm import get_llm_client
+from app.llm.client import LLMError
+from app.orchestration.pipeline_llm import pipeline_call_llm, pipeline_call_llm_json
 from app.parsers.chunker import chunk_text_into_sections
 
 logger = logging.getLogger(__name__)
@@ -145,7 +146,6 @@ async def suggestion_node(state: RefinementState) -> RefinementState:
     if not issues:
         return {**state, "suggestions": []}
 
-    client = get_llm_client()
     suggestions: list[RefinementIssue] = []
     for issue in issues:
         prompt = (
@@ -156,11 +156,23 @@ async def suggestion_node(state: RefinementState) -> RefinementState:
             "Write one replacement that fixes the defect. Return JSON: {\"suggested_fix\": \"...\"}"
         )
         try:
-            res = await client.call_llm_json(prompt=prompt, system=SUGGESTION_SYSTEM, temperature=0.0, max_tokens=220, role="longcontext")
+            res = await pipeline_call_llm_json(
+                prompt=prompt,
+                system=SUGGESTION_SYSTEM,
+                temperature=0.0,
+                max_tokens=220,
+                role="longcontext",
+            )
             suggested_fix = str((res or {}).get("suggested_fix") or "").strip()
             if not suggested_fix:
                 suggested_fix = f"{issue.get('original_text', '')} [REFINED]"
-        except Exception:
+        except LLMError:
+            raise
+        except (TypeError, ValueError, KeyError) as exc:
+            logger.warning(
+                "Suggestion LLM response malformed for issue %s: %s",
+                issue.get("issue_id"), exc,
+            )
             suggested_fix = f"{issue.get('original_text', '')} [REFINED]"
 
         suggestions.append({**issue, "suggested_fix": suggested_fix})
@@ -191,8 +203,19 @@ async def rewriter_node(state: RefinementState) -> RefinementState:
 
     refined_text = ""
     try:
-        refined_text = (await get_llm_client().call_llm(prompt=prompt, system=REWRITER_SYSTEM, temperature=0.0, max_tokens=8192, role="longcontext")).strip()
-    except Exception:
+        refined_text = (
+            await pipeline_call_llm(
+                prompt=prompt,
+                system=REWRITER_SYSTEM,
+                temperature=0.0,
+                max_tokens=8192,
+                role="longcontext",
+            )
+        ).strip()
+    except LLMError:
+        raise
+    except (TypeError, ValueError) as exc:
+        logger.warning("Rewriter LLM returned unexpected shape: %s", exc)
         refined_text = original_text
 
     if not refined_text:

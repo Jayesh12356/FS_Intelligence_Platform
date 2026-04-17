@@ -89,52 +89,191 @@
 }
 
 /* ── Dark Theme ─────────────────────────────────────────────── */
+/* Premium inky-black + vibrant lavender palette. Cards sit as
+   elevated tiles on near-pure-black with a faint violet undertone,
+   mirroring the target mosaic-dashboard aesthetic. Light-mode tokens
+   above are intentionally untouched. */
 
 [data-theme="dark"] {
-  --bg-primary: #0C0C14;
-  --bg-secondary: #13131F;
-  --bg-tertiary: #1A1A2A;
-  --bg-card: #161622;
-  --bg-card-hover: #1E1E30;
-  --bg-glass: rgba(22, 22, 34, 0.8);
-  --glass-bg: rgba(22, 22, 34, 0.8);
-  --glass-border: rgba(255, 255, 255, 0.06);
-  --bg-input: #1A1A2A;
+  /* Surfaces — deep inky black with a faint violet undertone. */
+  --bg-primary: #07070D;
+  --bg-secondary: #0D0D18;
+  --bg-tertiary: #15152A;
+  --bg-card: #14142A;
+  --bg-card-hover: #1E1E3C;
+  --bg-glass: rgba(20, 20, 42, 0.72);
+  --glass-bg: rgba(20, 20, 42, 0.72);
+  --glass-border: rgba(167, 139, 250, 0.12);
+  --bg-input: #15152A;
 
-  --text-primary: #F0F0F8;
-  --text-secondary: #A0A0B8;
-  --text-muted: #606078;
+  /* Text — crisp near-white with cool secondary / muted. */
+  --text-primary: #F5F5FB;
+  --text-secondary: #A8A8C6;
+  --text-muted: #6B6B88;
 
-  --accent-primary: #7C6FE0;
-  --accent-secondary: #9B8FF0;
-  --accent-gradient: linear-gradient(135deg, #7C6FE0, #9B8FF0);
-  --accent-glow: 0 0 20px rgba(124, 111, 224, 0.15);
-  --color-primary: #7C6FE0;
+  /* Accent — vibrant lavender (violet-400/300). */
+  --accent-primary: #A78BFA;
+  --accent-secondary: #C4B5FD;
+  --accent-gradient: linear-gradient(135deg, #A78BFA, #C4B5FD);
+  --accent-glow: 0 0 24px rgba(167, 139, 250, 0.25);
+  --color-primary: #A78BFA;
 
-  --bg-success-subtle: rgba(22, 163, 74, 0.12);
-  --bg-warning-subtle: rgba(217, 119, 6, 0.12);
-  --bg-error-subtle: rgba(220, 38, 38, 0.12);
-  --bg-info-subtle: rgba(37, 99, 235, 0.12);
-  --bg-accent-subtle: rgba(124, 111, 224, 0.1);
+  /* Semantic — brighter hues to keep contrast on near-black. */
+  --success: #4ADE80;
+  --warning: #FACC15;
+  --error: #F87171;
+  --info: #60A5FA;
+  --color-success: #4ADE80;
+  --color-warning: #FACC15;
+  --color-error: #F87171;
+  --color-info: #60A5FA;
 
-  --border-color: rgba(255, 255, 255, 0.08);
-  --border-subtle: rgba(255, 255, 255, 0.04);
-  --border-strong: rgba(255, 255, 255, 0.12);
+  --bg-success-subtle: rgba(74, 222, 128, 0.14);
+  --bg-warning-subtle: rgba(250, 204, 21, 0.14);
+  --bg-error-subtle: rgba(248, 113, 113, 0.14);
+  --bg-info-subtle: rgba(96, 165, 250, 0.14);
+  --bg-accent-subtle: rgba(167, 139, 250, 0.14);
 
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.6);
-  --shadow-glow: 0 0 0 3px rgba(124, 111, 224, 0.15);
+  /* Borders — mostly invisible, with a stronger tier for emphasis. */
+  --border-color: rgba(255, 255, 255, 0.07);
+  --border-subtle: rgba(255, 255, 255, 0.035);
+  --border-strong: rgba(255, 255, 255, 0.14);
 
-  --well-green: #1A2A1E;
-  --well-peach: #2A1F1A;
-  --well-blue: #1A1F2A;
-  --well-purple: #221A2A;
-  --well-amber: #2A251A;
-  --well-red: #2A1A1A;
-  --well-gray: #1E1E28;
+  /* Shadows — deep, layered depth on near-black. */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.55), 0 1px 2px rgba(0, 0, 0, 0.6);
+  --shadow-md: 0 8px 20px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 16px 32px rgba(0, 0, 0, 0.65);
+  --shadow-xl: 0 24px 60px rgba(0, 0, 0, 0.7);
+  --shadow-glow: 0 0 0 3px rgba(167, 139, 250, 0.22);
+
+  /* Pastel wells for KPI icons — dark-tinted so the colored
+     glyphs pop without washing out the black background. */
+  --well-green: #0F2A1C;
+  --well-peach: #2A1F15;
+  --well-blue: #0F2036;
+  --well-purple: #261E44;
+  --well-amber: #2B2310;
+  --well-red: #2C1515;
+  --well-gray: #18182C;
+}
+
+/* Dark-theme polish: cards sit as elevated tiles on near-black,
+   with soft depth and a subtle top highlight. Purely visual — no
+   structural rules are changed here. */
+[data-theme="dark"] .card,
+[data-theme="dark"] .section-card,
+[data-theme="dark"] .kpi-card,
+[data-theme="dark"] .info-item,
+[data-theme="dark"] .accordion-item,
+[data-theme="dark"] .analysis-summary-stat,
+[data-theme="dark"] .analysis-progress-card,
+[data-theme="dark"] .table-wrap {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="dark"] .card:hover,
+[data-theme="dark"] .kpi-card:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 4px 12px rgba(0, 0, 0, 0.55),
+    0 16px 40px rgba(167, 139, 250, 0.08);
+}
+
+[data-theme="dark"] .nav {
+  background: rgba(7, 7, 13, 0.72);
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .upload-zone {
+  background: var(--bg-card);
+  border-color: rgba(255, 255, 255, 0.09);
+}
+
+[data-theme="dark"] .upload-zone:hover,
+[data-theme="dark"] .upload-zone.drag-over {
+  border-color: var(--accent-primary);
+  background: rgba(167, 139, 250, 0.08);
+}
+
+[data-theme="dark"] .badge-neutral {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+}
+
+[data-theme="dark"] .tabs {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="dark"] .tab.active {
+  background: var(--bg-card-hover);
+}
+
+[data-theme="dark"] .form-input,
+[data-theme="dark"] .form-textarea,
+[data-theme="dark"] .form-select {
+  background: var(--bg-input);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .form-input:focus,
+[data-theme="dark"] .form-textarea:focus,
+[data-theme="dark"] .form-select:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.18);
+}
+
+[data-theme="dark"] .btn-primary {
+  background: var(--accent-primary);
+  color: #13111F;
+  font-weight: 600;
+}
+
+[data-theme="dark"] .btn-primary:hover {
+  background: var(--accent-secondary);
+  color: #13111F;
+}
+
+[data-theme="dark"] .btn-secondary {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+[data-theme="dark"] .btn-secondary:hover {
+  background: rgba(167, 139, 250, 0.08);
+}
+
+[data-theme="dark"] .table-wrap th {
+  background: #0F0F1E;
+  color: var(--text-secondary);
+}
+
+[data-theme="dark"] .table-wrap tr:hover td {
+  background: rgba(167, 139, 250, 0.04);
+}
+
+[data-theme="dark"] .table-wrap td:first-child {
+  background: var(--bg-card);
+}
+
+[data-theme="dark"] .doc-icon {
+  background: rgba(167, 139, 250, 0.12);
+  color: var(--accent-secondary);
+}
+
+[data-theme="dark"] .hero-badge {
+  background: rgba(167, 139, 250, 0.14);
+  color: var(--accent-secondary);
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(167, 139, 250, 0.35);
 }
 
 /* ── Base Reset ─────────────────────────────────────────────── */
@@ -1385,5 +1524,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 }
 
 [data-theme="dark"] ::selection {
-  background: rgba(124, 111, 224, 0.25);
+  background: rgba(167, 139, 250, 0.32);
+  color: #F5F5FB;
 }

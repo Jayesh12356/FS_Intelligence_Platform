@@ -1,0 +1,17 @@
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "E501",
+    "B008",
+    "B904",
+    "UP006",
+    "UP007",
+    "UP035",
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["F401", "F811", "B017"]
+"app/db/init_db.py" = ["B904"]

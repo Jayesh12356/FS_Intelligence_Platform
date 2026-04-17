@@ -21,6 +21,7 @@ import {
   Badge,
   Modal,
 } from "@/components/index";
+import { useToast } from "@/components/Toaster";
 import {
   listProjects,
   createProject,
@@ -41,6 +42,7 @@ function formatDate(dateStr: string): string {
 
 export default function ProjectsPage() {
   const router = useRouter();
+  const { error: toastError } = useToast();
   const [projects, setProjects] = useState<ProjectListData["projects"]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -91,11 +93,14 @@ export default function ProjectsPage() {
       resetCreateForm();
       router.refresh();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Could not create project");
+      toastError(
+        "Could not create project",
+        err instanceof Error ? err.message : undefined,
+      );
     } finally {
       setCreateBusy(false);
     }
-  }, [newName, newDescription, createBusy, resetCreateForm, router]);
+  }, [newName, newDescription, createBusy, resetCreateForm, router, toastError]);
 
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget || deleteBusy) return;
@@ -110,11 +115,11 @@ export default function ProjectsPage() {
       setRemovingId(null);
       router.refresh();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Delete failed");
+      toastError("Delete failed", err instanceof Error ? err.message : undefined);
     } finally {
       setDeleteBusy(false);
     }
-  }, [deleteTarget, deleteBusy, router]);
+  }, [deleteTarget, deleteBusy, router, toastError]);
 
   const requestDelete = (e: React.MouseEvent, project: FSProject) => {
     e.preventDefault();

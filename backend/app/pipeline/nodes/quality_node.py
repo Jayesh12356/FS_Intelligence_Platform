@@ -9,6 +9,7 @@ import logging
 from typing import List
 
 from app.llm import get_llm_client
+from app.orchestration.pipeline_llm import pipeline_call_llm_json
 from app.pipeline.state import (
     ComplianceTag,
     FSAnalysisState,
@@ -92,11 +93,10 @@ async def detect_compliance_tags_in_section(
     if not content or len(content.strip()) < 20:
         return []
 
-    client = get_llm_client()
     prompt = COMPLIANCE_USER_PROMPT.format(heading=heading, content=content)
 
     try:
-        result = await client.call_llm_json(
+        result = await pipeline_call_llm_json(
             prompt=prompt,
             system=COMPLIANCE_SYSTEM_PROMPT,
             temperature=0.0,

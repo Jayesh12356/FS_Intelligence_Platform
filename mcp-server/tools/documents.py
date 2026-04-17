@@ -5,10 +5,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-import httpx
 from fastmcp import FastMCP
 
-from config import BACKEND_URL
 from tools._http import request_json
 
 
@@ -49,31 +47,18 @@ def register(mcp: FastMCP) -> None:
         If score < 90, the build loop will auto-refine before
         starting any code generation.
         """
-        async with httpx.AsyncClient(timeout=150.0) as client:
-            for attempt in range(3):
-                try:
-                    r = await client.post(f"{BACKEND_URL}/api/fs/{document_id}/analyze")
-                    if r.status_code == 200:
-                        return r.json()
-                    if r.status_code == 503:
-                        if attempt < 2:
-                            await asyncio.sleep(5)
-                            continue
-                        return {
-                            "error": "Backend unavailable after 3 retries",
-                            "status_code": 503,
-                            "suggestion": "Check backend logs and restart",
-                        }
-                    return {
-                        "error": r.text,
-                        "status_code": r.status_code,
-                    }
-                except httpx.TimeoutException:
-                    if attempt < 2:
-                        await asyncio.sleep(5)
-                        continue
-                    return {"error": "Request timed out after 150s"}
-            return {"error": "All retry attempts failed"}
+        last: dict = {"error": "Not attempted", "status_code": 500}
+        for attempt in range(3):
+            res = await request_json("POST", f"/api/fs/{document_id}/analyze")
+            if "error" not in res:
+                return res
+            last = res
+            status_code = int(res.get("status_code") or 0)
+            if status_code in (503, 504) and attempt < 2:
+                await asyncio.sleep(5)
+                continue
+            break
+        return last
 
     @mcp.tool()
     async def get_document_status(document_id: str) -> dict:
@@ -89,7 +74,35 @@ def register(mcp: FastMCP) -> None:
         data = doc.get("data", {}) if isinstance(doc, dict) else {}
         sections = data.get("sections")
         if sections is None:
-            # If sections are not present yet, trigger parse and return parse result.
             return await request_json("POST", f"/api/fs/{document_id}/parse")
         return {"data": {"sections": sections, "total": len(sections)}}
+
+    @mcp.tool()
+    async def delete_document(document_id: str) -> dict:
+        """Permanently delete a document and all associated analysis data."""
+        return await request_json("DELETE", f"/api/fs/{document_id}")
+
+    @mcp.tool()
+    async def reset_document_status(document_id: str) -> dict:
+        """Reset a document back to 'uploaded' status so it can be re-analyzed."""
+        return await request_json("POST", f"/api/fs/{document_id}/reset-status")
+
+    @mcp.tool()
+    async def edit_section(document_id: str, section_index: int, heading: str = "", content: str = "") -> dict:
+        """Edit a specific section's heading and/or content by index."""
+        body: dict = {}
+        if heading:
+            body["heading"] = heading
+        if content:
+            body["content"] = content
+        return await request_json("PATCH", f"/api/fs/{document_id}/sections/{section_index}", json=body)
+
+    @mcp.tool()
+    async def add_section(document_id: str, heading: str, content: str) -> dict:
+        """Append a new section to the document."""
+        return await request_json(
+            "POST",
+            f"/api/fs/{document_id}/sections",
+            json={"heading": heading, "content": content},
+        )
 

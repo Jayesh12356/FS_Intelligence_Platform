@@ -22,6 +22,7 @@ import {
   EmptyState,
   Badge,
 } from "@/components/index";
+import { useToast } from "@/components/Toaster";
 import {
   getProject,
   updateProject,
@@ -64,6 +65,7 @@ function DocumentStatusBadge({ status }: { status: string }) {
 export default function ProjectDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const { error: toastError } = useToast();
   const projectId = typeof params.id === "string" ? params.id : params.id?.[0] ?? "";
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -132,11 +134,11 @@ export default function ProjectDetailPage() {
       setEditingName(false);
       router.refresh();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Could not update name");
+      toastError("Could not update name", err instanceof Error ? err.message : undefined);
       setNameDraft(project.name);
       setEditingName(false);
     }
-  }, [project, projectId, nameDraft, router]);
+  }, [project, projectId, nameDraft, router, toastError]);
 
   const saveDescription = useCallback(async () => {
     if (!project || !projectId) return;
@@ -156,11 +158,14 @@ export default function ProjectDetailPage() {
       setEditingDescription(false);
       router.refresh();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Could not update description");
+      toastError(
+        "Could not update description",
+        err instanceof Error ? err.message : undefined,
+      );
       setDescriptionDraft(project.description ?? "");
       setEditingDescription(false);
     }
-  }, [project, projectId, descriptionDraft, router]);
+  }, [project, projectId, descriptionDraft, router, toastError]);
 
   const startEditName = useCallback(() => {
     if (!project) return;
@@ -190,12 +195,12 @@ export default function ProjectDetailPage() {
         await loadProject();
         router.refresh();
       } catch (err: unknown) {
-        alert(err instanceof Error ? err.message : "Upload failed");
+        toastError("Upload failed", err instanceof Error ? err.message : undefined);
       } finally {
         setUploadBusy(false);
       }
     },
-    [projectId, uploadBusy, loadProject, router]
+    [projectId, uploadBusy, loadProject, router, toastError]
   );
 
   const titleNode = useMemo(() => {

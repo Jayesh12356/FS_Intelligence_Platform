@@ -10,11 +10,12 @@ from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
-# Import LLM client at module level so it can be mocked in tests
+from app.llm.client import LLMError
+
 try:
-    from app.llm import get_llm_client
+    from app.orchestration.pipeline_llm import pipeline_call_llm
 except ImportError:
-    get_llm_client = None  # type: ignore
+    pipeline_call_llm = None  # type: ignore[misc, assignment]
 
 
 TESTCASE_SYSTEM_PROMPT = """You are a senior QA engineer writing test cases from acceptance criteria. Every test case you produce must be executable — a tester or automated framework can follow the steps and verify the expected result without ambiguity.
@@ -90,7 +91,7 @@ async def testcase_node(state: Dict[str, Any]) -> Dict[str, Any]:
     fs_id = state.get("fs_id", "")
     test_cases: List[Dict[str, Any]] = []
     errors: List[str] = list(state.get("errors", []))
-    llm_available = get_llm_client is not None
+    llm_available = pipeline_call_llm is not None
 
     if not tasks:
         logger.info("No tasks found — skipping test case generation")
@@ -143,8 +144,9 @@ Return a JSON array of 1-3 test cases. Each element must have:
 Return ONLY a JSON array."""
 
         try:
-            client = get_llm_client()
-            response = await client.call_llm(prompt, system=TESTCASE_SYSTEM_PROMPT, role="build")
+            response = await pipeline_call_llm(
+                prompt, system=TESTCASE_SYSTEM_PROMPT, role="build"
+            )
             # Parse the JSON response
             response_text = _extract_json_array(response)
             parsed = json.loads(response_text)
@@ -168,6 +170,8 @@ Return ONLY a JSON array."""
             else:
                 logger.warning("LLM returned non-list for task %s", task_id)
 
+        except LLMError:
+            raise
         except json.JSONDecodeError as exc:
             logger.warning("JSON parse error for task %s test cases: %s", task_id, exc)
             # Fallback: create basic test case per criterion

@@ -12,6 +12,7 @@ import logging
 from typing import List
 
 from app.llm import get_llm_client
+from app.orchestration.pipeline_llm import pipeline_call_llm_json
 from app.pipeline.state import AmbiguityFlag, FSAnalysisState, Severity
 
 logger = logging.getLogger(__name__)
@@ -92,11 +93,10 @@ async def detect_ambiguities_in_section(
         logger.debug("Skipping section %d (%s): too short", section_index, heading)
         return []
 
-    client = get_llm_client()
     prompt = AMBIGUITY_USER_PROMPT.format(heading=heading, content=content)
 
     try:
-        result = await client.call_llm_json(
+        result = await pipeline_call_llm_json(
             prompt=prompt,
             system=AMBIGUITY_SYSTEM_PROMPT,
             temperature=0.0,

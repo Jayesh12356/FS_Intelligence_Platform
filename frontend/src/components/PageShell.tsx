@@ -13,7 +13,7 @@ interface PageShellProps {
   actions?: ReactNode;
   badge?: ReactNode;
   children: ReactNode;
-  maxWidth?: number;
+  maxWidth?: number | string;
 }
 
 export default function PageShell({

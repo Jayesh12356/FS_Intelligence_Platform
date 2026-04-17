@@ -15,6 +15,10 @@ import {
   getQualityDashboard,
   listAmbiguities,
   listTasks,
+  exportToJira,
+  exportToConfluence,
+  exportPdfReport,
+  exportDocxReport,
 } from "@/lib/api";
 import type {
   FSDocumentDetail,
@@ -58,6 +62,8 @@ import {
   Plus,
   Save,
   X,
+  Download,
+  TestTube2,
 } from "lucide-react";
 
 function formatDate(dateStr: string): string {
@@ -175,6 +181,8 @@ export default function DocumentDetailPage() {
   const [qualityData, setQualityData] = useState<QualityDashboardResponse | null>(null);
   const [ambiguities, setAmbiguities] = useState<AmbiguityFlag[]>([]);
   const [taskData, setTaskData] = useState<TaskListData | null>(null);
+  const [exporting, setExporting] = useState<string | null>(null);
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
 
   const fetchDoc = useCallback(async () => {
     try {
@@ -304,8 +312,8 @@ export default function DocumentDetailPage() {
         setDoc(refreshed.data);
         setSections(refreshed.data.sections || []);
       }
-    } catch (e) {
-      console.error("Cancel failed:", e);
+    } catch (err: unknown) {
+      setAnalyzeError(err instanceof Error ? err.message : "Cancel failed");
     } finally {
       setCancelling(false);
     }
@@ -345,8 +353,8 @@ export default function DocumentDetailPage() {
         setSections(refreshed.data.sections || []);
       }
       setEditingSection(null);
-    } catch (e) {
-      console.error("Save section failed:", e);
+    } catch (err: unknown) {
+      setParseError(err instanceof Error ? err.message : "Save section failed");
     } finally {
       setSavingSection(false);
     }
@@ -374,10 +382,43 @@ export default function DocumentDetailPage() {
       setShowAddSection(false);
       setNewSectionHeading("");
       setNewSectionContent("");
-    } catch (e) {
-      console.error("Add section failed:", e);
+    } catch (err: unknown) {
+      setParseError(err instanceof Error ? err.message : "Add section failed");
     } finally {
       setAddingSection(false);
+    }
+  };
+
+  const handleExport = async (type: string) => {
+    setExporting(type);
+    setExportMsg(null);
+    try {
+      let result;
+      switch (type) {
+        case "jira":
+          result = await exportToJira(docId);
+          setExportMsg(`Exported ${result.data.total} stories to JIRA`);
+          break;
+        case "confluence":
+          result = await exportToConfluence(docId);
+          setExportMsg(`Exported to Confluence: ${result.data.title}`);
+          break;
+        case "pdf":
+          result = await exportPdfReport(docId);
+          if (result.data.download_url) window.open(result.data.download_url, "_blank");
+          setExportMsg(`PDF report generated: ${result.data.filename}`);
+          break;
+        case "docx":
+          result = await exportDocxReport(docId);
+          if (result.data.download_url) window.open(result.data.download_url, "_blank");
+          setExportMsg(`DOCX report generated: ${result.data.filename}`);
+          break;
+      }
+    } catch (err: unknown) {
+      setExportMsg(err instanceof Error ? err.message : `Export failed`);
+    } finally {
+      setExporting(null);
+      setTimeout(() => setExportMsg(null), 5000);
     }
   };
 
@@ -433,6 +474,7 @@ export default function DocumentDetailPage() {
     { href: `/documents/${doc.id}/collab`, title: "Collaboration", icon: <Users size={20} aria-hidden />, well: "var(--well-gray)", id: "btn-collab-link" },
     { href: `/documents/${doc.id}/traceability`, title: "Traceability Matrix", icon: <Link2 size={20} aria-hidden />, well: "var(--well-blue)", id: "btn-traceability-link" },
     { href: `/documents/${doc.id}/refine`, title: "Refine FS", icon: <Sparkles size={20} aria-hidden />, well: "var(--well-purple)" },
+    { href: `/documents/${doc.id}/tests`, title: "Test Cases", icon: <TestTube2 size={20} aria-hidden />, well: "var(--well-peach)" },
     { href: `/documents/${doc.id}/build`, title: "Build with Cursor", icon: <Play size={20} aria-hidden />, well: "var(--well-green)" },
   ];
 
@@ -813,6 +855,40 @@ export default function DocumentDetailPage() {
                     </span>
                     <ChevronRight size={20} style={{ flexShrink: 0, color: "var(--text-muted)" }} aria-hidden />
                   </Link>
+                ))}
+              </div>
+
+              {/* Export Section */}
+              <h3 style={{ fontSize: "1rem", fontWeight: 700, margin: "1.5rem 0 0.75rem", color: "var(--text-primary)" }}>
+                Export
+              </h3>
+              {exportMsg && (
+                <div style={{
+                  padding: "0.5rem 0.75rem", borderRadius: "0.5rem", marginBottom: "0.75rem",
+                  background: exportMsg.includes("fail") ? "var(--error-bg)" : "var(--success-bg, rgba(34,197,94,0.1))",
+                  color: exportMsg.includes("fail") ? "var(--error)" : "var(--success)",
+                  fontSize: "0.8125rem",
+                }}>
+                  {exportMsg}
+                </div>
+              )}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                {([
+                  { key: "jira", label: "Export to JIRA" },
+                  { key: "confluence", label: "Export to Confluence" },
+                  { key: "pdf", label: "PDF Report" },
+                  { key: "docx", label: "DOCX Report" },
+                ] as const).map((exp) => (
+                  <button
+                    key={exp.key}
+                    className="btn btn-secondary btn-sm"
+                    disabled={exporting !== null}
+                    onClick={() => handleExport(exp.key)}
+                    style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}
+                  >
+                    <Download size={14} aria-hidden />
+                    {exporting === exp.key ? "Exporting..." : exp.label}
+                  </button>
                 ))}
               </div>
             </>

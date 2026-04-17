@@ -814,7 +814,9 @@ class TestReversePipelineGraph:
         import app.pipeline.graph as graph_mod
         graph_mod._compiled_reverse_graph = None
 
-        with patch("app.pipeline.nodes.reverse_fs_node.get_llm_client"):
+        with patch("app.pipeline.nodes.reverse_fs_node.pipeline_call_llm"), patch(
+            "app.pipeline.nodes.reverse_fs_node.pipeline_call_llm_json"
+        ):
             graph = graph_mod.build_reverse_graph()
             assert graph is not None
 
@@ -824,7 +826,9 @@ class TestReversePipelineGraph:
         import app.pipeline.graph as graph_mod
         graph_mod._compiled_reverse_graph = None
 
-        with patch("app.pipeline.nodes.reverse_fs_node.get_llm_client"):
+        with patch("app.pipeline.nodes.reverse_fs_node.pipeline_call_llm"), patch(
+            "app.pipeline.nodes.reverse_fs_node.pipeline_call_llm_json"
+        ):
             g1 = graph_mod.get_compiled_reverse_graph()
             g2 = graph_mod.get_compiled_reverse_graph()
             assert g1 is g2

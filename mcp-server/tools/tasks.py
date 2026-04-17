@@ -6,11 +6,9 @@ from collections import defaultdict
 import os
 from typing import Optional
 
-import httpx
 from fastmcp import FastMCP
 
 from config import (
-    BACKEND_URL,
     MCP_DRY_RUN_DEFAULT,
     MCP_MIN_QUALITY_SCORE,
     MCP_REQUIRE_TRACEABILITY,
@@ -44,20 +42,24 @@ def register(mcp: FastMCP) -> None:
         If returned status does not match what you set, retry once.
         Always verify before moving to next task.
         """
-        async with httpx.AsyncClient() as client:
-            r = await client.patch(
-                f"{BACKEND_URL}/api/fs/{document_id}/tasks/{task_id}",
-                json={"status": status, "title": title},
-            )
-            if r.status_code == 200:
-                verify = await client.get(
-                    f"{BACKEND_URL}/api/fs/{document_id}/tasks/{task_id}"
-                )
-                return {
-                    "updated": r.json(),
-                    "verified_status": verify.json().get("data", {}).get("status"),
-                }
-            return {"error": r.text, "status_code": r.status_code}
+        payload: dict = {"status": status}
+        if title is not None:
+            payload["title"] = title
+        updated = await request_json(
+            "PATCH",
+            f"/api/fs/{document_id}/tasks/{task_id}",
+            json=payload,
+        )
+        if "error" in updated:
+            return updated
+        verify = await request_json(
+            "GET", f"/api/fs/{document_id}/tasks/{task_id}"
+        )
+        return {
+            "updated": updated,
+            "verified_status": (verify.get("data") or {}).get("status")
+            if isinstance(verify, dict) else None,
+        }
 
     @mcp.tool()
     async def get_dependency_graph(document_id: str) -> dict:

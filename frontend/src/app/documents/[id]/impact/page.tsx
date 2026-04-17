@@ -91,6 +91,7 @@ export default function ImpactDashboardPage() {
   const [impactLoading, setImpactLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedChanges, setExpandedChanges] = useState<Set<number>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -126,14 +127,17 @@ export default function ImpactDashboardPage() {
     }
   }, [versions, selectedVersion]);
 
+  const [impactError, setImpactError] = useState<string | null>(null);
+
   const fetchImpactData = useCallback(
     async (versionId: string) => {
       try {
         setImpactLoading(true);
+        setImpactError(null);
         const result = await getImpactAnalysis(docId, versionId);
         setImpactData(result.data);
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Failed to load impact data");
+        setImpactError(err instanceof Error ? err.message : "Failed to load impact data");
       } finally {
         setImpactLoading(false);
       }
@@ -147,23 +151,58 @@ export default function ImpactDashboardPage() {
     }
   }, [selectedVersion, fetchImpactData]);
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const uploadImpl = useCallback(
+    async (file: File) => {
+      const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
+      if (![".pdf", ".docx", ".txt"].includes(ext)) {
+        setUploadError(`Unsupported file type '${ext}'. Allowed: .pdf, .docx, .txt`);
+        return;
+      }
+      if (file.size > 20 * 1024 * 1024) {
+        setUploadError(`File is ${(file.size / 1024 / 1024).toFixed(1)} MB — exceeds 20 MB limit.`);
+        return;
+      }
+
+      setUploading(true);
+      setUploadError(null);
+      try {
+        await uploadVersion(docId, file);
+        await fetchVersions();
+      } catch (err: unknown) {
+        setUploadError(err instanceof Error ? err.message : "Upload failed");
+      } finally {
+        setUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    },
+    [docId, fetchVersions],
+  );
+
+  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-
-    setUploading(true);
-    setUploadError(null);
-
-    try {
-      await uploadVersion(docId, file);
-      await fetchVersions();
-    } catch (err: unknown) {
-      setUploadError(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
+    if (file) void uploadImpl(file);
   };
+
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOver(false);
+      if (uploading) return;
+      const file = e.dataTransfer.files[0];
+      if (file) void uploadImpl(file);
+    },
+    [uploading, uploadImpl],
+  );
+
+  const onDragOver = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      if (!uploading) setDragOver(true);
+    },
+    [uploading],
+  );
+
+  const onDragLeave = useCallback(() => setDragOver(false), []);
 
   const handleCompare = (versionId: string) => {
     setSelectedVersion(versionId);
@@ -237,13 +276,17 @@ export default function ImpactDashboardPage() {
             Upload an updated FS document to trigger impact analysis
           </p>
           <motion.div
-            className="upload-zone"
+            className={`upload-zone ${dragOver ? "drag-over" : ""}`}
             onClick={uploading ? undefined : openFilePicker}
             onKeyDown={uploading ? undefined : onZoneKeyDown}
+            onDrop={onDrop}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
             role="button"
             tabIndex={uploading ? -1 : 0}
             aria-disabled={uploading}
             whileHover={uploading ? undefined : { scale: 1.01 }}
+            animate={{ scale: dragOver ? 1.02 : 1 }}
             transition={{ type: "spring", stiffness: 400, damping: 25 }}
             style={{ cursor: uploading ? "not-allowed" : "pointer", opacity: uploading ? 0.7 : 1 }}
           >
@@ -368,6 +411,12 @@ export default function ImpactDashboardPage() {
         <div className="page-loading" style={{ minHeight: "120px", marginTop: "1rem" }}>
           <div className="spinner" />
           Loading impact analysis…
+        </div>
+      )}
+
+      {impactError && !impactLoading && (
+        <div className="alert alert-error" style={{ marginTop: "1rem", marginBottom: "1rem" }}>
+          {impactError}
         </div>
       )}
 

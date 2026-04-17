@@ -10,6 +10,7 @@ import uuid
 from typing import List
 
 from app.llm import get_llm_client
+from app.orchestration.pipeline_llm import pipeline_call_llm_json
 from app.pipeline.state import EffortLevel, FSAnalysisState, FSTask
 
 logger = logging.getLogger(__name__)
@@ -93,7 +94,6 @@ async def decompose_section_into_tasks(
         logger.debug("Skipping section %d (%s): too short for task decomposition", section_index, heading)
         return []
 
-    client = get_llm_client()
     prompt = TASK_DECOMPOSITION_USER_PROMPT.format(
         heading=heading,
         content=content,
@@ -101,7 +101,7 @@ async def decompose_section_into_tasks(
     )
 
     try:
-        result = await client.call_llm_json(
+        result = await pipeline_call_llm_json(
             prompt=prompt,
             system=TASK_DECOMPOSITION_SYSTEM_PROMPT,
             temperature=0.0,

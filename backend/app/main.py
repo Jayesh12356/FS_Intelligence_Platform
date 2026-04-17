@@ -9,14 +9,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.db.init_db import init_db
+from app.errors import install_exception_handlers
+from app.middleware import RequestContextMiddleware, RequestIdLogFilter
 from app.vector import get_qdrant_manager
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(name)-30s | %(levelname)-8s | %(message)s",
+    format="%(asctime)s | %(name)-30s | %(levelname)-8s | rid=%(request_id)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
+for _h in logging.getLogger().handlers:
+    _h.addFilter(RequestIdLogFilter())
 logger = logging.getLogger(__name__)
 
 
@@ -25,7 +28,9 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     logger.info("🚀 Starting FS Intelligence Platform …")
     settings = get_settings()
-    logger.info("Database: %s", settings.DATABASE_URL.split("@")[-1])
+    # Do not log DB host/credentials; scheme only
+    db_scheme = settings.DATABASE_URL.split("://", 1)[0]
+    logger.info("Database: %s://<redacted>", db_scheme)
     logger.info("Qdrant:   %s", settings.QDRANT_URL)
     logger.info("LLM:      %s / %s", settings.LLM_PROVIDER, settings.PRIMARY_MODEL)
 
@@ -58,15 +63,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── CORS ───────────────────────────────────────────────
+# ── Middleware + error handlers ───────────────────────
 settings = get_settings()
+app.add_middleware(RequestContextMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
+install_exception_handlers(app)
 
 # ── Routers ────────────────────────────────────────────
 from app.api.fs_router import router as fs_router  # noqa: E402
@@ -88,6 +96,9 @@ from app.api.build_router import router as build_router  # noqa: E402
 # New feature routers
 from app.api.activity_router import router as activity_router  # noqa: E402
 from app.api.project_router import router as project_router  # noqa: E402
+# Phase 2 routers
+from app.api.idea_router import router as idea_router  # noqa: E402
+from app.api.orchestration_router import router as orchestration_router  # noqa: E402
 
 app.include_router(fs_router)
 app.include_router(health_router)
@@ -108,6 +119,9 @@ app.include_router(build_router)
 # New features
 app.include_router(activity_router)
 app.include_router(project_router)
+# Phase 2
+app.include_router(idea_router)
+app.include_router(orchestration_router)
 
 
 @app.get("/")

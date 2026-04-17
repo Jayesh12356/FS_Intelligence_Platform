@@ -3,6 +3,11 @@
 This manual covers the complete system as implemented through Level 10 plus all
 post-L10 enhancements (refinement, accept/resolve flow, build engine, MCP server).
 
+For a concise architectural overview with mermaid diagrams, see
+[ARCHITECTURE.md](./ARCHITECTURE.md). For subscription-tool guides, see
+[GUIDE_CURSOR.md](./GUIDE_CURSOR.md), [GUIDE_CLAUDE_CODE.md](./GUIDE_CLAUDE_CODE.md),
+and [GUIDE_WEB_UI.md](./GUIDE_WEB_UI.md).
+
 ---
 
 ## 1. System Overview
@@ -12,7 +17,7 @@ developer-ready work through AI-powered analysis:
 
 1. **Upload** -- Ingest FS documents (PDF, DOCX, TXT) or legacy codebases (ZIP).
 2. **Parse** -- Extract structured sections, generate vector embeddings, store in Qdrant.
-3. **Analyze** -- Run a 12-node LangGraph pipeline that detects ambiguities, contradictions,
+3. **Analyze** -- Run a 11-node LangGraph pipeline that detects ambiguities, contradictions,
    edge cases, quality issues, and duplicates; decomposes into tasks; generates test cases.
 4. **Validate** -- Adversarial multi-agent debate (CrewAI) challenges HIGH-severity ambiguity
    flags to reduce false positives.
@@ -21,6 +26,10 @@ developer-ready work through AI-powered analysis:
 7. **Track** -- Traceability matrix, version history, change impact analysis, rework estimation.
 8. **Export** -- JIRA, Confluence, PDF, DOCX, CSV exports.
 9. **Build** -- Autonomous build orchestration via MCP tools with pre/post-build gates.
+
+### Tool orchestration and LLM routing
+
+With `ORCHESTRATION_ENABLED=true`, pipeline LLM calls use the **LLM provider** saved in Settings (`ToolConfigDB`, user `default`): **api** (Direct API / existing env keys) or **claude_code** (Anthropic `claude` CLI on the server host). If an invalid legacy value like `cursor` is stored, it is treated as **api** with a warning log. When `ORCHESTRATION_STRICT_LLM=true` (default), failure of the chosen non-API provider surfaces as an error instead of falling back to Direct API. **Cursor** is intended for MCP build flows, not as a backend for synchronous LLM from the API process. Only three providers exist: **Direct API**, **Claude Code**, and **Cursor**. Environment variables: `ORCHESTRATION_ENABLED`, `ORCHESTRATION_STRICT_LLM`, `CLAUDE_CODE_CLI_PATH` (see root `.env.example`).
 
 ---
 
@@ -209,7 +218,7 @@ Default: OpenAI `text-embedding-3-small` (1536 dimensions).
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/{id}/analysis-progress` | Real-time pipeline node status |
-| `POST` | `/{id}/analyze` | Run full 12-node pipeline |
+| `POST` | `/{id}/analyze` | Run full 11-node pipeline |
 | `POST` | `/{id}/cancel-analysis` | Cancel in-flight analysis |
 | `GET` | `/{id}/ambiguities` | List ambiguity flags |
 | `PATCH` | `/{id}/ambiguities/{fid}` | Resolve ambiguity |
@@ -455,7 +464,7 @@ See `mcp-server/README.md` for Cursor, Claude Desktop, and Claude Code configura
 ### Application
 | Variable | Default |
 |----------|---------|
-| `ENVIRONMENT` | `development` |
+| `ENVIRONMENT` | `local` |
 | `UPLOAD_DIR` | `uploads` |
 | `MAX_UPLOAD_SIZE_MB` | `20` |
 | `CORS_ALLOW_ORIGINS` | `http://localhost:3001` |
@@ -535,6 +544,7 @@ Test files cover all levels:
 | `test_build_engine.py` | Build state, registry, gates (Build engine) |
 | `test_mcp_monitoring.py` | MCP sessions, events (MCP) |
 | `test_e2e_full.py` | End-to-end full pipeline |
+| `test_orchestration_routing.py` | Provider resolution, strict mode, fallback chain |
 
 ---
 

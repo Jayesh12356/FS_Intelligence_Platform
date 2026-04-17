@@ -4,7 +4,34 @@
  * All calls go through the backend API at NEXT_PUBLIC_API_URL.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+/** Typed API error raised by `apiFetch` on non-2xx responses. */
+export class APIError extends Error {
+  status: number;
+  code: string;
+  requestId?: string;
+  detail?: unknown;
+  constructor(message: string, init: { status: number; code?: string; requestId?: string; detail?: unknown }) {
+    super(message);
+    this.name = "APIError";
+    this.status = init.status;
+    this.code = init.code ?? `http_${init.status}`;
+    this.requestId = init.requestId;
+    this.detail = init.detail;
+  }
+}
+
+export function isApiError(err: unknown): err is APIError {
+  return err instanceof APIError;
+}
+
+/** Shallow helper to extract a user-facing message from any thrown value. */
+export function errorMessage(err: unknown, fallback = "Something went wrong"): string {
+  if (isApiError(err)) return err.message;
+  if (err instanceof Error) return err.message;
+  return fallback;
+}
 
 // ── Types ──────────────────────────────────────────────
 
@@ -55,6 +82,8 @@ export interface AmbiguityFlag {
   severity: "LOW" | "MEDIUM" | "HIGH";
   clarification_question: string;
   resolved: boolean;
+  resolution_text?: string | null;
+  resolved_at?: string | null;
 }
 
 export interface QualityScore {
@@ -196,24 +225,51 @@ export interface TraceabilityData {
 
 // ── Helper ─────────────────────────────────────────────
 
-async function apiFetch<T>(
+export async function apiFetch<T>(
   path: string,
-  options?: RequestInit
+  options?: RequestInit & { signal?: AbortSignal }
 ): Promise<APIResponse<T>> {
   const url = `${API_BASE}${path}`;
 
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      ...options?.headers,
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...options,
+      headers: {
+        ...options?.headers,
+      },
+    });
+  } catch (err) {
+    if ((err as { name?: string })?.name === "AbortError") throw err;
+    throw new APIError(
+      `Network error contacting ${url}`,
+      { status: 0, code: "network_error", detail: String(err) }
+    );
+  }
+
+  const requestId = res.headers.get("X-Request-ID") ?? undefined;
 
   if (!res.ok) {
-    const body = await res.json().catch(() => null);
+    const body = (await res.json().catch(() => null)) as
+      | { error?: string; detail?: unknown; code?: string; request_id?: string }
+      | null;
+    const detailText =
+      typeof body?.detail === "string"
+        ? body.detail
+        : Array.isArray(body?.detail)
+        ? (body!.detail as Array<{ msg?: string }>)
+            .map((d) => d?.msg)
+            .filter(Boolean)
+            .join("; ")
+        : undefined;
     const message =
-      body?.detail || body?.error || `API error: ${res.status} ${res.statusText}`;
-    throw new Error(message);
+      detailText || body?.error || `API error: ${res.status} ${res.statusText}`;
+    throw new APIError(message, {
+      status: res.status,
+      code: body?.code,
+      requestId: body?.request_id ?? requestId,
+      detail: body?.detail,
+    });
   }
 
   return res.json();
@@ -239,10 +295,15 @@ export async function uploadFile(
 /**
  * List all non-deleted documents.
  */
-export async function listDocuments(): Promise<
-  APIResponse<DocumentListData>
-> {
-  return apiFetch<DocumentListData>("/api/fs/");
+export async function listDocuments(
+  opts?: { limit?: number; offset?: number; signal?: AbortSignal },
+): Promise<APIResponse<DocumentListData>> {
+  const params = new URLSearchParams();
+  if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts?.offset !== undefined) params.set("offset", String(opts.offset));
+  const qs = params.toString();
+  const path = qs ? `/api/fs/?${qs}` : "/api/fs/";
+  return apiFetch<DocumentListData>(path, { signal: opts?.signal });
 }
 
 /**
@@ -368,10 +429,13 @@ export async function listAmbiguities(
  */
 export async function resolveAmbiguity(
   docId: string,
-  flagId: string
+  flagId: string,
+  body?: { resolution_text?: string; resolved?: boolean }
 ): Promise<APIResponse<AmbiguityFlag>> {
   return apiFetch<AmbiguityFlag>(`/api/fs/${docId}/ambiguities/${flagId}`, {
     method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
   });
 }
 
@@ -849,10 +913,15 @@ export async function uploadCodebase(
 /**
  * List all code uploads. (L8)
  */
-export async function listCodeUploads(): Promise<
-  APIResponse<CodeUploadListData>
-> {
-  return apiFetch<CodeUploadListData>("/api/code/uploads");
+export async function listCodeUploads(
+  opts?: { limit?: number; offset?: number; signal?: AbortSignal },
+): Promise<APIResponse<CodeUploadListData>> {
+  const params = new URLSearchParams();
+  if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts?.offset !== undefined) params.set("offset", String(opts.offset));
+  const qs = params.toString();
+  const path = qs ? `/api/code/uploads?${qs}` : "/api/code/uploads";
+  return apiFetch<CodeUploadListData>(path, { signal: opts?.signal });
 }
 
 /**
@@ -1444,5 +1513,163 @@ export async function getBuildPrompt(
 ): Promise<APIResponse<BuildPromptData>> {
   return apiFetch<BuildPromptData>(
     `/api/fs/${docId}/build-prompt?stack=${encodeURIComponent(stack)}&output_folder=${encodeURIComponent(outputFolder)}`
+  );
+}
+
+// ── Phase 2: Idea-to-FS ──────────────────────────────
+
+export interface IdeaGenerateResponse {
+  document_id: string;
+  filename: string;
+  fs_text: string;
+  section_count: number;
+}
+
+export interface GuidedQuestion {
+  id: string;
+  question: string;
+  dimension: string;
+  options: string[];
+}
+
+export interface GuidedQuestionsResponse {
+  session_id: string;
+  step: number;
+  questions: GuidedQuestion[];
+}
+
+export async function generateFSFromIdea(
+  idea: string,
+  industry?: string,
+  complexity?: string,
+): Promise<APIResponse<IdeaGenerateResponse>> {
+  return apiFetch<IdeaGenerateResponse>("/api/idea/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idea, industry, complexity }),
+  });
+}
+
+export async function guidedIdeaStep(
+  params: {
+    session_id?: string;
+    idea?: string;
+    step: number;
+    answers?: Record<string, string>;
+    industry?: string;
+    complexity?: string;
+  },
+): Promise<APIResponse<GuidedQuestionsResponse | IdeaGenerateResponse>> {
+  return apiFetch("/api/idea/guided", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+}
+
+// ── Phase 2: Tool Orchestration ──────────────────────
+
+export interface ProviderInfo {
+  name: string;
+  display_name: string;
+  capabilities: string[];
+  healthy: boolean | null;
+  /** When false, hidden from the automatic LLM picker (build/MCP-only tools). */
+  llm_selectable?: boolean;
+  /** Extra context for health checks (e.g. MCP vs CLI). */
+  health_note?: string;
+}
+
+export interface ToolConfig {
+  id: string;
+  llm_provider: string;
+  build_provider: string;
+  frontend_provider: string;
+  fallback_chain: string[];
+  cursor_config: Record<string, unknown>;
+  claude_code_config: Record<string, unknown>;
+}
+
+export interface ProviderTestResult {
+  provider: string;
+  display_name?: string;
+  healthy: boolean;
+  capabilities?: string[];
+  error?: string;
+}
+
+export async function listProviders(): Promise<APIResponse<ProviderInfo[]>> {
+  return apiFetch<ProviderInfo[]>("/api/orchestration/providers");
+}
+
+export async function getToolConfig(): Promise<APIResponse<ToolConfig>> {
+  return apiFetch<ToolConfig>("/api/orchestration/config");
+}
+
+export async function updateToolConfig(
+  config: Partial<ToolConfig>,
+): Promise<APIResponse<ToolConfig>> {
+  return apiFetch<ToolConfig>("/api/orchestration/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+}
+
+export async function testProvider(
+  providerName: string,
+): Promise<APIResponse<ProviderTestResult>> {
+  return apiFetch<ProviderTestResult>(
+    `/api/orchestration/test/${providerName}`,
+    { method: "POST" },
+  );
+}
+
+export async function getProviderCapabilities(): Promise<APIResponse<Record<string, string[]>>> {
+  return apiFetch<Record<string, string[]>>("/api/orchestration/capabilities");
+}
+
+// ── Build Engine ──────────────────────────────────────
+
+export interface BuildState {
+  id: string;
+  document_id: string;
+  status: "PENDING" | "RUNNING" | "PASSED" | "FAILED" | "CANCELLED";
+  current_phase: number;
+  current_task_index: number;
+  completed_task_ids: string[];
+  failed_task_ids: string[];
+  total_tasks: number;
+  stack: string | null;
+  output_folder: string | null;
+  started_at: string | null;
+  last_updated: string | null;
+}
+
+export interface FileRegistryEntry {
+  id: string;
+  document_id: string;
+  task_id: string | null;
+  section_id: string | null;
+  file_path: string;
+  file_type: string | null;
+  status: string | null;
+  created_at: string | null;
+}
+
+export async function getBuildState(
+  docId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<APIResponse<BuildState | null>> {
+  return apiFetch<BuildState | null>(`/api/fs/${docId}/build-state`, { signal: opts?.signal });
+}
+
+export async function listFileRegistry(
+  docId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<APIResponse<{ files: FileRegistryEntry[]; total: number }>> {
+  return apiFetch<{ files: FileRegistryEntry[]; total: number }>(
+    `/api/fs/${docId}/file-registry`,
+    { signal: opts?.signal },
   );
 }

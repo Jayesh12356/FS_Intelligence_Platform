@@ -6,7 +6,7 @@ from fastmcp import FastMCP
 
 from prompts import agent_loop
 from resources import fs_document, task_board
-from tools import analysis, build, collaboration, documents, exports, impact, reverse, tasks
+from tools import analysis, approval, build, collaboration, documents, duplicates, exports, idea, impact, orchestration, projects, reverse, tasks
 
 mcp = FastMCP(
     name="fs-intelligence-platform",
@@ -25,13 +25,18 @@ mcp = FastMCP(
 )
 
 documents.register(mcp)
+idea.register(mcp)
 analysis.register(mcp)
 tasks.register(mcp)
 impact.register(mcp)
 collaboration.register(mcp)
+approval.register(mcp)
 exports.register(mcp)
 reverse.register(mcp)
 build.register(mcp)
+duplicates.register(mcp)
+orchestration.register(mcp)
+projects.register(mcp)
 
 fs_document.register(mcp)
 task_board.register(mcp)

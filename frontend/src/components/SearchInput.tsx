@@ -9,6 +9,8 @@ interface SearchInputProps {
   placeholder?: string;
   debounceMs?: number;
   className?: string;
+  "aria-label"?: string;
+  id?: string;
 }
 
 export default function SearchInput({
@@ -17,6 +19,8 @@ export default function SearchInput({
   placeholder = "Search...",
   debounceMs = 0,
   className = "",
+  "aria-label": ariaLabel,
+  id,
 }: SearchInputProps) {
   const [internal, setInternal] = useState(value);
   const timer = useRef<ReturnType<typeof setTimeout>>();
@@ -37,7 +41,10 @@ export default function SearchInput({
     <div className={className} style={{ position: "relative", width: "100%", maxWidth: 360 }}>
       <Search size={16} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
       <input
-        type="text"
+        type="search"
+        role="searchbox"
+        id={id}
+        aria-label={ariaLabel ?? placeholder}
         className="form-input"
         style={{ paddingLeft: 36, paddingRight: internal ? 36 : 12 }}
         placeholder={placeholder}
@@ -47,6 +54,7 @@ export default function SearchInput({
       {internal && (
         <button
           onClick={() => handleChange("")}
+          aria-label="Clear search"
           style={{
             position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
             background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)",

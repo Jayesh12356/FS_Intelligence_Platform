@@ -233,7 +233,7 @@ EMBEDDING_PATCH = "app.vector.fs_store._generate_embeddings"
 QDRANT_UPSERT_PATCH = "app.vector.fs_store.get_qdrant_manager"
 QDRANT_SEARCH_PATCH = "app.vector.fs_store.search_similar_sections"
 DEBATE_PATCH = "app.pipeline.nodes.debate_node.run_debate"
-TESTCASE_CALL_LLM_PATCH = "app.pipeline.nodes.testcase_node.call_llm"
+TESTCASE_PIPELINE_LLM_PATCH = "app.pipeline.nodes.testcase_node.pipeline_call_llm"
 
 
 def _fake_embeddings(texts):
@@ -279,8 +279,8 @@ def _start_all_mocks():
     p_debate.start()
     active.append(p_debate)
 
-    # Patch testcase_node call_llm (imported at module level via from app.llm.client import call_llm)
-    p_testcase = patch(TESTCASE_CALL_LLM_PATCH, new=AsyncMock(side_effect=_make_mock_llm_text_router()))
+    # Patch testcase_node pipeline_call_llm
+    p_testcase = patch(TESTCASE_PIPELINE_LLM_PATCH, new=AsyncMock(side_effect=_make_mock_llm_text_router()))
     p_testcase.start()
     active.append(p_testcase)
 

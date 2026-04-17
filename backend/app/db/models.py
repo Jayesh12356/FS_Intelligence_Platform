@@ -141,7 +141,12 @@ class FSDocument(Base):
     task_impacts = relationship("TaskImpactDB", back_populates="document", cascade="all, delete-orphan")
     rework_estimates = relationship("ReworkEstimateDB", back_populates="document", cascade="all, delete-orphan")
     # L9 relationships
-    duplicate_flags = relationship("DuplicateFlagDB", back_populates="document", cascade="all, delete-orphan")
+    duplicate_flags = relationship(
+        "DuplicateFlagDB",
+        back_populates="document",
+        cascade="all, delete-orphan",
+        foreign_keys="DuplicateFlagDB.fs_id",
+    )
     comments = relationship("FSCommentDB", back_populates="document", cascade="all, delete-orphan")
     approvals = relationship("FSApprovalDB", back_populates="document", cascade="all, delete-orphan")
     audit_events = relationship("AuditEventDB", back_populates="document", cascade="all, delete-orphan")
@@ -222,6 +227,8 @@ class AmbiguityFlagDB(Base):
     )
     clarification_question = Column(Text, nullable=False)
     resolved = Column(Boolean, nullable=False, default=False)
+    resolution_text = Column(Text, nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
@@ -606,7 +613,11 @@ class DuplicateFlagDB(Base):
     fs_id = Column(UUID(as_uuid=True), ForeignKey("fs_documents.id", ondelete="CASCADE"), nullable=False)
     section_index = Column(Integer, nullable=False)
     section_heading = Column(String(512), nullable=False)
-    similar_fs_id = Column(UUID(as_uuid=True), nullable=False)  # The OTHER document
+    similar_fs_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("fs_documents.id", ondelete="CASCADE"),
+        nullable=False,
+    )  # The OTHER document
     similar_section_heading = Column(String(512), nullable=False, default="")
     similarity_score = Column(Float, nullable=False)
     flagged_text = Column(Text, nullable=False, default="")
@@ -618,7 +629,11 @@ class DuplicateFlagDB(Base):
     )
 
     # Relationships
-    document = relationship("FSDocument", back_populates="duplicate_flags")
+    document = relationship(
+        "FSDocument",
+        back_populates="duplicate_flags",
+        foreign_keys=[fs_id],
+    )
 
     def __repr__(self) -> str:
         return f"<DuplicateFlagDB id={self.id} score={self.similarity_score:.2f}>"
@@ -922,3 +937,38 @@ class PipelineCacheDB(Base):
     result_data = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     expires_at = Column(DateTime(timezone=True), nullable=True)
+
+
+# ── Phase 2: Idea-to-FS + Tool Orchestration ─────────
+
+
+class IdeaSessionDB(Base):
+    """Tracks idea-to-FS generation sessions (quick and guided modes)."""
+
+    __tablename__ = "idea_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    idea_text = Column(Text, nullable=False)
+    industry = Column(String(128), nullable=False, default="")
+    complexity = Column(String(64), nullable=False, default="")
+    mode = Column(String(32), nullable=False, default="quick")
+    conversation_state = Column(JSON, nullable=True)
+    generated_fs_id = Column(UUID(as_uuid=True), ForeignKey("fs_documents.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class ToolConfigDB(Base):
+    """Stores user tool orchestration preferences."""
+
+    __tablename__ = "tool_configs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(String(128), nullable=False, default="default")
+    llm_provider = Column(String(64), nullable=False, default="api")
+    build_provider = Column(String(64), nullable=False, default="cursor")
+    frontend_provider = Column(String(64), nullable=False, default="cursor")
+    fallback_chain = Column(JSON, nullable=False, default=lambda: ["api"])
+    cursor_config = Column(JSON, nullable=False, default=dict)
+    claude_code_config = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

@@ -9,7 +9,7 @@ Uses the unified LLM client (no direct SDK imports).
 import logging
 from typing import List
 
-from app.llm import get_llm_client
+from app.orchestration.pipeline_llm import pipeline_call_llm_json
 from app.pipeline.state import FSImpactState, ImpactType, TaskImpact
 
 logger = logging.getLogger(__name__)
@@ -114,8 +114,6 @@ async def analyze_change_impact(
         logger.debug("No tasks to analyze impact against")
         return []
 
-    client = get_llm_client()
-
     # Build task list string for prompt
     task_lines = []
     for t in tasks:
@@ -137,7 +135,7 @@ async def analyze_change_impact(
     )
 
     try:
-        result = await client.call_llm_json(
+        result = await pipeline_call_llm_json(
             prompt=prompt,
             system=IMPACT_SYSTEM_PROMPT,
             temperature=0.0,
