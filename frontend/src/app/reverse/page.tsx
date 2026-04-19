@@ -7,10 +7,14 @@ import {
   getReverseStatus,
   listReverseUploads,
   generateFS,
+  isCursorTaskEnvelope,
+  type CursorTaskEnvelope,
   type ReverseUploadItem,
   type GeneratedFSData,
 } from "@/lib/api";
+import { useToolConfig } from "@/lib/toolConfig";
 import {
+  CursorTaskModal,
   PageShell,
   KpiCard,
   FadeIn,
@@ -86,6 +90,8 @@ export default function ReverseFSPage() {
   const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set());
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [cursorTask, setCursorTask] = useState<CursorTaskEnvelope | null>(null);
+  useToolConfig();
 
   const fetchUploads = useCallback(async () => {
     try {
@@ -173,12 +179,17 @@ export default function ReverseFSPage() {
 
   const handleGenerate = async () => {
     if (!selectedUpload) return;
-    setGenerating(true);
     setError(null);
+
+    setGenerating(true);
     try {
       const result = await generateFS(selectedUpload);
-      setGeneratedFS(result.data);
-      await fetchUploads();
+      if (isCursorTaskEnvelope(result.data)) {
+        setCursorTask(result.data);
+      } else {
+        setGeneratedFS(result.data as GeneratedFSData);
+        await fetchUploads();
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Generation failed");
     } finally {
@@ -637,6 +648,16 @@ export default function ReverseFSPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <CursorTaskModal
+        envelope={cursorTask}
+        onClose={() => setCursorTask(null)}
+        onDone={async () => {
+          setCursorTask(null);
+          if (selectedUpload) await fetchGeneratedFS(selectedUpload);
+          await fetchUploads();
+        }}
+      />
     </PageShell>
   );
 }

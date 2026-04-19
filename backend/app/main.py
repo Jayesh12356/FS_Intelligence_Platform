@@ -51,9 +51,39 @@ async def lifespan(app: FastAPI):
             logger.warning("Qdrant not ready (attempt %d/%d): %s — retrying in 3s …", attempt, max_retries, exc)
             await asyncio.sleep(3)
 
+    # Start the Cursor-task TTL sweeper (expires abandoned paste-per-
+    # action tasks). Best-effort: failure here must not stop startup.
+    sweeper_task = None
+    try:
+        from app.api.cursor_task_router import _sweeper_loop as _cursor_task_sweeper
+
+        sweeper_task = asyncio.create_task(_cursor_task_sweeper())
+        logger.info("Cursor task TTL sweeper started")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Cursor task sweeper did not start: %s", exc)
+
+    # Idempotent ANALYZED back-fill — for documents that completed
+    # analysis BEFORE the lifecycle telemetry uplift shipped, their
+    # activity log only shows UPLOADED. We add a single ANALYZED event
+    # per such document so the per-doc Lifecycle strip and the global
+    # /monitoring activity feed correctly show "Analysis completed"
+    # without operators having to re-run the pipeline.
+    try:
+        from app.startup.backfill import backfill_analyzed_events
+
+        await backfill_analyzed_events()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ANALYZED back-fill skipped: %s", exc)
+
     logger.info("✅ All services initialised")
     yield
     logger.info("👋 Shutting down FS Intelligence Platform")
+    if sweeper_task is not None:
+        sweeper_task.cancel()
+        try:
+            await sweeper_task
+        except (asyncio.CancelledError, Exception):
+            pass
 
 
 app = FastAPI(
@@ -77,28 +107,34 @@ app.add_middleware(
 install_exception_handlers(app)
 
 # ── Routers ────────────────────────────────────────────
-from app.api.fs_router import router as fs_router  # noqa: E402
-from app.api.health_router import router as health_router  # noqa: E402
-from app.api.analysis_router import router as analysis_router  # noqa: E402
-from app.api.tasks_router import router as tasks_router  # noqa: E402
-from app.api.impact_router import router as impact_router  # noqa: E402
-from app.api.code_router import router as code_router  # noqa: E402
-# L9 routers
-from app.api.duplicate_router import router as duplicate_router  # noqa: E402
-from app.api.library_router import router as library_router  # noqa: E402
-from app.api.collab_router import router as collab_router  # noqa: E402
-from app.api.approval_router import router as approval_router  # noqa: E402
-from app.api.audit_router import router as audit_router  # noqa: E402
-# L10 routers
-from app.api.export_router import router as export_router  # noqa: E402
-from app.api.mcp_router import router as mcp_router  # noqa: E402
-from app.api.build_router import router as build_router  # noqa: E402
 # New feature routers
 from app.api.activity_router import router as activity_router  # noqa: E402
-from app.api.project_router import router as project_router  # noqa: E402
+from app.api.analysis_router import router as analysis_router  # noqa: E402
+from app.api.approval_router import router as approval_router  # noqa: E402
+from app.api.audit_router import router as audit_router  # noqa: E402
+from app.api.build_router import router as build_router  # noqa: E402
+from app.api.code_router import router as code_router  # noqa: E402
+from app.api.collab_router import router as collab_router  # noqa: E402
+
+# Cursor paste-per-action tasks
+from app.api.cursor_task_router import router as cursor_task_router  # noqa: E402
+
+# L9 routers
+from app.api.duplicate_router import router as duplicate_router  # noqa: E402
+
+# L10 routers
+from app.api.export_router import router as export_router  # noqa: E402
+from app.api.fs_router import router as fs_router  # noqa: E402
+from app.api.health_router import router as health_router  # noqa: E402
+
 # Phase 2 routers
 from app.api.idea_router import router as idea_router  # noqa: E402
+from app.api.impact_router import router as impact_router  # noqa: E402
+from app.api.library_router import router as library_router  # noqa: E402
+from app.api.mcp_router import router as mcp_router  # noqa: E402
 from app.api.orchestration_router import router as orchestration_router  # noqa: E402
+from app.api.project_router import router as project_router  # noqa: E402
+from app.api.tasks_router import router as tasks_router  # noqa: E402
 
 app.include_router(fs_router)
 app.include_router(health_router)
@@ -122,6 +158,8 @@ app.include_router(project_router)
 # Phase 2
 app.include_router(idea_router)
 app.include_router(orchestration_router)
+# Cursor paste-per-action tasks
+app.include_router(cursor_task_router)
 
 
 @app.get("/")

@@ -1,6 +1,25 @@
 # Web UI -- Direct API Workflow Guide
 
-The web UI with Direct API is the default way to use the FS Intelligence Platform. You configure your LLM API keys, and the platform handles everything through the browser: idea generation, analysis, refinement, and export. Build is not available through Direct API (use Claude Code or Cursor for builds).
+The web UI with Direct API is the default way to use the FS
+Intelligence Platform. You configure your LLM API keys, and the
+platform handles everything through the browser: idea generation,
+analysis, refinement, and export.
+
+**Two roles, three providers.** Settings now asks two questions:
+
+1. **Document LLM** — who powers Generate FS, Analyze, Refine,
+   Reverse FS and Impact? Pick **Direct API** (this guide,
+   synchronous, server-side), **Claude Code** (synchronous, local
+   CLI), or **Cursor** (paste-per-action handoff — every UI action
+   opens a modal with a mega-prompt you paste into Cursor's Agent).
+2. **Build Agent** — who writes the code? **Cursor** (paste the
+   build prompt into a Cursor Agent chat) or **Claude Code**
+   (headless, one-click from the Build page). Direct API is not a
+   valid Build Agent.
+
+Pair Direct API with Cursor or Claude Code to reach the Build step.
+See [GUIDE_CURSOR.md](./GUIDE_CURSOR.md) and
+[GUIDE_CLAUDE_CODE.md](./GUIDE_CLAUDE_CODE.md).
 
 ---
 
@@ -117,7 +136,19 @@ If the quality score is below 90:
 2. Choose mode: **Auto** (system picks), **Targeted** (per-issue fixes), or **Full** (complete rewrite).
 3. Review the side-by-side diff of original vs refined text.
 4. Click **Accept** to merge the refined text into the document.
-5. The system creates a new version and re-analyzes automatically.
+5. The platform creates a new version and **keeps the document in
+   `COMPLETE`** so the Build CTA stays visible. A soft amber banner
+   appears on the detail page — *"FS was refined since the last
+   analysis. Re-analyze to refresh metrics."* — with a one-click
+   **Re-analyze** button. You can ship now and refresh metrics later,
+   or click Re-analyze first and then build.
+
+> Behind the scenes the FSDocument now carries an `analysis_stale`
+> boolean that flips to `true` on every refine / accept-suggestion /
+> accept-edge-case / accept-contradiction / accept-all and is reset to
+> `false` by the next successful analyze run. Status is **never** demoted
+> to `PARSED` after a successful analysis (regression coverage:
+> [`backend/tests/test_refine_keeps_complete.py`](../backend/tests/test_refine_keeps_complete.py)).
 
 ---
 
@@ -131,6 +162,40 @@ For individual issues:
 - **Bulk operations**: Use **Accept All** or **Resolve All** for batch processing.
 
 After resolving issues, the quality score updates automatically.
+
+---
+
+## Step 7.5: Hand off to a Build Agent
+
+Once the document reaches `COMPLETE` (regardless of whether
+`analysis_stale` is set), the document detail page exposes two CTAs:
+
+- **Build with Cursor** → `/documents/{id}/build?provider=cursor`
+- **Build with Claude** → `/documents/{id}/build?provider=claude_code`
+
+The button matching your saved `Settings → Build Agent` is rendered as
+the **primary** action; the other becomes a secondary outline button so
+you can override per document. If `build_provider = api` (the only
+non-build provider), both CTAs are hidden — Direct API is never a valid
+build runtime.
+
+The Build page itself (`/documents/{id}/build`) shows:
+
+1. A **pre-build check** banner (open ambiguities / contradictions /
+   missing tasks).
+2. Inputs for `Stack` and `Output folder` that flow into the snippet.
+3. **Agent runtime** tabs (`Cursor`, `Claude Code`) — switch the URL
+   `?provider=` and re-render the MCP JSON snippet + agent prompt /
+   CLI command.
+4. A **Kickoff instructions** modal with step-by-step setup and a
+   single **Copy** button.
+5. On the Claude tab, a **Run Build Now** button that calls
+   `POST /api/fs/{id}/build/run` and polls the live `build-state`
+   stream below the tabs.
+
+Everything on this page is rendered from
+`GET /api/orchestration/mcp-config?document_id=…&stack=…&output_folder=…`,
+so the snippet you copy is the same one Cursor/Claude see at runtime.
 
 ---
 

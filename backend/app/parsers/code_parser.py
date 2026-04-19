@@ -12,13 +12,12 @@ Skips: node_modules, __pycache__, .git, build, dist, venv, .env, etc.
 import ast
 import fnmatch
 import logging
-import os
 import re
 import shutil
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Set, Tuple
 
 from app.config import get_settings
 from app.pipeline.state import CodebaseSnapshot, CodeEntity, CodeFile
@@ -30,16 +29,40 @@ logger = logging.getLogger(__name__)
 SUPPORTED_EXTENSIONS: Set[str] = {".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".go"}
 
 SKIP_DIRS: Set[str] = {
-    "node_modules", "__pycache__", ".git", ".svn", ".hg",
-    "build", "dist", "venv", ".venv", "env", ".env",
-    ".idea", ".vscode", ".mypy_cache", ".pytest_cache",
-    "vendor", "target", "bin", "obj", ".next", "out",
-    "coverage", ".tox", "eggs", ".eggs",
+    "node_modules",
+    "__pycache__",
+    ".git",
+    ".svn",
+    ".hg",
+    "build",
+    "dist",
+    "venv",
+    ".venv",
+    "env",
+    ".env",
+    ".idea",
+    ".vscode",
+    ".mypy_cache",
+    ".pytest_cache",
+    "vendor",
+    "target",
+    "bin",
+    "obj",
+    ".next",
+    "out",
+    "coverage",
+    ".tox",
+    "eggs",
+    ".eggs",
 }
 
 SKIP_FILES: Set[str] = {
-    ".gitignore", ".dockerignore", "package-lock.json",
-    "yarn.lock", "pnpm-lock.yaml", "Pipfile.lock",
+    ".gitignore",
+    ".dockerignore",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "Pipfile.lock",
     "poetry.lock",
 }
 
@@ -85,9 +108,7 @@ def _preflight_zip(zip_path: str) -> Tuple[int, int]:
     with zipfile.ZipFile(zip_path, "r") as zf:
         infos = zf.infolist()
         if len(infos) > settings.REVERSE_MAX_ARCHIVE_FILES:
-            raise ValueError(
-                f"Archive has too many files ({len(infos)} > {settings.REVERSE_MAX_ARCHIVE_FILES})"
-            )
+            raise ValueError(f"Archive has too many files ({len(infos)} > {settings.REVERSE_MAX_ARCHIVE_FILES})")
 
         total_uncompressed = 0
         total_compressed = 0
@@ -172,13 +193,15 @@ def _extract_python_entities(content: str) -> List[CodeEntity]:
 
             sig = f"def {node.name}({', '.join(args)}){returns}"
 
-            entities.append(CodeEntity(
-                name=node.name,
-                entity_type="function",
-                docstring=docstring,
-                signature=sig,
-                line_number=node.lineno,
-            ))
+            entities.append(
+                CodeEntity(
+                    name=node.name,
+                    entity_type="function",
+                    docstring=docstring,
+                    signature=sig,
+                    line_number=node.lineno,
+                )
+            )
 
         elif isinstance(node, ast.ClassDef):
             docstring = ast.get_docstring(node)
@@ -193,13 +216,15 @@ def _extract_python_entities(content: str) -> List[CodeEntity]:
             if bases:
                 sig += f"({', '.join(bases)})"
 
-            entities.append(CodeEntity(
-                name=node.name,
-                entity_type="class",
-                docstring=docstring,
-                signature=sig,
-                line_number=node.lineno,
-            ))
+            entities.append(
+                CodeEntity(
+                    name=node.name,
+                    entity_type="class",
+                    docstring=docstring,
+                    signature=sig,
+                    line_number=node.lineno,
+                )
+            )
 
             # Extract methods from the class
             for item in node.body:
@@ -224,13 +249,15 @@ def _extract_python_entities(content: str) -> List[CodeEntity]:
 
                     method_sig = f"{node.name}.{item.name}({', '.join(method_args)}){method_returns}"
 
-                    entities.append(CodeEntity(
-                        name=f"{node.name}.{item.name}",
-                        entity_type="method",
-                        docstring=method_doc,
-                        signature=method_sig,
-                        line_number=item.lineno,
-                    ))
+                    entities.append(
+                        CodeEntity(
+                            name=f"{node.name}.{item.name}",
+                            entity_type="method",
+                            docstring=method_doc,
+                            signature=method_sig,
+                            line_number=item.lineno,
+                        )
+                    )
 
     return entities
 
@@ -290,66 +317,76 @@ def _extract_generic_entities(content: str, language: str) -> List[CodeEntity]:
 
     if language in ("javascript", "typescript"):
         for match in JS_FUNCTION_RE.finditer(content):
-            line_num = content[:match.start()].count("\n") + 1
+            line_num = content[: match.start()].count("\n") + 1
             doc = jsdoc.get(line_num, None)
-            entities.append(CodeEntity(
-                name=match.group(1),
-                entity_type="function",
-                docstring=doc,
-                signature=f"function {match.group(1)}({match.group(2)})",
-                line_number=line_num,
-            ))
+            entities.append(
+                CodeEntity(
+                    name=match.group(1),
+                    entity_type="function",
+                    docstring=doc,
+                    signature=f"function {match.group(1)}({match.group(2)})",
+                    line_number=line_num,
+                )
+            )
 
         for match in JS_ARROW_RE.finditer(content):
-            line_num = content[:match.start()].count("\n") + 1
+            line_num = content[: match.start()].count("\n") + 1
             doc = jsdoc.get(line_num, None)
-            entities.append(CodeEntity(
-                name=match.group(1),
-                entity_type="function",
-                docstring=doc,
-                signature=f"const {match.group(1)} = (...) =>",
-                line_number=line_num,
-            ))
+            entities.append(
+                CodeEntity(
+                    name=match.group(1),
+                    entity_type="function",
+                    docstring=doc,
+                    signature=f"const {match.group(1)} = (...) =>",
+                    line_number=line_num,
+                )
+            )
 
         for match in JS_CLASS_RE.finditer(content):
-            line_num = content[:match.start()].count("\n") + 1
+            line_num = content[: match.start()].count("\n") + 1
             doc = jsdoc.get(line_num, None)
             sig = f"class {match.group(1)}"
             if match.group(2):
                 sig += f" extends {match.group(2)}"
-            entities.append(CodeEntity(
-                name=match.group(1),
-                entity_type="class",
-                docstring=doc,
-                signature=sig,
-                line_number=line_num,
-            ))
+            entities.append(
+                CodeEntity(
+                    name=match.group(1),
+                    entity_type="class",
+                    docstring=doc,
+                    signature=sig,
+                    line_number=line_num,
+                )
+            )
 
     elif language == "java":
         for match in JAVA_CLASS_RE.finditer(content):
-            line_num = content[:match.start()].count("\n") + 1
+            line_num = content[: match.start()].count("\n") + 1
             sig = f"class {match.group(1)}"
             if match.group(2):
                 sig += f" extends {match.group(2)}"
-            entities.append(CodeEntity(
-                name=match.group(1),
-                entity_type="class",
-                signature=sig,
-                line_number=line_num,
-            ))
+            entities.append(
+                CodeEntity(
+                    name=match.group(1),
+                    entity_type="class",
+                    signature=sig,
+                    line_number=line_num,
+                )
+            )
 
         for match in JAVA_METHOD_RE.finditer(content):
-            line_num = content[:match.start()].count("\n") + 1
-            entities.append(CodeEntity(
-                name=match.group(1),
-                entity_type="method",
-                signature=f"{match.group(1)}({match.group(2)})",
-                line_number=line_num,
-            ))
+            line_num = content[: match.start()].count("\n") + 1
+            entities.append(
+                CodeEntity(
+                    name=match.group(1),
+                    entity_type="method",
+                    signature=f"{match.group(1)}({match.group(2)})",
+                    line_number=line_num,
+                )
+            )
 
     elif language == "go":
         for match in GO_FUNC_RE.finditer(content):
-            line_num = content[:match.start()].count("\n") + 1
+            line_num = content[: match.start()].count("\n") + 1
             # Check for comment on line above
             doc = None
             if line_num > 1:
@@ -357,13 +394,15 @@ def _extract_generic_entities(content: str, language: str) -> List[CodeEntity]:
                 if prev_line.startswith("//"):
                     doc = prev_line.lstrip("/ ").strip()
 
-            entities.append(CodeEntity(
-                name=match.group(1),
-                entity_type="function",
-                docstring=doc,
-                signature=f"func {match.group(1)}({match.group(2)})",
-                line_number=line_num,
-            ))
+            entities.append(
+                CodeEntity(
+                    name=match.group(1),
+                    entity_type="function",
+                    docstring=doc,
+                    signature=f"func {match.group(1)}({match.group(2)})",
+                    line_number=line_num,
+                )
+            )
 
     return entities
 
@@ -371,7 +410,7 @@ def _extract_generic_entities(content: str, language: str) -> List[CodeEntity]:
 # ── File Parsing ────────────────────────────────────────
 
 
-def _should_skip_file(path: Path, filter_cfg: Optional[dict] = None) -> bool:
+def _should_skip_file(path: Path, filter_cfg: dict | None = None) -> bool:
     """Check if a file should be skipped."""
     cfg = filter_cfg or {
         "skip_dirs": SKIP_DIRS,
@@ -408,7 +447,7 @@ def _should_skip_file(path: Path, filter_cfg: Optional[dict] = None) -> bool:
     return False
 
 
-def _parse_single_file(file_path: Path, base_dir: Path, filter_cfg: Optional[dict] = None) -> Optional[CodeFile]:
+def _parse_single_file(file_path: Path, base_dir: Path, filter_cfg: dict | None = None) -> CodeFile | None:
     """Parse a single source code file."""
     relative_path = str(file_path.relative_to(base_dir)).replace("\\", "/")
     cfg = filter_cfg or {}
@@ -469,9 +508,21 @@ def _score_code_file(code_file: CodeFile) -> int:
 
     # Prioritize feature/entrypoint files
     high_signal_parts = [
-        "route", "router", "controller", "service", "handler", "api",
-        "auth", "payment", "order", "user", "main", "app", "module",
-        "feature", "workflow",
+        "route",
+        "router",
+        "controller",
+        "service",
+        "handler",
+        "api",
+        "auth",
+        "payment",
+        "order",
+        "user",
+        "main",
+        "app",
+        "module",
+        "feature",
+        "workflow",
     ]
     for token in high_signal_parts:
         if token in path_l:
@@ -583,7 +634,11 @@ def parse_codebase(zip_path: str) -> CodebaseSnapshot:
 
         logger.info(
             "Parsed codebase: %d files, %d lines, primary language: %s, languages: %s, stats=%s",
-            len(files), total_lines, primary_language, languages, parser_stats,
+            len(files),
+            total_lines,
+            primary_language,
+            languages,
+            parser_stats,
         )
 
         return CodebaseSnapshot(

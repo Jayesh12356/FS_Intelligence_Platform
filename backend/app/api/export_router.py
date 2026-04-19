@@ -26,7 +26,6 @@ from app.db.models import (
     ContradictionDB,
     EdgeCaseGapDB,
     FSDocument,
-    FSDocumentStatus,
     FSTaskDB,
     TestCaseDB,
     TraceabilityEntryDB,
@@ -68,9 +67,7 @@ async def export_to_jira(
     doc = await _get_doc(doc_id, db)
 
     # Load tasks
-    result = await db.execute(
-        select(FSTaskDB).where(FSTaskDB.fs_id == doc_id).order_by(FSTaskDB.order)
-    )
+    result = await db.execute(select(FSTaskDB).where(FSTaskDB.fs_id == doc_id).order_by(FSTaskDB.order))
     tasks = result.scalars().all()
 
     if not tasks:
@@ -97,8 +94,11 @@ async def export_to_jira(
     # Log audit event
     from app.db.audit import log_audit_event
     from app.db.models import AuditEventType
+
     await log_audit_event(
-        db, doc_id, AuditEventType.EXPORTED,
+        db,
+        doc_id,
+        AuditEventType.EXPORTED,
         payload={"target": "jira", "stories": len(export_result["stories"])},
     )
     await db.commit()
@@ -128,12 +128,11 @@ async def export_to_confluence(
     sections = []
     if doc.parsed_text:
         from app.parsers.chunker import chunk_text_into_sections
+
         sections = chunk_text_into_sections(doc.parsed_text)
 
     # Load tasks
-    tasks_result = await db.execute(
-        select(FSTaskDB).where(FSTaskDB.fs_id == doc_id).order_by(FSTaskDB.order)
-    )
+    tasks_result = await db.execute(select(FSTaskDB).where(FSTaskDB.fs_id == doc_id).order_by(FSTaskDB.order))
     tasks = [
         {
             "task_id": t.task_id,
@@ -145,9 +144,7 @@ async def export_to_confluence(
     ]
 
     # Load ambiguities
-    amb_result = await db.execute(
-        select(AmbiguityFlagDB).where(AmbiguityFlagDB.fs_id == doc_id)
-    )
+    amb_result = await db.execute(select(AmbiguityFlagDB).where(AmbiguityFlagDB.fs_id == doc_id))
     ambiguities = [
         {
             "section_heading": a.section_heading,
@@ -158,9 +155,7 @@ async def export_to_confluence(
     ]
 
     # Load traceability
-    trace_result = await db.execute(
-        select(TraceabilityEntryDB).where(TraceabilityEntryDB.fs_id == doc_id)
-    )
+    trace_result = await db.execute(select(TraceabilityEntryDB).where(TraceabilityEntryDB.fs_id == doc_id))
     traceability = [
         {
             "task_id": t.task_id,
@@ -185,8 +180,11 @@ async def export_to_confluence(
     # Log audit
     from app.db.audit import log_audit_event
     from app.db.models import AuditEventType
+
     await log_audit_event(
-        db, doc_id, AuditEventType.EXPORTED,
+        db,
+        doc_id,
+        AuditEventType.EXPORTED,
         payload={"target": "confluence", "page_id": page_result.get("id", "")},
     )
     await db.commit()
@@ -213,9 +211,7 @@ async def list_test_cases(
     await _get_doc(doc_id, db)
 
     result = await db.execute(
-        select(TestCaseDB)
-        .where(TestCaseDB.fs_id == doc_id)
-        .order_by(TestCaseDB.section_index, TestCaseDB.task_id)
+        select(TestCaseDB).where(TestCaseDB.fs_id == doc_id).order_by(TestCaseDB.section_index, TestCaseDB.task_id)
     )
     rows = result.scalars().all()
 
@@ -259,9 +255,7 @@ async def export_test_cases_csv(
     await _get_doc(doc_id, db)
 
     result = await db.execute(
-        select(TestCaseDB)
-        .where(TestCaseDB.fs_id == doc_id)
-        .order_by(TestCaseDB.section_index, TestCaseDB.task_id)
+        select(TestCaseDB).where(TestCaseDB.fs_id == doc_id).order_by(TestCaseDB.section_index, TestCaseDB.task_id)
     )
     rows = result.scalars().all()
 
@@ -271,15 +265,17 @@ async def export_test_cases_csv(
 
     for r in rows:
         steps_str = "; ".join(r.steps or [])
-        writer.writerow([
-            r.task_id,
-            r.title,
-            r.test_type.value if r.test_type else "UNIT",
-            r.preconditions or "",
-            steps_str,
-            r.expected_result or "",
-            r.section_heading or "",
-        ])
+        writer.writerow(
+            [
+                r.task_id,
+                r.title,
+                r.test_type.value if r.test_type else "UNIT",
+                r.preconditions or "",
+                steps_str,
+                r.expected_result or "",
+                r.section_heading or "",
+            ]
+        )
 
     output.seek(0)
     return StreamingResponse(
@@ -319,8 +315,11 @@ async def export_pdf_report(
     # Log audit
     from app.db.audit import log_audit_event
     from app.db.models import AuditEventType
+
     await log_audit_event(
-        db, doc_id, AuditEventType.EXPORTED,
+        db,
+        doc_id,
+        AuditEventType.EXPORTED,
         payload={"target": "pdf", "filename": filename},
     )
     await db.commit()
@@ -375,8 +374,11 @@ async def export_docx_report(
 
     from app.db.audit import log_audit_event
     from app.db.models import AuditEventType
+
     await log_audit_event(
-        db, doc_id, AuditEventType.EXPORTED,
+        db,
+        doc_id,
+        AuditEventType.EXPORTED,
         payload={"target": "docx", "filename": filename},
     )
     await db.commit()
@@ -419,45 +421,31 @@ async def _build_report_content(
 ) -> dict:
     """Gather all analysis data for report generation."""
     # Tasks
-    tasks_result = await db.execute(
-        select(FSTaskDB).where(FSTaskDB.fs_id == doc_id).order_by(FSTaskDB.order)
-    )
+    tasks_result = await db.execute(select(FSTaskDB).where(FSTaskDB.fs_id == doc_id).order_by(FSTaskDB.order))
     tasks = tasks_result.scalars().all()
 
     # Ambiguities
-    amb_result = await db.execute(
-        select(AmbiguityFlagDB).where(AmbiguityFlagDB.fs_id == doc_id)
-    )
+    amb_result = await db.execute(select(AmbiguityFlagDB).where(AmbiguityFlagDB.fs_id == doc_id))
     ambiguities = amb_result.scalars().all()
 
     # Contradictions
-    contra_result = await db.execute(
-        select(ContradictionDB).where(ContradictionDB.fs_id == doc_id)
-    )
+    contra_result = await db.execute(select(ContradictionDB).where(ContradictionDB.fs_id == doc_id))
     contradictions = contra_result.scalars().all()
 
     # Edge cases
-    ec_result = await db.execute(
-        select(EdgeCaseGapDB).where(EdgeCaseGapDB.fs_id == doc_id)
-    )
+    ec_result = await db.execute(select(EdgeCaseGapDB).where(EdgeCaseGapDB.fs_id == doc_id))
     edge_cases = ec_result.scalars().all()
 
     # Compliance
-    comp_result = await db.execute(
-        select(ComplianceTagDB).where(ComplianceTagDB.fs_id == doc_id)
-    )
+    comp_result = await db.execute(select(ComplianceTagDB).where(ComplianceTagDB.fs_id == doc_id))
     compliance = comp_result.scalars().all()
 
     # Traceability
-    trace_result = await db.execute(
-        select(TraceabilityEntryDB).where(TraceabilityEntryDB.fs_id == doc_id)
-    )
+    trace_result = await db.execute(select(TraceabilityEntryDB).where(TraceabilityEntryDB.fs_id == doc_id))
     traceability = trace_result.scalars().all()
 
     # Test cases
-    tc_result = await db.execute(
-        select(TestCaseDB).where(TestCaseDB.fs_id == doc_id)
-    )
+    tc_result = await db.execute(select(TestCaseDB).where(TestCaseDB.fs_id == doc_id))
     test_cases = tc_result.scalars().all()
 
     return {
@@ -479,11 +467,12 @@ def _generate_pdf(filename: str, content: dict) -> bytes:
     Uses basic byte construction since reportlab might not be available.
     """
     try:
-        from reportlab.lib.pagesizes import A4
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-        from reportlab.lib.styles import getSampleStyleSheet
-        from reportlab.lib import colors
         import io as _io
+
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
         buffer = _io.BytesIO()
         doc_pdf = SimpleDocTemplate(buffer, pagesize=A4)
@@ -507,15 +496,19 @@ def _generate_pdf(filename: str, content: dict) -> bytes:
             ["Test Cases", str(len(content["test_cases"]))],
         ]
         t = Table(stats)
-        t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#8b5cf6")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-            ("FONTSIZE", (0, 0), (-1, -1), 10),
-            ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
-            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f5f3ff")),
-            ("GRID", (0, 0), (-1, -1), 1, colors.HexColor("#c4b5fd")),
-        ]))
+        t.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#8b5cf6")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 10),
+                    ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
+                    ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f5f3ff")),
+                    ("GRID", (0, 0), (-1, -1), 1, colors.HexColor("#c4b5fd")),
+                ]
+            )
+        )
         story.append(t)
         story.append(Spacer(1, 20))
 
@@ -523,30 +516,36 @@ def _generate_pdf(filename: str, content: dict) -> bytes:
         if content["tasks"]:
             story.append(Paragraph("Task Breakdown", styles["Heading2"]))
             for task in content["tasks"]:
-                story.append(Paragraph(
-                    f"<b>{task.task_id}</b>: {task.title} (Effort: {task.effort.value})",
-                    styles["Normal"],
-                ))
+                story.append(
+                    Paragraph(
+                        f"<b>{task.task_id}</b>: {task.title} (Effort: {task.effort.value})",
+                        styles["Normal"],
+                    )
+                )
             story.append(Spacer(1, 12))
 
         # Ambiguities
         if content["ambiguities"]:
             story.append(Paragraph("Ambiguity Flags", styles["Heading2"]))
             for amb in content["ambiguities"]:
-                story.append(Paragraph(
-                    f"[{amb.severity.value}] {amb.section_heading}: {amb.reason}",
-                    styles["Normal"],
-                ))
+                story.append(
+                    Paragraph(
+                        f"[{amb.severity.value}] {amb.section_heading}: {amb.reason}",
+                        styles["Normal"],
+                    )
+                )
             story.append(Spacer(1, 12))
 
         # Test Cases
         if content["test_cases"]:
             story.append(Paragraph("Test Cases", styles["Heading2"]))
             for tc in content["test_cases"]:
-                story.append(Paragraph(
-                    f"<b>{tc.title}</b> ({tc.test_type.value}) — Task: {tc.task_id}",
-                    styles["Normal"],
-                ))
+                story.append(
+                    Paragraph(
+                        f"<b>{tc.title}</b> ({tc.test_type.value}) — Task: {tc.task_id}",
+                        styles["Normal"],
+                    )
+                )
 
         doc_pdf.build(story)
         return buffer.getvalue()
@@ -560,14 +559,15 @@ def _generate_pdf(filename: str, content: dict) -> bytes:
 def _generate_docx(filename: str, content: dict) -> bytes:
     """Generate a Word .docx report from analysis content."""
     try:
-        from docx import Document as DocxDocument
-        from docx.shared import Inches, Pt, RGBColor
         import io as _io
+
+        from docx import Document as DocxDocument
+        from docx.shared import Inches, Pt, RGBColor  # noqa: F401 (used by python-docx internals)
 
         doc = DocxDocument()
 
         # Title
-        title = doc.add_heading(f"FS Intelligence Report: {filename}", 0)
+        doc.add_heading(f"FS Intelligence Report: {filename}", 0)
 
         # Status
         doc.add_paragraph(f"Status: {content['status']}")

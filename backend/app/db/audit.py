@@ -6,7 +6,7 @@ Usage:
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +21,7 @@ async def log_audit_event(
     fs_id: UUID,
     event_type: AuditEventType,
     user_id: str = "system",
-    payload: Optional[Dict[str, Any]] = None,
+    payload: Dict[str, Any] | None = None,
 ) -> AuditEventDB:
     """Log an audit event for an FS document.
 
@@ -45,7 +45,9 @@ async def log_audit_event(
 
     logger.info(
         "Audit event logged: type=%s fs_id=%s user=%s",
-        event_type.value, fs_id, user_id,
+        event_type.value,
+        fs_id,
+        user_id,
     )
 
     return event

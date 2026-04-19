@@ -1,9 +1,18 @@
-"""Feature-flagged LLM caller for pipeline nodes.
+"""Unified LLM caller for pipeline nodes (0.4.0+).
 
-When ORCHESTRATION_ENABLED is true, routes through the orchestration layer.
-When false, uses the direct LLM client (Phase 1 behavior). This function
-is a drop-in replacement for `get_llm_client().call_llm(...)` calls in
-pipeline nodes.
+Every pipeline LLM call is routed through :func:`orchestrated_call_llm`
+in :mod:`app.orchestration.llm_bridge`. That bridge resolves the
+provider configured in ``ToolConfigDB`` and calls exactly that provider
+— no silent fallbacks, no hidden Direct-API path.
+
+Why no feature flag
+-------------------
+
+Earlier versions had an ``ORCHESTRATION_ENABLED`` flag that, when false,
+routed every call straight through :class:`LLMClient`. That path
+ignored the user's Settings choice and leaked tokens to OpenRouter even
+when the user had selected ``cursor`` or ``claude_code``. The flag is
+removed as of 0.4.0; orchestration is the only path.
 """
 
 from __future__ import annotations
@@ -11,9 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Optional, Union
-
-from app.config import get_settings
+from typing import Any, Union
 
 logger = logging.getLogger(__name__)
 
@@ -32,47 +39,25 @@ async def pipeline_call_llm(
     max_tokens: int = 4096,
     temperature: float = 0.0,
     role: str = "primary",
-    model: Optional[str] = None,
+    model: str | None = None,  # noqa: ARG001 — reserved; providers pick their own model
     **kwargs: Any,
 ) -> str:
-    """Unified LLM caller for pipeline nodes.
-
-    Checks the ORCHESTRATION_ENABLED flag. When enabled, routes through
-    orchestrated_call_llm. When disabled, uses the standard LLM client.
-    """
-    settings = get_settings()
+    """LLM caller for pipeline nodes. Always routes through the orchestrator."""
 
     from app.llm.retry import llm_retry
+    from app.orchestration.llm_bridge import orchestrated_call_llm
 
-    if settings.ORCHESTRATION_ENABLED:
-        from app.orchestration.llm_bridge import orchestrated_call_llm
-
-        async def _orch():
-            return await orchestrated_call_llm(
-                prompt=prompt,
-                system=system,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                role=role,
-                **kwargs,
-            )
-
-        return await llm_retry(_orch, label=f"pipeline_call_llm[{role}]")
-
-    from app.llm import get_llm_client
-    client = get_llm_client()
-
-    async def _direct():
-        return await client.call_llm(
+    async def _orch() -> str:
+        return await orchestrated_call_llm(
             prompt=prompt,
             system=system,
-            model=model,
             max_tokens=max_tokens,
             temperature=temperature,
             role=role,
+            **kwargs,
         )
 
-    return await llm_retry(_direct, label=f"pipeline_call_llm[{role}]")
+    return await llm_retry(_orch, label=f"pipeline_call_llm[{role}]")
 
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```\s*$", re.IGNORECASE | re.DOTALL)
@@ -81,7 +66,6 @@ _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```\s*$", re.IGNORECASE | re.DOTALL
 def _strip_code_fences(text: str) -> str:
     s = text.strip()
     if s.startswith("```"):
-        # Remove leading fence line
         s = re.sub(r"^```(?:json)?\s*\n?", "", s, flags=re.IGNORECASE)
     if s.rstrip().endswith("```"):
         s = re.sub(r"\n?```\s*$", "", s.rstrip())
@@ -117,7 +101,7 @@ def _extract_first_json_blob(text: str) -> str | None:
                 elif c == end:
                     depth -= 1
                     if depth == 0:
-                        return stripped[i:j + 1]
+                        return stripped[i : j + 1]
             break
     return None
 
@@ -143,68 +127,51 @@ async def pipeline_call_llm_json(
     max_tokens: int = 4096,
     temperature: float = 0.0,
     role: str = "primary",
-    model: Optional[str] = None,
+    model: str | None = None,  # noqa: ARG001 — providers choose their own model
     **kwargs: Any,
 ) -> Union[dict, list]:
-    """JSON variant of pipeline_call_llm with robust fallback parsing.
+    """JSON variant of :func:`pipeline_call_llm` with robust fallback parsing.
 
     Strategy:
-      1. Call the LLM.
-      2. Try `json.loads` after stripping code fences.
+      1. Call the LLM via the orchestrator.
+      2. Try ``json.loads`` after stripping code fences.
       3. If that fails, search for the first balanced JSON blob.
       4. If that fails, retry once with a stricter prompt asking for pure JSON.
       5. If still failing, raise :class:`LLMJSONParseError`.
     """
-    settings = get_settings()
+    from app.orchestration.llm_bridge import orchestrated_call_llm
 
-    if settings.ORCHESTRATION_ENABLED:
-        from app.orchestration.llm_bridge import orchestrated_call_llm
-
-        async def _invoke(p: str, s: str) -> str:
-            return await orchestrated_call_llm(
-                prompt=p,
-                system=s,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                role=role,
-                **kwargs,
-            )
-
-        raw = await _invoke(prompt, system)
-        parsed = _try_parse_json(raw)
-        if parsed is not None:
-            return parsed
-
-        logger.warning(
-            "LLM returned non-JSON; retrying once with stricter prompt (len=%d)", len(raw)
-        )
-        strict_system = (
-            (system.strip() + "\n\n" if system else "")
-            + "CRITICAL: respond ONLY with valid JSON. No prose, no markdown, no code fences."
-        )
-        strict_prompt = (
-            prompt
-            + "\n\nReply ONLY with a single valid JSON value. "
-            + "Do not include explanations, greetings, or code fences."
-        )
-        raw2 = await _invoke(strict_prompt, strict_system)
-        parsed2 = _try_parse_json(raw2)
-        if parsed2 is not None:
-            return parsed2
-
-        logger.error("LLM JSON parse failed after retry. First 500 chars: %r", raw2[:500])
-        raise LLMJSONParseError(
-            "LLM response could not be parsed as JSON after retry.",
-            raw=raw2,
+    async def _invoke(p: str, s: str) -> str:
+        return await orchestrated_call_llm(
+            prompt=p,
+            system=s,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            role=role,
+            **kwargs,
         )
 
-    from app.llm import get_llm_client
-    client = get_llm_client()
-    return await client.call_llm_json(
-        prompt=prompt,
-        system=system,
-        model=model,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        role=role,
+    raw = await _invoke(prompt, system)
+    parsed = _try_parse_json(raw)
+    if parsed is not None:
+        return parsed
+
+    logger.warning("LLM returned non-JSON; retrying once with stricter prompt (len=%d)", len(raw))
+    strict_system = (
+        system.strip() + "\n\n" if system else ""
+    ) + "CRITICAL: respond ONLY with valid JSON. No prose, no markdown, no code fences."
+    strict_prompt = (
+        prompt
+        + "\n\nReply ONLY with a single valid JSON value. "
+        + "Do not include explanations, greetings, or code fences."
+    )
+    raw2 = await _invoke(strict_prompt, strict_system)
+    parsed2 = _try_parse_json(raw2)
+    if parsed2 is not None:
+        return parsed2
+
+    logger.error("LLM JSON parse failed after retry. First 500 chars: %r", raw2[:500])
+    raise LLMJSONParseError(
+        "LLM response could not be parsed as JSON after retry.",
+        raw=raw2,
     )

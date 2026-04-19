@@ -1,0 +1,39 @@
+name: mutmut
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 720
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        working-directory: backend
+        run: |
+          pip install -e .[dev]
+          pip install "mutmut<3"
+      - name: Run mutmut
+        working-directory: backend
+        env:
+          PYTHONIOENCODING: utf-8
+          LLM_PROVIDER: mock
+          PERFECTION_LOOP: "1"
+        run: |
+          mutmut run --CI || true
+          mutmut junitxml > mutmut.xml
+          mutmut results | tee mutmut-results.txt
+      - name: Upload artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutmut-report
+          path: |
+            backend/mutmut.xml
+            backend/mutmut-results.txt
+            backend/.mutmut-cache

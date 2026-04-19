@@ -10,7 +10,7 @@ Uses difflib for accurate text comparison.
 
 import difflib
 import logging
-from typing import List, Optional
+from typing import List
 
 from app.pipeline.state import ChangeType, FSChange, FSImpactState
 
@@ -65,29 +65,31 @@ def compute_section_diff(
 
             if old_content != new_content:
                 # Content changed — compute similarity ratio
-                ratio = difflib.SequenceMatcher(
-                    None, old_content, new_content
-                ).ratio()
+                ratio = difflib.SequenceMatcher(None, old_content, new_content).ratio()
 
                 if ratio < 0.95:  # Only flag if meaningfully different
-                    changes.append(FSChange(
-                        change_type=ChangeType.MODIFIED,
-                        section_id=f"section_{section_index}",
-                        section_heading=heading,
-                        section_index=section_index,
-                        old_text=old_content,
-                        new_text=new_content,
-                    ))
+                    changes.append(
+                        FSChange(
+                            change_type=ChangeType.MODIFIED,
+                            section_id=f"section_{section_index}",
+                            section_heading=heading,
+                            section_index=section_index,
+                            old_text=old_content,
+                            new_text=new_content,
+                        )
+                    )
         else:
             # New section — ADDED
-            changes.append(FSChange(
-                change_type=ChangeType.ADDED,
-                section_id=f"section_{section_index}",
-                section_heading=heading,
-                section_index=section_index,
-                old_text=None,
-                new_text=new_content,
-            ))
+            changes.append(
+                FSChange(
+                    change_type=ChangeType.ADDED,
+                    section_id=f"section_{section_index}",
+                    section_heading=heading,
+                    section_index=section_index,
+                    old_text=None,
+                    new_text=new_content,
+                )
+            )
 
     # Check for deleted sections (in old but not in new)
     for key, old_sec in old_by_heading.items():
@@ -96,14 +98,16 @@ def compute_section_diff(
             old_content = old_sec.get("content", "").strip()
             section_index = old_sec.get("section_index", 0)
 
-            changes.append(FSChange(
-                change_type=ChangeType.DELETED,
-                section_id=f"section_{section_index}",
-                section_heading=heading,
-                section_index=section_index,
-                old_text=old_content,
-                new_text=None,
-            ))
+            changes.append(
+                FSChange(
+                    change_type=ChangeType.DELETED,
+                    section_id=f"section_{section_index}",
+                    section_heading=heading,
+                    section_index=section_index,
+                    old_text=old_content,
+                    new_text=None,
+                )
+            )
 
     # Sort by section_index for consistent ordering
     changes.sort(key=lambda c: c.section_index)
@@ -155,7 +159,9 @@ async def version_node(state: FSImpactState) -> FSImpactState:
 
     logger.info(
         "Version node: comparing %d old sections with %d new sections for fs_id=%s",
-        len(old_sections), len(new_sections), state.get("fs_id", "?"),
+        len(old_sections),
+        len(new_sections),
+        state.get("fs_id", "?"),
     )
 
     try:

@@ -121,10 +121,24 @@ def register(mcp: FastMCP) -> None:
         tasks = ((tasks_res.get("data") or {}).get("tasks")) or []
         adjacency = ((deps_res.get("data") or {}).get("adjacency")) or {}
         quality_score = (((quality_res.get("data") or {}).get("quality_score")) or {}).get("overall", 0)
-        ambiguities = (ambiguities_res.get("data") or []) if isinstance(ambiguities_res, dict) else []
+        # The backend endpoint returns the list either as the top-level
+        # ``data`` array or nested under ``data.ambiguities`` depending on
+        # the router version. Accept both shapes and silently fall back to
+        # an empty list for any other shape (including mocks that return a
+        # sentinel dict).
+        raw_amb = ambiguities_res.get("data") if isinstance(ambiguities_res, dict) else None
+        if isinstance(raw_amb, list):
+            ambiguities = raw_amb
+        elif isinstance(raw_amb, dict):
+            nested = raw_amb.get("ambiguities")
+            ambiguities = nested if isinstance(nested, list) else []
+        else:
+            ambiguities = []
         high_open = [
             a for a in ambiguities
-            if str(a.get("severity", "")).upper() == "HIGH" and not bool(a.get("resolved", False))
+            if isinstance(a, dict)
+            and str(a.get("severity", "")).upper() == "HIGH"
+            and not bool(a.get("resolved", False))
         ]
         trace_entries = ((trace_res.get("data") or {}).get("entries")) or []
         task_ids_with_trace = {e.get("task_id") for e in trace_entries}

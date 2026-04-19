@@ -172,6 +172,112 @@ _REPRESENTATIVE_TOOLS = [
 ]
 
 
+_ALL_TOOL_MODULES = (
+    "tools.documents",
+    "tools.analysis",
+    "tools.projects",
+    "tools.orchestration",
+    "tools.tasks",
+    "tools.exports",
+    "tools.impact",
+    "tools.duplicates",
+    "tools.approval",
+    "tools.reverse",
+    "tools.idea",
+    "tools.collaboration",
+    "tools.build",
+    "tools.cursor_tasks",
+)
+
+
+def _synthetic_kwargs_for(tool) -> dict | None:
+    """Build minimal, syntactically valid kwargs for any tool.
+
+    Returns ``None`` when the tool cannot be safely dispatched under a
+    mocked backend (e.g. ``upload_document`` does filesystem IO before
+    hitting ``request_json``).
+    """
+    schema = tool.parameters or {}
+    required = schema.get("required") or []
+    props = schema.get("properties") or {}
+
+    # Tools that do local filesystem IO or otherwise side-step request_json
+    # before reaching the HTTP layer; exclude from the dispatch sweep.
+    LOCAL_IO_TOOLS = {"upload_document"}
+    if tool.name in LOCAL_IO_TOOLS:
+        return None
+
+    def _sample(prop_name: str, prop_schema: dict) -> object:
+        ptype = prop_schema.get("type")
+        if prop_name.endswith("_id") or prop_name == "id":
+            return "00000000-0000-0000-0000-000000000000"
+        if ptype == "string":
+            return prop_schema.get("default") or "sample"
+        if ptype == "integer":
+            return prop_schema.get("default") or 1
+        if ptype == "number":
+            return prop_schema.get("default") or 1.0
+        if ptype == "boolean":
+            return bool(prop_schema.get("default") or False)
+        if ptype == "array":
+            return list(prop_schema.get("default") or [])
+        if ptype == "object":
+            return dict(prop_schema.get("default") or {})
+        return "sample"
+
+    kwargs: dict = {}
+    for name in required:
+        kwargs[name] = _sample(name, props.get(name, {}))
+    return kwargs
+
+
+@pytest.mark.asyncio
+async def test_every_registered_tool_dispatches_under_mock_backend(tools) -> None:
+    """Expanded NUCLEAR contract: every tool in the registry must be
+    dispatchable under a stubbed backend and return either a dict payload or
+    the shared error envelope — never raise, never time out, never hang.
+    """
+
+    async def stub_request(method: str, path: str, **_kw):
+        return {"data": {"_mock": True, "method": method, "path": path}}
+
+    patchers = [patch(f"{mp}.request_json", new=stub_request) for mp in _ALL_TOOL_MODULES]
+    for p in patchers:
+        p.start()
+    try:
+        errors: list[str] = []
+        dispatched = 0
+        for tool in tools:
+            kwargs = _synthetic_kwargs_for(tool)
+            if kwargs is None:
+                continue
+            try:
+                result = await asyncio.wait_for(tool.fn(**kwargs), timeout=5.0)
+            except Exception as exc:  # pragma: no cover — catches any drift
+                # Capture the last 4 frames of the traceback inline so any
+                # regression points directly at the offending source line
+                # instead of failing with an opaque "raised AttributeError".
+                import traceback
+
+                tb_tail = traceback.format_exc().splitlines()[-4:]
+                errors.append(
+                    f"{tool.name}: raised {type(exc).__name__}: {exc}\n    "
+                    + "\n    ".join(tb_tail)
+                )
+                continue
+            if not isinstance(result, dict):
+                errors.append(f"{tool.name}: returned non-dict {type(result).__name__}")
+                continue
+            dispatched += 1
+        assert dispatched >= 50, (
+            f"Only {dispatched} tools dispatched; expected >= 50 — coverage regression"
+        )
+        assert not errors, "Tool dispatch failures:\n" + "\n".join(errors)
+    finally:
+        for p in patchers:
+            p.stop()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error_status", [404, 500])
 @pytest.mark.parametrize("tool_name,kwargs", _REPRESENTATIVE_TOOLS)
@@ -189,13 +295,7 @@ async def test_representative_tools_propagate_error_envelope(
 
     # Each tool module imports request_json at module scope, so patch it
     # on every candidate module to guarantee the stub is hit.
-    for module_path in (
-        "tools.documents", "tools.analysis", "tools.projects",
-        "tools.orchestration", "tools.tasks", "tools.exports",
-        "tools.impact", "tools.duplicates", "tools.approval",
-        "tools.reverse", "tools.idea", "tools.collaboration",
-        "tools.build",
-    ):
+    for module_path in _ALL_TOOL_MODULES:
         patch(f"{module_path}.request_json", new=stub_request).start()
     try:
         result = await tool.fn(**kwargs)

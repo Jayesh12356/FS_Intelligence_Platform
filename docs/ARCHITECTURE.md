@@ -143,20 +143,24 @@ flowchart LR
   subgraph Registry
     api[APIProvider\n(LLM)]
     claude[ClaudeCodeProvider\n(LLM + build)]
-    cursor[CursorProvider\n(build)]
+    cursor[CursorProvider\n(paste-per-action + build)]
   end
   Pipeline -->|capability=llm| Registry
-  Registry -->|preferred| claude
-  claude -.fails.-> FallbackChain[["fallback_chain"]] --> api
+  Registry -->|configured provider| api
+  Registry -->|configured provider| claude
+  Registry -.cursor raises\nCursorLLMUnsupported-.-> cursor
   Pipeline -->|capability=build| Registry
-  Registry --> cursor
 ```
 
 Resolved configuration comes from `ToolConfigDB` (user `default`), cached in
-`backend/app/orchestration/config_resolver.py`. In strict mode
-(`ORCHESTRATION_STRICT_LLM=true`) the `"api"` provider is **not** silently
-appended to the fallback chain so that misconfiguration surfaces as an error
-rather than degrading silently.
+`backend/app/orchestration/config_resolver.py`. Orchestration is mandatory
+and strict by construction (0.4.0) — there is no feature flag and no silent
+fallback to Direct API. When `llm_provider = cursor`, the backend never
+issues an LLM call at all: the HTTP route mints a `CursorTaskDB` envelope
+and the work happens inside the user's Cursor IDE via the MCP submit
+tools. When `llm_provider = claude_code`, the Claude Code subprocess
+provider runs and, if it fails, the failure surfaces as `LLMError`
+(never as an OpenRouter call).
 
 ---
 
@@ -168,6 +172,30 @@ rather than degrading silently.
   `Base.metadata.create_all` then `alembic upgrade head`.
 * Per-table indexes on hot `fs_id` columns are created by migration
   `0004_analysis_indexes`.
+
+### `FSDocument` lifecycle (0.4.x)
+
+`FSDocument.status` walks `UPLOADED → PARSING → PARSED → ANALYZING →
+COMPLETE` (or `FAILED`). Once a document reaches `COMPLETE`, **it is
+never demoted** by a successful refine / accept-suggestion / accept-edge
+case / accept-contradiction / accept-all. Instead, those endpoints flip
+the new `analysis_stale: bool` flag (migration
+`0008_fs_document_analysis_stale`) to `true`. The very next successful
+`POST /api/fs/{id}/analyze` clears it back to `false` and sets
+`status = COMPLETE`.
+
+This guarantees the **Build with Cursor / Build with Claude** CTAs stay
+visible immediately after a refine — the document detail page only
+needs to render an amber *"FS was refined since last analysis —
+re-analyze to refresh metrics"* banner with a Re-analyze button. The
+flag is exposed in `FSDocumentResponse` / `FSDocumentDetail` so both
+the web UI and MCP agents can render the same affordance.
+
+The Cursor paste-per-action path mirrors the synchronous analyze:
+`POST /api/cursor-tasks/{task_id}/submit-analyze` now sets
+`status = COMPLETE` and `analysis_stale = false` after persisting the
+analysis output, so a Cursor-driven analyze unlocks the Build CTA the
+same way a Direct API analyze does.
 
 ---
 
@@ -207,9 +235,31 @@ The Next.js app uses the App Router. Key shared surfaces:
 * `src/lib/api.ts` — typed client, throws `APIError` on non-2xx with parsed
   `code`, `request_id`, and `detail`.
 
-The `/documents/[id]/build` page subscribes to
-`GET /api/mcp/sessions/{id}/events/stream` via SSE to render live autonomous
-build progress, file registry, and snapshot history.
+The `/documents/[id]/build` page is the **single hand-off surface** for
+both build agents. It is rendered from the spec described in
+[GUIDE_WEB_UI.md §7.5](./GUIDE_WEB_UI.md) and:
+
+* Reads `?provider=cursor|claude_code` (falling back to
+  `ToolConfigDB.build_provider`) to drive the **Agent runtime** tabs.
+* Calls
+  `GET /api/orchestration/mcp-config?document_id=…&stack=…&output_folder=…`
+  on every input change so the JSON snippet, agent prompt, and CLI
+  command always render with substituted values and `auto_proceed='true'`
+  baked in — same source of truth as the **Kickoff instructions** modal
+  and `reports/cursor_ide_kickoff.md`.
+* Renders a **Pre-build check** banner from
+  `GET /api/fs/{id}/pre-build-check`.
+* On the Claude tab only, exposes **Run Build Now** which POSTs to
+  `/api/fs/{id}/build/run` and then polls
+  `GET /api/fs/{id}/build-state` (3s cadence) for live progress.
+* For Cursor-driven builds, also subscribes to
+  `GET /api/mcp/sessions/{id}/events/stream` via SSE to render live
+  autonomous build progress, file registry, and snapshot history once
+  the Cursor agent has been kicked off externally.
+
+The CTA selection on the document detail page is dynamic: the button
+matching `Settings → Build Agent` is rendered as primary; the other is
+secondary; `build_provider = api` hides both.
 
 ---
 

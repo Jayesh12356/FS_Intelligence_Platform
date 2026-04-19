@@ -1,6 +1,7 @@
 export { default as AnimatedNumber } from "./AnimatedNumber";
 export { default as Badge, StatusBadge } from "./Badge";
 export { default as CopyButton } from "./CopyButton";
+export { default as CursorTaskModal } from "./CursorTaskModal";
 export { default as EmptyState } from "./EmptyState";
 export { default as KpiCard } from "./KpiCard";
 export { default as LoadingSkeleton, KpiRowSkeleton, CardListSkeleton, SkeletonText, SkeletonCard } from "./LoadingSkeleton";

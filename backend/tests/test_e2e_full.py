@@ -23,7 +23,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import AsyncClient
 
-
 # ── Test FS Document ────────────────────────────────────
 
 TEST_FS_CONTENT = """\
@@ -51,12 +50,15 @@ Admins can export transaction reports in CSV and PDF format.
 Reports must be generated within an unspecified time frame.
 """
 
-UPDATED_FS_CONTENT = TEST_FS_CONTENT + """\
+UPDATED_FS_CONTENT = (
+    TEST_FS_CONTENT
+    + """\
 
 ## 6. Refunds
 Users may request full or partial refunds within 30 days.
 The session timeout shall be 45 minutes.
 """
+)
 
 
 # ── Mock Responses ──────────────────────────────────────
@@ -136,6 +138,7 @@ MOCK_TASKS = [
 
 # ── Mock LLM Router ────────────────────────────────────
 
+
 def _make_mock_llm_json_router():
     """Return async callable that routes mock responses based on prompt/system content."""
 
@@ -144,30 +147,47 @@ def _make_mock_llm_json_router():
         prompt = str(kwargs.get("prompt", args[0] if args else "")).lower()
         combined = system + " " + prompt
 
-        if "ambiguit" in combined or "ambiguous" in combined:
-            # Only return HIGH ambiguities for sections about transaction limits / reporting
-            # Other sections get no ambiguities so task_node can process them
+        # Match on *schema field names* and unique role phrases so both the
+        # legacy v1 prompts and the v2 master-template prompts are routed
+        # correctly.  Order matters — check the most specific markers first.
+        if "clarification_question" in combined or "first attempt" in combined:
+            # Ambiguity analysis.
             if "transaction limit" in prompt or "unspecified" in prompt:
-                return MOCK_AMBIGUITIES[:2]  # HIGH flags
+                return MOCK_AMBIGUITIES[:2]
             elif "retries" in prompt or "tbd" in prompt:
-                return [MOCK_AMBIGUITIES[2]]  # MEDIUM flag
-            return []  # Clean sections → no ambiguities
-        elif "contradiction" in combined:
+                return [MOCK_AMBIGUITIES[2]]
+            return []
+        elif "cross-reference validation" in combined or "index_a" in combined:
             return MOCK_CONTRADICTIONS
-        elif "edge case" in combined:
+        elif (
+            "scenario_description" in combined or "suggested_addition" in combined or "production incidents" in combined
+        ):
             return MOCK_EDGE_CASES
-        elif "compliance" in combined:
+        elif "compliance officer" in combined or "compliance" in combined:
             return MOCK_COMPLIANCE_TAGS
-        elif "decompos" in combined or "break" in combined or "atomic" in combined:
+        elif "staff software architect" in combined or "decompos" in combined or "atomic" in combined:
             return MOCK_TASKS
-        elif "dependenc" in combined:
-            return {}  # No inter-task deps for simplicity
-        elif "impact" in combined:
+        elif "depends_on" in combined or "build-order planner" in combined or "dependenc" in combined:
+            return {}
+        elif "change-impact" in combined or "impact" in combined:
             return []
         elif "user flow" in combined or "user-facing" in combined:
-            return [{"flow_name": "Authentication", "description": "Login/logout", "involved_modules": ["auth_service"], "entry_points": ["login"]}]
+            return [
+                {
+                    "flow_name": "Authentication",
+                    "description": "Login/logout",
+                    "involved_modules": ["auth_service"],
+                    "entry_points": ["login"],
+                }
+            ]
         elif "module summar" in combined or "module_name" in combined:
-            return {"module_name": "test_module", "purpose": "Test", "summary": "Test module", "key_components": ["fn1"], "dependencies": []}
+            return {
+                "module_name": "test_module",
+                "purpose": "Test",
+                "summary": "Test module",
+                "key_components": ["fn1"],
+                "dependencies": [],
+            }
         return []
 
     return _route
@@ -184,19 +204,24 @@ def _make_mock_llm_text_router():
         if "functional spec" in combined or "fs section" in combined:
             return "The system shall provide authentication via JWT tokens. Users shall be able to login and logout."
         elif "test case" in combined or "test scenario" in combined:
-            return json.dumps([{
-                "title": "Verify login flow",
-                "preconditions": "User exists",
-                "steps": ["Enter credentials", "Submit"],
-                "expected_result": "Token issued",
-                "test_type": "INTEGRATION",
-            }])
+            return json.dumps(
+                [
+                    {
+                        "title": "Verify login flow",
+                        "preconditions": "User exists",
+                        "steps": ["Enter credentials", "Submit"],
+                        "expected_result": "Token issued",
+                        "test_type": "INTEGRATION",
+                    }
+                ]
+            )
         return "OK"
 
     return _route
 
 
 # ── Mock Debate ─────────────────────────────────────────
+
 
 def _make_mock_debate():
     """Return mock for run_debate that returns a DebateVerdict."""
@@ -216,18 +241,23 @@ def _make_mock_debate():
 
 # ── Patch helpers ───────────────────────────────────────
 
-# Nodes that import get_llm_client from their own module (via from app.pipeline.nodes.<node>.get_llm_client)
+# Nodes that call pipeline_call_llm_json at module scope post-refactor.
+# Patch each target with an AsyncMock so the router in _start_all_mocks()
+# can drive behaviour from the call site's system prompt.
 NODE_LLM_PATCHES = [
-    "app.pipeline.nodes.ambiguity_node.get_llm_client",
-    "app.pipeline.nodes.contradiction_node.get_llm_client",
-    "app.pipeline.nodes.edge_case_node.get_llm_client",
-    "app.pipeline.nodes.quality_node.get_llm_client",
+    "app.pipeline.nodes.ambiguity_node.pipeline_call_llm_json",
+    "app.pipeline.nodes.contradiction_node.pipeline_call_llm_json",
+    "app.pipeline.nodes.edge_case_node.pipeline_call_llm_json",
+    "app.pipeline.nodes.quality_node.pipeline_call_llm_json",
+    "app.pipeline.nodes.task_node.pipeline_call_llm_json",
+    "app.pipeline.nodes.dependency_node.pipeline_call_llm_json",
+    "app.pipeline.nodes.impact_node.pipeline_call_llm_json",
+    "app.pipeline.nodes.reverse_fs_node.pipeline_call_llm_json",
 ]
 
-# Nodes that import get_llm_client from app.llm module-level
-MODULE_LLM_PATCHES = [
-    "app.llm.get_llm_client",  # used by task_node, dependency_node, impact_node, reverse_fs_node
-]
+# Kept for backwards compatibility with any lingering caller; intentionally
+# empty because all call sites now flow through `pipeline_call_llm_json`.
+MODULE_LLM_PATCHES: list[str] = []
 
 EMBEDDING_PATCH = "app.vector.fs_store._generate_embeddings"
 QDRANT_UPSERT_PATCH = "app.vector.fs_store.get_qdrant_manager"
@@ -254,24 +284,25 @@ def _fake_qdrant_manager():
 
 def _start_all_mocks():
     """Start all LLM + embedding + Qdrant patches and return (mock_client, active_patches)."""
+    json_router = _make_mock_llm_json_router()
+    text_router = _make_mock_llm_text_router()
+
+    # `mock_client` is retained only so tests that still reference
+    # ``mock_client.call_llm_json`` for assertions keep working; the
+    # production code path now goes through the patched
+    # ``pipeline_call_llm_json`` free function, not a client method.
     mock_client = AsyncMock()
-    mock_client.call_llm_json = AsyncMock(side_effect=_make_mock_llm_json_router())
-    mock_client.call_llm = AsyncMock(side_effect=_make_mock_llm_text_router())
+    mock_client.call_llm_json = AsyncMock(side_effect=json_router)
+    mock_client.call_llm = AsyncMock(side_effect=text_router)
 
     active = []
 
-    # Patch node-level get_llm_client references
+    # Patch every node's module-level `pipeline_call_llm_json` so analysis
+    # runs through our deterministic router instead of hitting a live LLM.
     for path in NODE_LLM_PATCHES:
-        p = patch(path)
+        p = patch(path, new_callable=AsyncMock)
         mp = p.start()
-        mp.return_value = mock_client
-        active.append(p)
-
-    # Patch module-level get_llm_client (covers task_node, dependency_node, impact_node, reverse_fs_node)
-    for path in MODULE_LLM_PATCHES:
-        p = patch(path)
-        mp = p.start()
-        mp.return_value = mock_client
+        mp.side_effect = json_router
         active.append(p)
 
     # Patch debate (CrewAI)
@@ -301,10 +332,11 @@ def _start_all_mocks():
 
     # Reset compiled graph singletons
     import app.pipeline.graph as graph_mod
+
     graph_mod._compiled_graph = None
-    if hasattr(graph_mod, '_compiled_impact_graph'):
+    if hasattr(graph_mod, "_compiled_impact_graph"):
         graph_mod._compiled_impact_graph = None
-    if hasattr(graph_mod, '_compiled_reverse_graph'):
+    if hasattr(graph_mod, "_compiled_reverse_graph"):
         graph_mod._compiled_reverse_graph = None
 
     return mock_client, active
@@ -315,10 +347,11 @@ def _stop_all_mocks(active_patches):
     for p in active_patches:
         p.stop()
     import app.pipeline.graph as graph_mod
+
     graph_mod._compiled_graph = None
-    if hasattr(graph_mod, '_compiled_impact_graph'):
+    if hasattr(graph_mod, "_compiled_impact_graph"):
         graph_mod._compiled_impact_graph = None
-    if hasattr(graph_mod, '_compiled_reverse_graph'):
+    if hasattr(graph_mod, "_compiled_reverse_graph"):
         graph_mod._compiled_reverse_graph = None
 
 
@@ -333,18 +366,28 @@ class TestPipelineStructure:
     def test_analysis_pipeline_has_11_nodes(self):
         """Analysis graph has 11 named nodes."""
         from app.pipeline.graph import build_analysis_graph
+
         graph = build_analysis_graph()
         nodes = [n for n in graph.nodes.keys() if not n.startswith("__")]
         assert len(nodes) == 11, f"Expected 11 nodes, got {len(nodes)}: {nodes}"
         expected = {
-            "parse_node", "ambiguity_node", "debate_node", "contradiction_node",
-            "edge_case_node", "quality_node", "task_decomposition_node",
-            "dependency_node", "traceability_node", "duplicate_node", "testcase_node",
+            "parse_node",
+            "ambiguity_node",
+            "debate_node",
+            "contradiction_node",
+            "edge_case_node",
+            "quality_node",
+            "task_decomposition_node",
+            "dependency_node",
+            "traceability_node",
+            "duplicate_node",
+            "testcase_node",
         }
         assert set(nodes) == expected, f"Missing: {expected - set(nodes)}"
 
     def test_impact_pipeline_has_3_nodes(self):
         from app.pipeline.graph import build_impact_graph
+
         graph = build_impact_graph()
         nodes = [n for n in graph.nodes.keys() if not n.startswith("__")]
         assert len(nodes) == 3
@@ -352,6 +395,7 @@ class TestPipelineStructure:
 
     def test_reverse_pipeline_has_2_nodes(self):
         from app.pipeline.graph import build_reverse_graph
+
         graph = build_reverse_graph()
         nodes = [n for n in graph.nodes.keys() if not n.startswith("__")]
         assert len(nodes) == 2
@@ -359,10 +403,21 @@ class TestPipelineStructure:
 
     def test_analysis_state_has_all_fields(self):
         from app.pipeline.state import FSAnalysisState
+
         required_keys = [
-            "fs_id", "parsed_sections", "ambiguities", "debate_results",
-            "contradictions", "edge_cases", "quality_score", "compliance_tags",
-            "tasks", "traceability_matrix", "duplicates", "test_cases", "errors",
+            "fs_id",
+            "parsed_sections",
+            "ambiguities",
+            "debate_results",
+            "contradictions",
+            "edge_cases",
+            "quality_score",
+            "compliance_tags",
+            "tasks",
+            "traceability_matrix",
+            "duplicates",
+            "test_cases",
+            "errors",
         ]
         annotations = FSAnalysisState.__annotations__
         for key in required_keys:
@@ -379,10 +434,12 @@ class TestLLMClient:
 
     def test_default_model_is_claude_sonnet(self):
         from app.llm.client import _DEFAULT_MODELS, PROVIDER_ANTHROPIC
+
         assert _DEFAULT_MODELS[PROVIDER_ANTHROPIC] == "claude-sonnet-4-20250514"
 
     def test_llm_client_provider_routing(self):
-        from app.llm.client import LLMClient, PROVIDER_ANTHROPIC
+        from app.llm.client import PROVIDER_ANTHROPIC, LLMClient
+
         with patch("app.llm.client.get_settings") as mock_s:
             mock_s.return_value = MagicMock(
                 LLM_PROVIDER="anthropic",
@@ -394,9 +451,12 @@ class TestLLMClient:
 
     def test_all_providers_supported(self):
         from app.llm.client import (
-            PROVIDER_ANTHROPIC, PROVIDER_OPENAI,
-            PROVIDER_GROQ, PROVIDER_OPENROUTER,
+            PROVIDER_ANTHROPIC,
+            PROVIDER_GROQ,
+            PROVIDER_OPENAI,
+            PROVIDER_OPENROUTER,
         )
+
         assert PROVIDER_ANTHROPIC == "anthropic"
         assert PROVIDER_OPENAI == "openai"
         assert PROVIDER_GROQ == "groq"
@@ -413,6 +473,7 @@ class TestVectorStoreStructure:
 
     def test_collections_defined(self):
         from app.vector.client import COLLECTIONS
+
         assert "fs_requirements" in COLLECTIONS
         assert "fs_library" in COLLECTIONS
         assert COLLECTIONS["fs_requirements"]["size"] == 1536
@@ -420,12 +481,14 @@ class TestVectorStoreStructure:
 
     def test_vector_store_functions_exist(self):
         from app.vector import fs_store
+
         assert hasattr(fs_store, "search_similar_sections")
         assert hasattr(fs_store, "store_library_item")
         assert hasattr(fs_store, "search_library")
 
     def test_store_fs_chunks_function_exists(self):
         from app.vector.fs_store import store_fs_chunks
+
         assert callable(store_fs_chunks)
 
 
@@ -439,21 +502,36 @@ class TestDatabaseTables:
 
     def test_all_tables_exist(self):
         from app.db.base import Base
+
         table_names = set(Base.metadata.tables.keys())
         required = {
-            "fs_documents", "fs_versions", "analysis_results",
-            "ambiguity_flags", "contradictions", "edge_case_gaps",
-            "compliance_tags", "fs_tasks", "traceability_entries",
-            "debate_results", "fs_changes", "task_impacts",
-            "rework_estimates", "code_uploads",
-            "duplicate_flags", "fs_comments", "fs_mentions",
-            "fs_approvals", "audit_events", "test_cases",
+            "fs_documents",
+            "fs_versions",
+            "analysis_results",
+            "ambiguity_flags",
+            "contradictions",
+            "edge_case_gaps",
+            "compliance_tags",
+            "fs_tasks",
+            "traceability_entries",
+            "debate_results",
+            "fs_changes",
+            "task_impacts",
+            "rework_estimates",
+            "code_uploads",
+            "duplicate_flags",
+            "fs_comments",
+            "fs_mentions",
+            "fs_approvals",
+            "audit_events",
+            "test_cases",
         }
         missing = required - table_names
         assert not missing, f"Missing tables: {missing}"
 
     def test_table_count(self):
         from app.db.base import Base
+
         count = len(Base.metadata.tables)
         assert count >= 20, f"Expected >= 20 tables, got {count}"
 
@@ -464,7 +542,6 @@ class TestDatabaseTables:
 
 
 class TestL1L2UploadParse:
-
     @pytest.mark.asyncio
     async def test_health_check(self, client: AsyncClient):
         resp = await client.get("/")
@@ -489,8 +566,10 @@ class TestL1L2UploadParse:
         resp = await client.post("/api/fs/upload", files=files)
         doc_id = resp.json()["data"]["id"]
 
-        with patch(EMBEDDING_PATCH, side_effect=_fake_embeddings), \
-             patch(QDRANT_UPSERT_PATCH, return_value=_fake_qdrant_manager()):
+        with (
+            patch(EMBEDDING_PATCH, side_effect=_fake_embeddings),
+            patch(QDRANT_UPSERT_PATCH, return_value=_fake_qdrant_manager()),
+        ):
             resp = await client.post(f"/api/fs/{doc_id}/parse")
 
         assert resp.status_code == 200
@@ -509,7 +588,6 @@ class TestL1L2UploadParse:
 
 
 class TestL3toL6AnalysisFlow:
-
     @pytest.mark.asyncio
     async def test_full_analysis_pipeline(self, client: AsyncClient):
         """Upload → parse → analyze → verify L3-L6 outputs."""
@@ -521,8 +599,10 @@ class TestL3toL6AnalysisFlow:
         doc_id = resp.json()["data"]["id"]
 
         # ── Parse ──
-        with patch(EMBEDDING_PATCH, side_effect=_fake_embeddings), \
-             patch(QDRANT_UPSERT_PATCH, return_value=_fake_qdrant_manager()):
+        with (
+            patch(EMBEDDING_PATCH, side_effect=_fake_embeddings),
+            patch(QDRANT_UPSERT_PATCH, return_value=_fake_qdrant_manager()),
+        ):
             resp = await client.post(f"/api/fs/{doc_id}/parse")
         assert resp.status_code == 200
 
@@ -610,7 +690,6 @@ class TestL3toL6AnalysisFlow:
 
 
 class TestL7ChangeImpact:
-
     @pytest.mark.asyncio
     async def test_version_upload_and_impact(self, client: AsyncClient):
         """Upload → parse → analyze → upload new version → check diff/impact/rework."""
@@ -620,8 +699,10 @@ class TestL7ChangeImpact:
         resp = await client.post("/api/fs/upload", files=files)
         doc_id = resp.json()["data"]["id"]
 
-        with patch(EMBEDDING_PATCH, side_effect=_fake_embeddings), \
-             patch(QDRANT_UPSERT_PATCH, return_value=_fake_qdrant_manager()):
+        with (
+            patch(EMBEDDING_PATCH, side_effect=_fake_embeddings),
+            patch(QDRANT_UPSERT_PATCH, return_value=_fake_qdrant_manager()),
+        ):
             await client.post(f"/api/fs/{doc_id}/parse")
 
         mock_client, active_patches = _start_all_mocks()
@@ -681,11 +762,12 @@ class TestL7ChangeImpact:
 
 
 class TestL8ReverseFS:
-
     def _create_test_zip(self) -> bytes:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("codebase/auth_service.py", '''\
+            zf.writestr(
+                "codebase/auth_service.py",
+                '''\
 """Authentication service — JWT login/logout."""
 
 def login(username: str, password: str) -> dict:
@@ -697,8 +779,11 @@ def login(username: str, password: str) -> dict:
 def logout(token: str) -> bool:
     """Invalidate a JWT token."""
     return True
-''')
-            zf.writestr("codebase/payment_service.py", '''\
+''',
+            )
+            zf.writestr(
+                "codebase/payment_service.py",
+                '''\
 """Payment processing service — charge and refund."""
 
 def charge(amount: float, currency: str, card_token: str) -> dict:
@@ -710,8 +795,11 @@ def charge(amount: float, currency: str, card_token: str) -> dict:
 def refund(transaction_id: str, amount: float = None) -> dict:
     """Process a refund for a transaction."""
     return {"refund_id": "ref_456", "status": "refunded"}
-''')
-            zf.writestr("codebase/models.py", '''\
+''',
+            )
+            zf.writestr(
+                "codebase/models.py",
+                '''\
 """Data models for the application."""
 from dataclasses import dataclass
 
@@ -729,7 +817,8 @@ class Transaction:
     amount: float
     currency: str
     status: str = "pending"
-''')
+''',
+            )
         return buf.getvalue()
 
     @pytest.mark.asyncio
@@ -787,7 +876,6 @@ class Transaction:
 
 
 class TestL9SemanticCollab:
-
     @pytest.mark.asyncio
     async def test_duplicate_detection_endpoint(self, client: AsyncClient):
         files = {"file": ("dup_spec.txt", io.BytesIO(TEST_FS_CONTENT.encode()), "text/plain")}
@@ -828,8 +916,10 @@ class TestL9SemanticCollab:
         resp = await client.post("/api/fs/upload", files=files)
         doc_id = resp.json()["data"]["id"]
 
-        with patch(EMBEDDING_PATCH, side_effect=_fake_embeddings), \
-             patch(QDRANT_UPSERT_PATCH, return_value=_fake_qdrant_manager()):
+        with (
+            patch(EMBEDDING_PATCH, side_effect=_fake_embeddings),
+            patch(QDRANT_UPSERT_PATCH, return_value=_fake_qdrant_manager()),
+        ):
             await client.post(f"/api/fs/{doc_id}/parse")
 
         mock_client, active_patches = _start_all_mocks()
@@ -844,9 +934,11 @@ class TestL9SemanticCollab:
         assert resp.json()["data"]["status"] == "PENDING"
 
         # Approve (patch library store to avoid Qdrant calls)
-        with patch("app.vector.fs_store.store_library_item", return_value="mock-id"), \
-             patch(EMBEDDING_PATCH, side_effect=_fake_embeddings), \
-             patch(QDRANT_UPSERT_PATCH, return_value=_fake_qdrant_manager()):
+        with (
+            patch("app.vector.fs_store.store_library_item", return_value="mock-id"),
+            patch(EMBEDDING_PATCH, side_effect=_fake_embeddings),
+            patch(QDRANT_UPSERT_PATCH, return_value=_fake_qdrant_manager()),
+        ):
             resp = await client.post(f"/api/fs/{doc_id}/approve", json={"approver_id": "director"})
         assert resp.status_code == 200
         assert resp.json()["data"]["status"] == "APPROVED"
@@ -862,8 +954,10 @@ class TestL9SemanticCollab:
         resp = await client.post("/api/fs/upload", files=files)
         doc_id = resp.json()["data"]["id"]
 
-        with patch(EMBEDDING_PATCH, side_effect=_fake_embeddings), \
-             patch(QDRANT_UPSERT_PATCH, return_value=_fake_qdrant_manager()):
+        with (
+            patch(EMBEDDING_PATCH, side_effect=_fake_embeddings),
+            patch(QDRANT_UPSERT_PATCH, return_value=_fake_qdrant_manager()),
+        ):
             await client.post(f"/api/fs/{doc_id}/parse")
 
         mock_client, active_patches = _start_all_mocks()
@@ -883,16 +977,19 @@ class TestL9SemanticCollab:
 
     @pytest.mark.asyncio
     async def test_library_search_endpoint(self, client: AsyncClient):
-        with patch("app.vector.fs_store.search_library", return_value=[
-            {
-                "id": "mock-id-1",
-                "fs_id": str(uuid.uuid4()),
-                "section_index": 0,
-                "section_heading": "Authentication",
-                "text": "OAuth 2.0 authentication requirement",
-                "score": 0.92,
-            },
-        ]):
+        with patch(
+            "app.vector.fs_store.search_library",
+            return_value=[
+                {
+                    "id": "mock-id-1",
+                    "fs_id": str(uuid.uuid4()),
+                    "section_index": 0,
+                    "section_heading": "Authentication",
+                    "text": "OAuth 2.0 authentication requirement",
+                    "score": 0.92,
+                },
+            ],
+        ):
             resp = await client.get("/api/library/search?q=authentication")
             assert resp.status_code == 200
             data = resp.json()["data"]
@@ -906,15 +1003,16 @@ class TestL9SemanticCollab:
 
 
 class TestL10IntegrationsExport:
-
     async def _setup_analyzed_doc(self, client: AsyncClient) -> str:
         """Helper: upload → parse → analyze → return doc_id."""
         files = {"file": ("export_spec.txt", io.BytesIO(TEST_FS_CONTENT.encode()), "text/plain")}
         resp = await client.post("/api/fs/upload", files=files)
         doc_id = resp.json()["data"]["id"]
 
-        with patch(EMBEDDING_PATCH, side_effect=_fake_embeddings), \
-             patch(QDRANT_UPSERT_PATCH, return_value=_fake_qdrant_manager()):
+        with (
+            patch(EMBEDDING_PATCH, side_effect=_fake_embeddings),
+            patch(QDRANT_UPSERT_PATCH, return_value=_fake_qdrant_manager()),
+        ):
             await client.post(f"/api/fs/{doc_id}/parse")
 
         mock_client, active_patches = _start_all_mocks()
@@ -929,11 +1027,20 @@ class TestL10IntegrationsExport:
         doc_id = await self._setup_analyzed_doc(client)
         # Mock JiraClient to avoid hitting real JIRA API
         mock_jira = MagicMock()
-        mock_jira.export_fs_tasks = AsyncMock(return_value={
-            "epic": {"id": "SIM-EPIC-001", "key": "FSP-001", "url": "https://jira.example.com/FSP-001", "simulated": True},
-            "stories": [{"id": "SIM-S-1", "key": "FSP-002", "url": "https://jira.example.com/FSP-002", "simulated": True}],
-            "total": 1,
-        })
+        mock_jira.export_fs_tasks = AsyncMock(
+            return_value={
+                "epic": {
+                    "id": "SIM-EPIC-001",
+                    "key": "FSP-001",
+                    "url": "https://jira.example.com/FSP-001",
+                    "simulated": True,
+                },
+                "stories": [
+                    {"id": "SIM-S-1", "key": "FSP-002", "url": "https://jira.example.com/FSP-002", "simulated": True}
+                ],
+                "total": 1,
+            }
+        )
         with patch("app.integrations.jira.JiraClient", return_value=mock_jira):
             resp = await client.post(f"/api/fs/{doc_id}/export/jira")
         assert resp.status_code == 200
@@ -947,12 +1054,14 @@ class TestL10IntegrationsExport:
         doc_id = await self._setup_analyzed_doc(client)
         # Mock ConfluenceClient to avoid hitting real Confluence API
         mock_confluence = MagicMock()
-        mock_confluence.create_fs_page = AsyncMock(return_value={
-            "id": "SIM-PAGE-001",
-            "url": "https://confluence.example.com/SIM-PAGE-001",
-            "title": "Payment Gateway Integration - FS Analysis",
-            "simulated": True,
-        })
+        mock_confluence.create_fs_page = AsyncMock(
+            return_value={
+                "id": "SIM-PAGE-001",
+                "url": "https://confluence.example.com/SIM-PAGE-001",
+                "title": "Payment Gateway Integration - FS Analysis",
+                "simulated": True,
+            }
+        )
         with patch("app.integrations.confluence.ConfluenceClient", return_value=mock_confluence):
             resp = await client.post(f"/api/fs/{doc_id}/export/confluence")
         assert resp.status_code == 200

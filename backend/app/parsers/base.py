@@ -5,7 +5,7 @@ extracted from the source document.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 
 @dataclass
@@ -47,7 +47,7 @@ class FSChunk:
     section_heading: str
     text: str
     chunk_index: int
-    embedding: Optional[List[float]] = None
+    embedding: List[float] | None = None
 
     def to_dict(self) -> dict:
         return {

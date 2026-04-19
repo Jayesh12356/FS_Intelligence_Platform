@@ -2,7 +2,7 @@
 
 import enum
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
@@ -15,15 +15,16 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.types import JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
+from sqlalchemy.types import JSON
 
 from app.db.base import Base
 
 
-class FSDocumentStatus(str, enum.Enum):
+class FSDocumentStatus(enum.StrEnum):
     """Processing status for an FS document."""
+
     UPLOADED = "UPLOADED"
     PARSING = "PARSING"
     PARSED = "PARSED"
@@ -33,37 +34,42 @@ class FSDocumentStatus(str, enum.Enum):
     DELETED = "DELETED"
 
 
-class AmbiguitySeverity(str, enum.Enum):
+class AmbiguitySeverity(enum.StrEnum):
     """Severity level for ambiguity flags."""
+
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
 
 
-class EffortLevel(str, enum.Enum):
+class EffortLevel(enum.StrEnum):
     """Effort complexity for a dev task."""
+
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
     UNKNOWN = "UNKNOWN"
 
 
-class TaskStatus(str, enum.Enum):
+class TaskStatus(enum.StrEnum):
     """Execution status for an FS task."""
+
     PENDING = "PENDING"
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETE = "COMPLETE"
 
 
-class ChangeType(str, enum.Enum):
+class ChangeType(enum.StrEnum):
     """Type of change between FS versions."""
+
     ADDED = "ADDED"
     MODIFIED = "MODIFIED"
     DELETED = "DELETED"
 
 
-class ImpactType(str, enum.Enum):
+class ImpactType(enum.StrEnum):
     """Impact level on a task from an FS change."""
+
     INVALIDATED = "INVALIDATED"
     REQUIRES_REVIEW = "REQUIRES_REVIEW"
     UNAFFECTED = "UNAFFECTED"
@@ -80,13 +86,13 @@ class FSProject(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     documents = relationship("FSDocument", back_populates="project", lazy="selectin")
@@ -109,6 +115,17 @@ class FSDocument(Base):
         nullable=False,
         default=FSDocumentStatus.UPLOADED,
     )
+    # When the FS body is mutated (refinement, accept-suggestion, …) after
+    # an analysis already completed, we keep ``status = COMPLETE`` so the
+    # Build CTA stays visible but flip ``analysis_stale`` so the UI can
+    # surface a "re-analyze to refresh metrics" hint. Reset to False on
+    # every successful analyze run.
+    analysis_stale = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
     file_path = Column(String(1024), nullable=True)
     file_size = Column(Integer, nullable=True)
     content_type = Column(String(128), nullable=True)
@@ -117,13 +134,13 @@ class FSDocument(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -174,7 +191,7 @@ class FSVersion(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -199,7 +216,7 @@ class AnalysisResult(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -232,7 +249,7 @@ class AmbiguityFlagDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -264,7 +281,7 @@ class ContradictionDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -294,7 +311,7 @@ class EdgeCaseGapDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -318,7 +335,7 @@ class ComplianceTagDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -358,7 +375,7 @@ class FSTaskDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -382,7 +399,7 @@ class TraceabilityEntryDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -411,7 +428,7 @@ class DebateResultDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -441,7 +458,7 @@ class FSChangeDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -471,7 +488,7 @@ class TaskImpactDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -499,7 +516,7 @@ class ReworkEstimateDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -507,14 +524,17 @@ class ReworkEstimateDB(Base):
     version = relationship("FSVersion", back_populates="rework_estimate")
 
     def __repr__(self) -> str:
-        return f"<ReworkEstimateDB id={self.id} invalidated={self.invalidated_count} rework_days={self.total_rework_days}>"
+        return (
+            f"<ReworkEstimateDB id={self.id} invalidated={self.invalidated_count} rework_days={self.total_rework_days}>"
+        )
 
 
 # ── L8: Code Upload ────────────────────────────────────
 
 
-class CodeUploadStatus(str, enum.Enum):
+class CodeUploadStatus(enum.StrEnum):
     """Status of a code upload through the reverse gen pipeline."""
+
     UPLOADED = "UPLOADED"
     PARSING = "PARSING"
     PARSED = "PARSED"
@@ -560,13 +580,13 @@ class CodeUploadDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -579,15 +599,17 @@ class CodeUploadDB(Base):
 # ── L9: Semantic Intelligence + Collaboration ──────────
 
 
-class ApprovalStatus(str, enum.Enum):
+class ApprovalStatus(enum.StrEnum):
     """Approval workflow status."""
+
     PENDING = "PENDING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
 
 
-class AuditEventType(str, enum.Enum):
+class AuditEventType(enum.StrEnum):
     """Type of audit event logged."""
+
     UPLOADED = "UPLOADED"
     PARSED = "PARSED"
     ANALYZED = "ANALYZED"
@@ -602,6 +624,21 @@ class AuditEventType(str, enum.Enum):
     SECTION_EDITED = "SECTION_EDITED"
     SECTION_ADDED = "SECTION_ADDED"
     ANALYSIS_CANCELLED = "ANALYSIS_CANCELLED"
+    # Lifecycle additions (telemetry uplift) — these light up the
+    # per-document timeline and the global activity log so users can
+    # see exactly what happened between upload and build, without us
+    # surfacing raw runtime traces.
+    ANALYSIS_REFINED = "ANALYSIS_REFINED"
+    AMBIGUITY_RESOLVED = "AMBIGUITY_RESOLVED"
+    CONTRADICTION_ACCEPTED = "CONTRADICTION_ACCEPTED"
+    EDGE_CASE_ACCEPTED = "EDGE_CASE_ACCEPTED"
+    VERSION_REVERTED = "VERSION_REVERTED"
+    BUILD_STARTED = "BUILD_STARTED"
+    BUILD_PHASE_CHANGED = "BUILD_PHASE_CHANGED"
+    BUILD_TASK_COMPLETED = "BUILD_TASK_COMPLETED"
+    FILE_REGISTERED = "FILE_REGISTERED"
+    BUILD_COMPLETED = "BUILD_COMPLETED"
+    BUILD_FAILED = "BUILD_FAILED"
 
 
 class DuplicateFlagDB(Base):
@@ -625,7 +662,7 @@ class DuplicateFlagDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -653,7 +690,7 @@ class FSCommentDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -675,7 +712,7 @@ class FSMentionDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -702,7 +739,7 @@ class FSApprovalDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -728,7 +765,7 @@ class AuditEventDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -741,16 +778,18 @@ class AuditEventDB(Base):
 # ── L10 Enums ──────────────────────────────────────────
 
 
-class TestType(str, enum.Enum):
+class TestType(enum.StrEnum):
     """Type of test case."""
+
     UNIT = "UNIT"
     INTEGRATION = "INTEGRATION"
     E2E = "E2E"
     ACCEPTANCE = "ACCEPTANCE"
 
 
-class MCPSessionStatus(str, enum.Enum):
+class MCPSessionStatus(enum.StrEnum):
     """Lifecycle status for an MCP-driven build session."""
+
     RUNNING = "RUNNING"
     PASSED = "PASSED"
     FAILED = "FAILED"
@@ -782,7 +821,7 @@ class TestCaseDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -814,19 +853,19 @@ class MCPSessionDB(Base):
     started_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
     ended_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     document = relationship("FSDocument")
@@ -848,7 +887,7 @@ class MCPSessionEventDB(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     session = relationship("MCPSessionDB", back_populates="events")
@@ -857,7 +896,7 @@ class MCPSessionEventDB(Base):
 # ── Build Engine Models ────────────────────────────────
 
 
-class BuildStatus(str, enum.Enum):
+class BuildStatus(enum.StrEnum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
     PAUSED = "PAUSED"
@@ -884,10 +923,10 @@ class BuildStateDB(Base):
     last_updated = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
 
 
 class FileRegistryDB(Base):
@@ -902,12 +941,12 @@ class FileRegistryDB(Base):
     file_path = Column(String(1024), nullable=False)
     file_type = Column(String(64), nullable=False, default="unknown")
     status = Column(String(32), nullable=False, default="CREATED")
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
     last_modified = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
 
@@ -922,7 +961,7 @@ class BuildSnapshotDB(Base):
     quality_score_at_snapshot = Column(Float, nullable=True)
     file_registry_snapshot = Column(JSON, nullable=False, default=list)
     task_states_snapshot = Column(JSON, nullable=False, default=list)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
 
 
 class PipelineCacheDB(Base):
@@ -935,7 +974,7 @@ class PipelineCacheDB(Base):
     node_name = Column(String(128), nullable=False)
     input_hash = Column(String(128), nullable=False)
     result_data = Column(JSON, nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
     expires_at = Column(DateTime(timezone=True), nullable=True)
 
 
@@ -954,7 +993,7 @@ class IdeaSessionDB(Base):
     mode = Column(String(32), nullable=False, default="quick")
     conversation_state = Column(JSON, nullable=True)
     generated_fs_id = Column(UUID(as_uuid=True), ForeignKey("fs_documents.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
 
 
 class ToolConfigDB(Base):
@@ -970,5 +1009,77 @@ class ToolConfigDB(Base):
     fallback_chain = Column(JSON, nullable=False, default=lambda: ["api"])
     cursor_config = Column(JSON, nullable=False, default=dict)
     claude_code_config = Column(JSON, nullable=False, default=dict)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+
+
+# ── Cursor paste-per-action tasks (0.4.0) ──────────────
+
+
+class CursorTaskKind(enum.StrEnum):
+    """One user-facing action that a Cursor paste-per-action flow handles."""
+
+    GENERATE_FS = "GENERATE_FS"
+    ANALYZE = "ANALYZE"
+    REVERSE_FS = "REVERSE_FS"
+    REFINE = "REFINE"
+    IMPACT = "IMPACT"
+
+
+class CursorTaskStatus(enum.StrEnum):
+    """Lifecycle of a single Cursor paste-per-action task."""
+
+    PENDING = "PENDING"  # prompt minted, awaiting Cursor claim
+    CLAIMED = "CLAIMED"  # Cursor MCP has called claim_cursor_task
+    DONE = "DONE"  # submit tool recorded the result
+    FAILED = "FAILED"  # submit tool reported an error
+    EXPIRED = "EXPIRED"  # user abandoned — TTL sweeper closed it
+
+
+class CursorTaskDB(Base):
+    """One paste-per-action request minted for a Cursor IDE turn.
+
+    Each user click on Generate FS / Analyze / Reverse FS creates one
+    row. The ``prompt_text`` is what the UI displays for copy; Cursor
+    later submits its result via the MCP ``submit_*`` tool, which marks
+    the row DONE and stores ``result_ref`` pointing at the FSDocument
+    or CodeUpload that the submission produced.
+    """
+
+    __tablename__ = "cursor_tasks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    kind = Column(
+        Enum(CursorTaskKind, name="cursor_task_kind"),
+        nullable=False,
+    )
+    status = Column(
+        Enum(CursorTaskStatus, name="cursor_task_status"),
+        nullable=False,
+        default=CursorTaskStatus.PENDING,
+    )
+    # Origin of the task — FSDocument.id for analyze, CodeUploadDB.id
+    # for reverse_fs, NULL for generate_fs (the doc is created on submit).
+    related_id = Column(UUID(as_uuid=True), nullable=True)
+    # Minimal input snapshot so the prompt can be regenerated on retry.
+    input_payload = Column(JSON, nullable=False, default=dict)
+    # Exact prompt text shown to the user. Written once, never mutated.
+    prompt_text = Column(Text, nullable=False)
+    # Cursor's raw submission (JSON or markdown depending on kind).
+    output_payload = Column(JSON, nullable=True)
+    # FSDocument.id created or updated by a successful submission.
+    result_ref = Column(UUID(as_uuid=True), nullable=True)
+    error = Column(Text, nullable=True)
+    ttl_sec = Column(Integer, nullable=False, default=900)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+    claimed_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<CursorTaskDB id={self.id} kind={self.kind} status={self.status}>"

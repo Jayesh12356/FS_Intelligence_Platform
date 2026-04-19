@@ -7,13 +7,14 @@ Usage:
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import httpx
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
 
 def _looks_unconfigured(value: str) -> bool:
     v = (value or "").strip().lower()
@@ -31,6 +32,7 @@ def _looks_unconfigured(value: str) -> bool:
 
 class JiraError(Exception):
     """Raised when a JIRA API call fails."""
+
     pass
 
 
@@ -44,9 +46,7 @@ class JiraClient:
         self.api_token = settings.JIRA_API_TOKEN
         self.project_key = settings.JIRA_PROJECT_KEY
         self._configured = not (
-            _looks_unconfigured(self.base_url)
-            or _looks_unconfigured(self.email)
-            or _looks_unconfigured(self.api_token)
+            _looks_unconfigured(self.base_url) or _looks_unconfigured(self.email) or _looks_unconfigured(self.api_token)
         )
 
     @property
@@ -233,7 +233,8 @@ class JiraClient:
 
         logger.info(
             "JIRA export complete: epic=%s, stories=%d",
-            epic_key, len(stories),
+            epic_key,
+            len(stories),
         )
 
         return {

@@ -26,7 +26,7 @@ def test_try_parse_json_with_fences():
 
 
 def test_try_parse_json_blob_extraction():
-    raw = "Sure, here is your JSON: {\"ok\": true}. Hope that helps!"
+    raw = 'Sure, here is your JSON: {"ok": true}. Hope that helps!'
     assert _try_parse_json(raw) == {"ok": True}
 
 
@@ -54,11 +54,7 @@ async def test_pipeline_call_llm_json_retries_on_bad_output(monkeypatch):
             return "I think the answer is... {not json}"
         return '{"retry": "ok"}'
 
-    class _FakeSettings:
-        ORCHESTRATION_ENABLED = True
-
-    with patch("app.orchestration.pipeline_llm.get_settings", return_value=_FakeSettings()), \
-         patch("app.orchestration.llm_bridge.orchestrated_call_llm", fake_call):
+    with patch("app.orchestration.llm_bridge.orchestrated_call_llm", fake_call):
         result = await pipeline_call_llm_json(prompt="Give me JSON", system="system")
 
     assert result == {"retry": "ok"}
@@ -71,10 +67,6 @@ async def test_pipeline_call_llm_json_raises_after_retry(monkeypatch):
     async def fake_call(*, prompt: str, system: str, **_kwargs):
         return "no json anywhere at all"
 
-    class _FakeSettings:
-        ORCHESTRATION_ENABLED = True
-
-    with patch("app.orchestration.pipeline_llm.get_settings", return_value=_FakeSettings()), \
-         patch("app.orchestration.llm_bridge.orchestrated_call_llm", fake_call):
+    with patch("app.orchestration.llm_bridge.orchestrated_call_llm", fake_call):
         with pytest.raises(LLMJSONParseError):
             await pipeline_call_llm_json(prompt="x", system="y")

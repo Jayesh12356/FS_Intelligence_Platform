@@ -1,0 +1,146 @@
+{
+  "analysis.ambiguity": {
+    "constraint_count": 6,
+    "contract_hash": "8e4d373735",
+    "contract_shape": "json_array",
+    "few_shot_count": 2,
+    "mission": "Flag only requirements that a competent developer CANNOT implement without guessing \u2014 never stylistic preferences or intentional flexibility.",
+    "name": "analysis.ambiguity",
+    "role_opening": "You are a principal requirements analyst with 20 years of experience auditing Functional Specifications for enterprise s"
+  },
+  "analysis.contradiction": {
+    "constraint_count": 6,
+    "contract_hash": "4e3fac6c26",
+    "contract_shape": "json_array",
+    "few_shot_count": 1,
+    "mission": "Compare two FS sections and flag only requirements that are mutually exclusive or logically incompatible.",
+    "name": "analysis.contradiction",
+    "role_opening": "You are a principal requirements analyst specialising in cross-reference validation of Functional Specifications"
+  },
+  "analysis.dependency": {
+    "constraint_count": 6,
+    "contract_hash": "50a47d6fad",
+    "contract_shape": "json_object",
+    "few_shot_count": 2,
+    "mission": "For each task, list ONLY the task IDs it cannot start without. Emit no 'nice-to-have' orderings.",
+    "name": "analysis.dependency",
+    "role_opening": "You are a build-order planner for a software project"
+  },
+  "analysis.edge_case": {
+    "constraint_count": 5,
+    "contract_hash": "5c9f31f4f8",
+    "contract_shape": "json_array",
+    "few_shot_count": 1,
+    "mission": "Identify scenarios where the section is silent but a real user or system event would occur. Only flag gaps actually missing from the text.",
+    "name": "analysis.edge_case",
+    "role_opening": "You are a senior QA architect who writes test plans for mission-critical enterprise systems"
+  },
+  "analysis.quality.compliance": {
+    "constraint_count": 9,
+    "contract_hash": "89c4206a09",
+    "contract_shape": "json_array",
+    "few_shot_count": 1,
+    "mission": "Identify which compliance domains the section implements. Apply tags only when the section describes concrete, actionable functionality in that domain \u2014 never for passing references.",
+    "name": "analysis.quality.compliance",
+    "role_opening": "You are a compliance officer reviewing Functional Specifications for regulatory and security risk"
+  },
+  "analysis.task": {
+    "constraint_count": 9,
+    "contract_hash": "647efb1f1c",
+    "contract_shape": "json_array",
+    "few_shot_count": 1,
+    "mission": "Convert every implementable requirement into atomic, independently deliverable development tasks that an AI coding agent can ship on the first attempt.",
+    "name": "analysis.task",
+    "role_opening": "You are a staff software architect decomposing FS requirements into a developer-ready task backlog"
+  },
+  "analysis.testcase": {
+    "constraint_count": 6,
+    "contract_hash": "fe70cf2fde",
+    "contract_shape": "json_array",
+    "few_shot_count": 1,
+    "mission": "Generate 1-3 test cases per task: always one happy-path, at least one failure or edge-case, and a boundary test when applicable.",
+    "name": "analysis.testcase",
+    "role_opening": "You are a senior QA engineer writing test cases from acceptance criteria"
+  },
+  "idea.guided_fs": {
+    "constraint_count": 6,
+    "contract_hash": "31e1093a0d",
+    "contract_shape": "markdown",
+    "few_shot_count": 0,
+    "mission": "Using the product idea AND the user's discovery answers, generate a comprehensive, industry-grade Functional Specification tailored to the user's scale, stack, integrations, compliance, and business model.",
+    "name": "idea.guided_fs",
+    "role_opening": "You are an elite enterprise software architect"
+  },
+  "idea.guided_questions": {
+    "constraint_count": 5,
+    "contract_hash": "4ed9cd52bd",
+    "contract_shape": "json_array",
+    "few_shot_count": 1,
+    "mission": "Given a product idea, generate exactly 6 targeted clarifying questions, one per dimension, that maximise FS quality.",
+    "name": "idea.guided_questions",
+    "role_opening": "You are an expert business analyst conducting a requirements discovery session"
+  },
+  "idea.quick": {
+    "constraint_count": 6,
+    "contract_hash": "31e1093a0d",
+    "contract_shape": "markdown",
+    "few_shot_count": 0,
+    "mission": "Transform a brief product idea into a comprehensive, industry-grade Functional Specification (FS) with all ten required sections.",
+    "name": "idea.quick",
+    "role_opening": "You are an elite enterprise software architect and business analyst"
+  },
+  "impact.change_impact": {
+    "constraint_count": 7,
+    "contract_hash": "8c60a2bfc3",
+    "contract_shape": "json_array",
+    "few_shot_count": 1,
+    "mission": "Classify EVERY task in the input against a single FS change using three categories: INVALIDATED, REQUIRES_REVIEW, UNAFFECTED.",
+    "name": "impact.change_impact",
+    "role_opening": "You are a change-impact analyst for a software project"
+  },
+  "refinement.rewriter": {
+    "constraint_count": 6,
+    "contract_hash": "31e1093a0d",
+    "contract_shape": "markdown",
+    "few_shot_count": 1,
+    "mission": "Find each original fragment in the document and substitute it with the approved replacement. Append `[REFINED]` to every modified line.",
+    "name": "refinement.rewriter",
+    "role_opening": "You are a document editor applying approved fixes to a Functional Specification"
+  },
+  "refinement.suggestion": {
+    "constraint_count": 5,
+    "contract_hash": "6358733aad",
+    "contract_shape": "json_object",
+    "few_shot_count": 1,
+    "mission": "For one flagged issue, produce a single replacement that resolves the defect while preserving the original intent and scope.",
+    "name": "refinement.suggestion",
+    "role_opening": "You are a requirements engineer fixing defects in Functional Specifications"
+  },
+  "reverse.fs_sections": {
+    "constraint_count": 9,
+    "contract_hash": "31e1093a0d",
+    "contract_shape": "markdown",
+    "few_shot_count": 0,
+    "mission": "Write a complete FS section for one feature using the exact structure below, based on the inferred module behaviours.",
+    "name": "reverse.fs_sections",
+    "role_opening": "You are a senior technical writer producing a Functional Specification from code analysis"
+  },
+  "reverse.module_summary": {
+    "constraint_count": 5,
+    "contract_hash": "0192b6aff9",
+    "contract_shape": "json_object",
+    "few_shot_count": 0,
+    "mission": "Summarise one source file into a single, strictly-shaped module record suitable for downstream FS generation.",
+    "name": "reverse.module_summary",
+    "role_opening": "You are a code archaeologist reverse-engineering a codebase into documentation"
+  },
+  "reverse.user_flows": {
+    "constraint_count": 8,
+    "contract_hash": "732def1ab1",
+    "contract_shape": "json_array",
+    "few_shot_count": 0,
+    "mission": "From a set of module summaries, enumerate the 3-10 most valuable user flows that span multiple modules.",
+    "name": "reverse.user_flows",
+    "role_opening": "You are a software architect identifying the distinct user-facing features in a codebase by analysing module summaries"
+  }
+}

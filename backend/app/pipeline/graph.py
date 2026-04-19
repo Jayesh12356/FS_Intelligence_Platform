@@ -24,29 +24,29 @@ import json
 import logging
 import threading
 import uuid as _uuid_mod
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Callable, Dict, List
 
-from langgraph.graph import StateGraph, START, END
-from sqlalchemy import delete, select
+from langgraph.graph import END, START, StateGraph
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.pipeline.state import FSAnalysisState, FSImpactState, ReverseGenState
 from app.pipeline.nodes.ambiguity_node import ambiguity_node
-from app.pipeline.nodes.debate_node import debate_node
 from app.pipeline.nodes.contradiction_node import contradiction_node
-from app.pipeline.nodes.edge_case_node import edge_case_node
-from app.pipeline.nodes.quality_node import quality_node
-from app.pipeline.nodes.task_node import task_decomposition_node
+from app.pipeline.nodes.debate_node import debate_node
 from app.pipeline.nodes.dependency_node import dependency_node
-from app.pipeline.nodes.traceability_node import traceability_node
 from app.pipeline.nodes.duplicate_node import duplicate_node
-from app.pipeline.nodes.testcase_node import testcase_node
-from app.pipeline.nodes.version_node import version_node
+from app.pipeline.nodes.edge_case_node import edge_case_node
 from app.pipeline.nodes.impact_node import impact_node
-from app.pipeline.nodes.rework_node import rework_node
+from app.pipeline.nodes.quality_node import quality_node
 from app.pipeline.nodes.reverse_fs_node import reverse_fs_node
 from app.pipeline.nodes.reverse_quality_node import reverse_quality_node
+from app.pipeline.nodes.rework_node import rework_node
+from app.pipeline.nodes.task_node import task_decomposition_node
+from app.pipeline.nodes.testcase_node import testcase_node
+from app.pipeline.nodes.traceability_node import traceability_node
+from app.pipeline.nodes.version_node import version_node
+from app.pipeline.state import FSAnalysisState, FSImpactState, ReverseGenState
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +54,17 @@ logger = logging.getLogger(__name__)
 # ── Analysis Progress Tracking (in-memory, per document) ─
 
 ANALYSIS_NODE_ORDER = [
-    "parse_node", "ambiguity_node", "debate_node", "contradiction_node",
-    "edge_case_node", "quality_node", "task_decomposition_node",
-    "dependency_node", "traceability_node", "duplicate_node", "testcase_node",
+    "parse_node",
+    "ambiguity_node",
+    "debate_node",
+    "contradiction_node",
+    "edge_case_node",
+    "quality_node",
+    "task_decomposition_node",
+    "dependency_node",
+    "traceability_node",
+    "duplicate_node",
+    "testcase_node",
 ]
 
 ANALYSIS_NODE_LABELS: dict[str, str] = {
@@ -92,12 +100,15 @@ def get_analysis_progress(fs_id: str) -> dict | None:
 
 def _update_progress(fs_id: str, *, node: str, phase: str, log: str | None = None) -> None:
     with _analysis_progress_lock:
-        entry = _analysis_progress.setdefault(fs_id, {
-            "completed_nodes": [],
-            "current_node": None,
-            "total_nodes": len(ANALYSIS_NODE_ORDER),
-            "logs": [],
-        })
+        entry = _analysis_progress.setdefault(
+            fs_id,
+            {
+                "completed_nodes": [],
+                "current_node": None,
+                "total_nodes": len(ANALYSIS_NODE_ORDER),
+                "logs": [],
+            },
+        )
         if phase == "start":
             entry["current_node"] = node
             msg = f"Started: {ANALYSIS_NODE_LABELS.get(node, node)}"
@@ -114,7 +125,7 @@ def _update_progress(fs_id: str, *, node: str, phase: str, log: str | None = Non
         else:
             msg = log or phase
 
-        ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        ts = datetime.now(UTC).strftime("%H:%M:%S")
         entry["logs"].append(f"[{ts}] {msg}")
         if len(entry["logs"]) > 100:
             entry["logs"] = entry["logs"][-80:]
@@ -309,51 +320,84 @@ def _compute_input_hash(node_name: str, state: dict) -> str:
 
 
 async def _get_cached_result(
-    fs_id: str, node_name: str, input_hash: str, db: AsyncSession
+    fs_id: "_uuid_mod.UUID",
+    node_name: str,
+    input_hash: str,
+    db: AsyncSession,
 ) -> dict | None:
+    """Fetch a cached node result.
+
+    ``fs_id`` MUST be a :class:`uuid.UUID` instance — ``PipelineCacheDB.document_id``
+    is a ``UUID(as_uuid=True)`` column whose SQLAlchemy bind processor calls
+    ``.hex`` on the value. Passing a ``str`` here historically raised
+    ``AttributeError: 'str' object has no attribute 'hex'`` and silently
+    disabled the entire pipeline cache; see ``tests/test_pipeline_cache_roundtrip``.
+    """
     from app.db.models import PipelineCacheDB
-    row = (await db.execute(
-        select(PipelineCacheDB).where(
-            PipelineCacheDB.document_id == fs_id,
-            PipelineCacheDB.node_name == node_name,
-            PipelineCacheDB.input_hash == input_hash,
+
+    row = (
+        await db.execute(
+            select(PipelineCacheDB).where(
+                PipelineCacheDB.document_id == fs_id,
+                PipelineCacheDB.node_name == node_name,
+                PipelineCacheDB.input_hash == input_hash,
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if not row:
         return None
-    if row.expires_at and row.expires_at < datetime.now(timezone.utc):
-        await db.delete(row)
-        await db.commit()
-        return None
+    # SQLite does not persist tzinfo, so rows may come back naive. Treat
+    # naive datetimes as UTC so comparison with ``datetime.now(UTC)``
+    # stays correct on both Postgres and SQLite.
+    if row.expires_at:
+        expiry = row.expires_at
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=UTC)
+        if expiry < datetime.now(UTC):
+            await db.delete(row)
+            await db.commit()
+            return None
     return row.result_data
 
 
 async def _set_cache(
-    fs_id: str, node_name: str, input_hash: str, result_data: dict, db: AsyncSession
+    fs_id: "_uuid_mod.UUID",
+    node_name: str,
+    input_hash: str,
+    result_data: dict,
+    db: AsyncSession,
 ) -> None:
+    """Write (or refresh) a cached node result. See ``_get_cached_result`` for the
+    UUID contract."""
     from app.db.models import PipelineCacheDB
-    existing = (await db.execute(
-        select(PipelineCacheDB).where(
-            PipelineCacheDB.document_id == fs_id,
-            PipelineCacheDB.node_name == node_name,
+
+    existing = (
+        await db.execute(
+            select(PipelineCacheDB).where(
+                PipelineCacheDB.document_id == fs_id,
+                PipelineCacheDB.node_name == node_name,
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if existing:
         existing.input_hash = input_hash
         existing.result_data = result_data
-        existing.created_at = datetime.now(timezone.utc)
-        existing.expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+        existing.created_at = datetime.now(UTC)
+        existing.expires_at = datetime.now(UTC) + timedelta(hours=24)
     else:
         import uuid as _uuid
-        db.add(PipelineCacheDB(
-            id=_uuid.uuid4(),
-            document_id=fs_id,
-            node_name=node_name,
-            input_hash=input_hash,
-            result_data=result_data,
-            created_at=datetime.now(timezone.utc),
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
-        ))
+
+        db.add(
+            PipelineCacheDB(
+                id=_uuid.uuid4(),
+                document_id=fs_id,
+                node_name=node_name,
+                input_hash=input_hash,
+                result_data=result_data,
+                created_at=datetime.now(UTC),
+                expires_at=datetime.now(UTC) + timedelta(hours=24),
+            )
+        )
     await db.commit()
 
 
@@ -375,19 +419,19 @@ async def _load_project_context(fs_id: str, db: AsyncSession) -> List[Dict[str, 
     """Load summaries of sibling documents in the same project for context."""
     from app.db.models import FSDocument, FSDocumentStatus
 
-    doc_result = await db.execute(
-        select(FSDocument).where(FSDocument.id == _uuid_mod.UUID(fs_id))
-    )
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == _uuid_mod.UUID(fs_id)))
     doc = doc_result.scalar_one_or_none()
     if not doc or not doc.project_id:
         return []
 
     siblings_result = await db.execute(
-        select(FSDocument).where(
+        select(FSDocument)
+        .where(
             FSDocument.project_id == doc.project_id,
             FSDocument.id != doc.id,
             FSDocument.status.in_([FSDocumentStatus.COMPLETE, FSDocumentStatus.PARSED]),
-        ).order_by(FSDocument.order_in_project)
+        )
+        .order_by(FSDocument.order_in_project)
     )
     siblings = siblings_result.scalars().all()
     if not siblings:
@@ -396,15 +440,19 @@ async def _load_project_context(fs_id: str, db: AsyncSession) -> List[Dict[str, 
     context = []
     for sib in siblings:
         text_preview = (sib.parsed_text or "")[:2000]
-        context.append({
-            "document_id": str(sib.id),
-            "filename": sib.filename,
-            "status": sib.status.value if hasattr(sib.status, "value") else str(sib.status),
-            "text_preview": text_preview,
-        })
+        context.append(
+            {
+                "document_id": str(sib.id),
+                "filename": sib.filename,
+                "status": sib.status.value if hasattr(sib.status, "value") else str(sib.status),
+                "text_preview": text_preview,
+            }
+        )
     logger.info(
         "Loaded project context: %d sibling docs for fs_id=%s (project=%s)",
-        len(context), fs_id, doc.project_id,
+        len(context),
+        fs_id,
+        doc.project_id,
     )
     return context
 
@@ -448,7 +496,8 @@ async def run_analysis_pipeline(
         sections = [s for s in sections if s.get("section_index") in changed_indices]
         logger.info(
             "Selective analysis: restricted to %d sections (%s)",
-            len(sections), sorted(changed_indices),
+            len(sections),
+            sorted(changed_indices),
         )
 
     project_context: List[Dict[str, Any]] = []
@@ -477,7 +526,9 @@ async def run_analysis_pipeline(
 
     logger.info(
         "Starting analysis pipeline for fs_id=%s (%d sections, %d project context docs)",
-        fs_id, len(sections), len(project_context),
+        fs_id,
+        len(sections),
+        len(project_context),
     )
 
     with _analysis_progress_lock:
@@ -503,11 +554,18 @@ async def run_analysis_pipeline(
         }
         state = dict(initial_state)
         cache_hits = 0
+        # Parse ``fs_id`` into a real ``uuid.UUID`` object. The cache columns
+        # use ``UUID(as_uuid=True)`` and the SQLAlchemy bind processor calls
+        # ``.hex`` on the bound value — passing a string silently disables the
+        # entire cache with an ``AttributeError``.
+        import uuid as _uuid
+
         try:
-            fs_uuid = str(fs_id)
-            import uuid as _uuid
-            _uuid.UUID(fs_uuid)
-        except (ValueError, AttributeError):
+            if isinstance(fs_id, _uuid.UUID):
+                fs_uuid = fs_id
+            else:
+                fs_uuid = _uuid.UUID(str(fs_id))
+        except (ValueError, AttributeError, TypeError):
             fs_uuid = None
 
         for node_name in node_order:
@@ -606,7 +664,11 @@ async def run_impact_pipeline(
 
     logger.info(
         "Starting impact pipeline for fs_id=%s version=%s (%d old sections, %d new sections, %d tasks)",
-        fs_id, version_id, len(old_sections), len(new_sections), len(tasks),
+        fs_id,
+        version_id,
+        len(old_sections),
+        len(new_sections),
+        len(tasks),
     )
 
     result = await graph.ainvoke(initial_state)
@@ -650,7 +712,8 @@ async def run_reverse_pipeline(
 
     logger.info(
         "Starting reverse pipeline for code_upload_id=%s (%d files)",
-        code_upload_id, snapshot.get("total_files", 0),
+        code_upload_id,
+        snapshot.get("total_files", 0),
     )
 
     result = await graph.ainvoke(initial_state)

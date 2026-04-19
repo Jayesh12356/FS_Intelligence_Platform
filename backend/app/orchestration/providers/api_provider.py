@@ -22,6 +22,7 @@ class APIProvider(ExecutionProvider):
         **kwargs: Any,
     ) -> str:
         from app.llm import get_llm_client
+
         client = get_llm_client()
         return await client.call_llm(
             prompt=prompt,
@@ -37,6 +38,7 @@ class APIProvider(ExecutionProvider):
     async def check_health(self) -> bool:
         try:
             from app.llm import get_llm_client
+
             client = get_llm_client()
             return await client.check_health()
         except Exception:

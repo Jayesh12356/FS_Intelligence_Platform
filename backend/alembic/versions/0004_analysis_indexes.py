@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from alembic import op
 
-
 # revision identifiers, used by Alembic.
 revision = "0004_analysis_indexes"
 down_revision = "0003_duplicate_flag_fk"
@@ -33,11 +32,13 @@ _INDEXES = [
 
 def _table_exists(bind, name: str) -> bool:
     from sqlalchemy import inspect
+
     return name in inspect(bind).get_table_names()
 
 
 def _index_exists(bind, table: str, name: str) -> bool:
     from sqlalchemy import inspect
+
     try:
         existing = {ix["name"] for ix in inspect(bind).get_indexes(table)}
     except Exception:

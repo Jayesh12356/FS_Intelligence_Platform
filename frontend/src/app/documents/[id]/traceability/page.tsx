@@ -205,7 +205,12 @@ export default function TraceabilityPage() {
 
         {sectionRows.length > 0 && taskCols.length > 0 ? (
           <FadeIn delay={0.06}>
-            <div className="table-wrap">
+            <div
+              className="table-wrap"
+              tabIndex={0}
+              role="region"
+              aria-label="Traceability matrix"
+            >
               <table id="traceability-table">
                 <thead>
                   <tr>

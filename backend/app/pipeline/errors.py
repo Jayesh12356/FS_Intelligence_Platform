@@ -7,7 +7,7 @@ structured record that can be surfaced by the analysis progress endpoint.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Dict
 
 
@@ -17,7 +17,7 @@ class NodeError:
     message: str
     exc_type: str = ""
     section_index: int | None = None
-    at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def to_dict(self) -> Dict[str, Any]:
         return {

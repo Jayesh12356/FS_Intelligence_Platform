@@ -5,6 +5,7 @@ import os
 import tempfile
 import uuid
 from typing import AsyncGenerator
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -19,6 +20,31 @@ from app.db.base import Base, get_db
 from app.main import app
 
 
+@pytest.fixture(autouse=True)
+def _default_llm_provider_is_api():
+    """Default every test's orchestration provider to ``api``.
+
+    Tests that need a different provider should monkeypatch
+    ``app.orchestration.config_resolver.get_configured_llm_provider_name``
+    (and, for idea_router, its local binding) explicitly. This fixture
+    just prevents leakage from a real database that might have
+    ``llm_provider=cursor`` saved — without it, route branching would
+    divert tests to the Cursor paste-per-action flow.
+    """
+    mock = AsyncMock(return_value="api")
+    with (
+        patch(
+            "app.orchestration.config_resolver.get_configured_llm_provider_name",
+            new=mock,
+        ),
+        patch(
+            "app.api.idea_router.get_configured_llm_provider_name",
+            new=mock,
+        ),
+    ):
+        yield
+
+
 @pytest.fixture(scope="session")
 def event_loop():
     """Create an event loop for the test session."""
@@ -30,9 +56,7 @@ def event_loop():
 @pytest_asyncio.fixture(scope="function")
 async def test_db() -> AsyncGenerator[AsyncSession, None]:
     """Create a fresh test database for each test."""
-    temp_db_path = os.path.join(
-        tempfile.gettempdir(), f"fs_intel_test_{uuid.uuid4().hex}.db"
-    )
+    temp_db_path = os.path.join(tempfile.gettempdir(), f"fs_intel_test_{uuid.uuid4().hex}.db")
     test_database_url = f"sqlite+aiosqlite:///{temp_db_path}"
     engine = create_async_engine(test_database_url, echo=False)
 

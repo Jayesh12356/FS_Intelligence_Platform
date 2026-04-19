@@ -1,10 +1,32 @@
-"""Cursor Provider — MCP-driven analysis and builds from the Cursor IDE.
+"""Cursor Provider — paste-per-action LLM and build agent.
 
-Cursor connects to our MCP server and drives the full workflow:
-analysis, refinement, task decomposition, and builds. When selected as
-the LLM provider, server-side LLM calls are delegated through Direct API
-(same engine the MCP tools use), while Cursor's agent orchestrates the flow.
+Cursor is invoked exactly once per user action via the paste-per-action
+flow (see :mod:`app.api.cursor_task_router`):
+
+1. UI click for Generate FS / Analyze / Reverse FS mints a
+   :class:`CursorTaskDB` row and returns its prompt.
+2. The user pastes that prompt into the Cursor IDE chat.
+3. Cursor's agent uses the MCP tools (``claim_cursor_task``,
+   ``submit_generate_fs`` / ``submit_analyze`` / ``submit_reverse_fs``)
+   to return the result.
+
+For the Build step, Cursor is still driven by the kickoff prompt on the
+Build page via ``mcp-server/tools/build.py``.
+
+Design invariant
+----------------
+
+``CursorProvider.call_llm`` must **never** execute an LLM call, even
+indirectly. The pipeline's ``pipeline_llm.call_llm`` is a synchronous
+per-node helper and cannot be adapted to a single-shot paste flow; the
+correct behaviour for ``provider == "cursor"`` is for the route handler
+to branch *before* touching the pipeline and return a task envelope
+instead. If anything ever reaches ``call_llm`` while Cursor is selected,
+we raise loudly so the token leak is obvious rather than silently
+falling back to the Direct API.
 """
+
+from __future__ import annotations
 
 import logging
 from typing import Any
@@ -14,21 +36,28 @@ from app.orchestration.base import BuildResult, ExecutionProvider
 logger = logging.getLogger(__name__)
 
 
-class CursorProvider(ExecutionProvider):
-    """Cursor connects to our MCP server for analysis and builds.
+class CursorLLMUnsupported(RuntimeError):
+    """Raised whenever :meth:`CursorProvider.call_llm` is invoked.
 
-    When selected as the LLM provider, backend pipeline LLM calls are
-    routed through Direct API (the same path MCP tools use internally),
-    while Cursor's agent drives the orchestration via MCP tools.
+    Cursor answers LLM work through the paste-per-action flow, not
+    through :func:`pipeline_llm.call_llm`. Any caller reaching this
+    provider's ``call_llm`` represents a routing bug that would
+    otherwise silently fall back to another provider.
     """
 
+
+class CursorProvider(ExecutionProvider):
+    """Cursor IDE provider — paste-per-action Document LLM + Build."""
+
     name = "cursor"
-    display_name = "Cursor (IDE Agent + Plan Mode)"
+    display_name = "Cursor (paste-per-action via MCP)"
     capabilities = ["llm", "build"]
     llm_selectable = True
     health_note = (
-        "Checks backend MCP endpoint. Cursor drives analysis and builds "
-        "via MCP tools; server-side LLM calls use Direct API as the engine."
+        "Cursor runs Generate FS / Analyze / Reverse FS via one "
+        "paste per action: the platform shows a ready-to-paste prompt, "
+        "you drop it into Cursor, and Cursor submits the result through "
+        "the MCP tool. Also drives Build via the Build page kickoff."
     )
 
     async def call_llm(
@@ -39,20 +68,14 @@ class CursorProvider(ExecutionProvider):
         temperature: float = 0.0,
         **kwargs: Any,
     ) -> str:
-        """Route LLM calls through Direct API when Cursor is the selected provider.
+        """Unsupported — Cursor LLM is paste-per-action only."""
 
-        Cursor's agent drives the workflow via MCP tools. Those tools trigger
-        backend endpoints that need LLM calls — this method handles them by
-        delegating to Direct API, which is the same engine the MCP tools use.
-        """
-        from app.llm import get_llm_client
-        client = get_llm_client()
-        return await client.call_llm(
-            prompt=prompt,
-            system=system,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            role=kwargs.get("role", "primary"),
+        raise CursorLLMUnsupported(
+            "Cursor must be invoked via the paste-per-action flow "
+            "(create a CursorTask and submit via MCP). pipeline_llm "
+            "should not route to CursorProvider.call_llm — check that "
+            "the route handler branches on llm_provider before calling "
+            "the pipeline."
         )
 
     async def build_task(
@@ -61,13 +84,6 @@ class CursorProvider(ExecutionProvider):
         output_folder: str,
         **kwargs: Any,
     ) -> BuildResult:
-        """Cursor build tasks are executed via MCP tool calls from Cursor's agent.
-
-        The platform generates the build prompt and Cursor's agent mode executes it,
-        calling our MCP server's tools (register_file, verify_task_completion, etc.).
-        This method returns a placeholder — the actual execution happens through the
-        MCP protocol initiated by the user in Cursor.
-        """
         logger.info(
             "Cursor build task prepared for: %s (execute via Cursor agent mode)",
             task_context.get("title", "Unknown"),
@@ -78,23 +94,7 @@ class CursorProvider(ExecutionProvider):
         )
 
     async def check_health(self) -> bool:
-        """Cursor health is determined by whether the MCP server can be reached.
-
-        Since Cursor connects TO our MCP server (not the other way around),
-        we check if the MCP monitoring endpoint is responsive. The base URL
-        is pulled from ``settings.BACKEND_SELF_URL`` (falling back to
-        ``http://localhost:8000``) so deployments can configure it.
-        """
-        try:
-            import httpx
-
-            from app.config import get_settings
-
-            settings = get_settings()
-            base = getattr(settings, "BACKEND_SELF_URL", None) or "http://localhost:8000"
-            async with httpx.AsyncClient(timeout=5) as client:
-                resp = await client.get(f"{base.rstrip('/')}/api/mcp/sessions")
-                return resp.status_code == 200
-        except Exception as exc:
-            logger.debug("CursorProvider health check failed: %s", exc)
-            return False
+        # Paste-per-action has no long-running component to health-check.
+        # Returning True lets the Settings page show Cursor as selectable
+        # without probing a non-existent worker process.
+        return True

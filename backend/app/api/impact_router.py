@@ -6,25 +6,29 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.db.audit import log_audit_event
 from app.db.base import get_db
 from app.db.models import (
     AuditEventType,
-    ChangeType as ChangeTypeDB,
     FSChangeDB,
     FSDocument,
     FSDocumentStatus,
     FSTaskDB,
     FSVersion,
-    ImpactType as ImpactTypeDB,
     ReworkEstimateDB,
     TaskImpactDB,
 )
-from app.db.audit import log_audit_event
+from app.db.models import (
+    ChangeType as ChangeTypeDB,
+)
+from app.db.models import (
+    ImpactType as ImpactTypeDB,
+)
 from app.models.schemas import (
     APIResponse,
     DiffResponse,
@@ -47,24 +51,30 @@ ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 # ── Version Upload ──────────────────────────────────────
 
 
-@router.post("/{doc_id}/version", response_model=APIResponse[FSVersionSchema])
+@router.post("/{doc_id}/version", response_model=APIResponse)
 async def upload_version(
     doc_id: uuid.UUID,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-) -> APIResponse[FSVersionSchema]:
+) -> APIResponse:
     """Upload a new version of an existing FS document.
 
     Stores as new FSVersion row, runs parser on new version,
     then triggers the impact analysis pipeline (diff → impact → rework).
+
+    When ``llm_provider == "cursor"``, the impact pipeline is skipped.
+    Instead we parse + persist the version and then mint a Cursor task
+    whose prompt asks the agent to compare the two FS markdown blobs
+    and submit an impact JSON via the ``submit_impact`` MCP tool. The
+    caller receives ``{mode: "cursor_task", ...}`` so the UI can open
+    the paste-per-action modal — no Direct-API tokens are burned.
     """
+    from app.orchestration.config_resolver import get_configured_llm_provider_name
     from app.parsers.router import parse_document as do_parse
     from app.pipeline.graph import run_impact_pipeline
 
     # Validate document exists
-    result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -74,6 +84,8 @@ async def upload_version(
             status_code=400,
             detail=f"Document must be parsed/analyzed before uploading a new version. Current status: {doc.status.value}",
         )
+
+    provider = (await get_configured_llm_provider_name()) or "api"
 
     # Validate file extension
     if file.filename:
@@ -86,9 +98,7 @@ async def upload_version(
 
     # Determine version number
     versions_result = await db.execute(
-        select(FSVersion)
-        .where(FSVersion.fs_id == doc_id)
-        .order_by(FSVersion.version_number.desc())
+        select(FSVersion).where(FSVersion.fs_id == doc_id).order_by(FSVersion.version_number.desc())
     )
     existing_versions = versions_result.scalars().all()
     new_version_number = (existing_versions[0].version_number + 1) if existing_versions else 2
@@ -172,6 +182,7 @@ async def upload_version(
     # We need to get the structured sections, not just text
     # Use the stored parsed_text to re-chunk
     from app.parsers.chunker import chunk_text_into_sections
+
     old_sections = chunk_text_into_sections(old_parsed_text)
     new_sections = [
         {
@@ -183,11 +194,7 @@ async def upload_version(
     ]
 
     # Load existing tasks for impact analysis
-    tasks_result = await db.execute(
-        select(FSTaskDB)
-        .where(FSTaskDB.fs_id == doc_id)
-        .order_by(FSTaskDB.order)
-    )
+    tasks_result = await db.execute(select(FSTaskDB).where(FSTaskDB.fs_id == doc_id).order_by(FSTaskDB.order))
     existing_tasks = tasks_result.scalars().all()
     task_dicts = [
         {
@@ -202,7 +209,62 @@ async def upload_version(
         for t in existing_tasks
     ]
 
-    # Run impact pipeline
+    # When Cursor is the active provider, stop before the LLM-driven
+    # impact pipeline and mint a paste-per-action task. The version row
+    # is already persisted; the Cursor agent will submit the impact
+    # JSON via the ``submit_impact`` MCP tool.
+    if provider == "cursor":
+        from app.db.models import (
+            CursorTaskDB,
+            CursorTaskKind,
+            CursorTaskStatus,
+        )
+        from app.orchestration.cursor_prompts import (
+            build_impact_prompt,
+            build_mcp_snippet,
+        )
+
+        task_id = uuid.uuid4()
+        task_prompt = build_impact_prompt(
+            task_id=task_id,
+            old_fs_text=old_parsed_text,
+            new_fs_text=new_parsed_text,
+        )
+        task = CursorTaskDB(
+            id=task_id,
+            kind=CursorTaskKind.IMPACT,
+            status=CursorTaskStatus.PENDING,
+            related_id=doc_id,
+            input_payload={
+                "doc_id": str(doc_id),
+                "version_id": str(version.id),
+                "version_number": new_version_number,
+            },
+            prompt_text=task_prompt,
+        )
+        db.add(task)
+        await db.commit()
+        await db.refresh(task)
+        logger.info(
+            "Version v%d impact branched to Cursor paste task %s (doc=%s)",
+            new_version_number,
+            task.id,
+            doc_id,
+        )
+        return APIResponse(
+            data={
+                "mode": "cursor_task",
+                "task_id": str(task.id),
+                "kind": "impact",
+                "prompt": task.prompt_text,
+                "mcp_snippet": build_mcp_snippet(),
+                "status": task.status.value.lower(),
+                "version_id": str(version.id),
+                "version_number": new_version_number,
+            }
+        )
+
+    # Run impact pipeline (api / claude_code)
     try:
         impact_result = await run_impact_pipeline(
             fs_id=str(doc_id),
@@ -219,9 +281,7 @@ async def upload_version(
     # Persist impact results
     # Delete existing impact data for this version
     for model_class in [FSChangeDB, TaskImpactDB, ReworkEstimateDB]:
-        existing = await db.execute(
-            select(model_class).where(model_class.version_id == version.id)
-        )
+        existing = await db.execute(select(model_class).where(model_class.version_id == version.id))
         for row in existing.scalars().all():
             await db.delete(row)
 
@@ -247,7 +307,9 @@ async def upload_version(
         db.add(change_db)
 
     # Generate diff summary
-    from app.pipeline.nodes.version_node import generate_diff_summary, FSChange as FSChangeModel
+    from app.pipeline.nodes.version_node import FSChange as FSChangeModel
+    from app.pipeline.nodes.version_node import generate_diff_summary
+
     change_models = []
     for c in changes:
         try:
@@ -296,7 +358,9 @@ async def upload_version(
 
     # Log audit event (L9)
     await log_audit_event(
-        db, doc_id, AuditEventType.VERSION_ADDED,
+        db,
+        doc_id,
+        AuditEventType.VERSION_ADDED,
         payload={
             "version_number": new_version_number,
             "changes_count": len(changes),
@@ -306,7 +370,10 @@ async def upload_version(
 
     logger.info(
         "Version %d uploaded for document %s: %d changes, %d impacts",
-        new_version_number, doc_id, len(changes), len(task_impacts),
+        new_version_number,
+        doc_id,
+        len(changes),
+        len(task_impacts),
     )
 
     return APIResponse(
@@ -328,17 +395,13 @@ async def list_versions(
 ) -> APIResponse[FSVersionListResponse]:
     """List all versions for a document."""
     # Verify document exists
-    doc_result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = doc_result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
     result = await db.execute(
-        select(FSVersion)
-        .where(FSVersion.fs_id == doc_id)
-        .order_by(FSVersion.version_number.asc())
+        select(FSVersion).where(FSVersion.fs_id == doc_id).order_by(FSVersion.version_number.asc())
     )
     versions = result.scalars().all()
 
@@ -356,13 +419,17 @@ async def get_version_text(
     db: AsyncSession = Depends(get_db),
 ):
     """Get the full text of a specific version."""
-    result = await db.execute(
-        select(FSVersion).where(FSVersion.id == version_id, FSVersion.fs_id == doc_id)
-    )
+    result = await db.execute(select(FSVersion).where(FSVersion.id == version_id, FSVersion.fs_id == doc_id))
     version = result.scalar_one_or_none()
     if not version:
         raise HTTPException(status_code=404, detail="Version not found")
-    return {"data": {"id": str(version.id), "version_number": version.version_number, "parsed_text": version.parsed_text or ""}}
+    return {
+        "data": {
+            "id": str(version.id),
+            "version_number": version.version_number,
+            "parsed_text": version.parsed_text or "",
+        }
+    }
 
 
 @router.post("/{doc_id}/versions/{version_id}/revert")
@@ -372,9 +439,7 @@ async def revert_to_version(
     db: AsyncSession = Depends(get_db),
 ):
     """Revert document text to a specific version."""
-    ver_result = await db.execute(
-        select(FSVersion).where(FSVersion.id == version_id, FSVersion.fs_id == doc_id)
-    )
+    ver_result = await db.execute(select(FSVersion).where(FSVersion.id == version_id, FSVersion.fs_id == doc_id))
     version = ver_result.scalar_one_or_none()
     if not version:
         raise HTTPException(status_code=404, detail="Version not found")
@@ -385,7 +450,27 @@ async def revert_to_version(
         raise HTTPException(status_code=404, detail="Document not found")
 
     doc.parsed_text = version.parsed_text
-    doc.status = FSDocumentStatus.PARSED
+    # No-demotion guarantee: once a doc has been COMPLETE, reverting the
+    # spec text preserves that status and merely flags the analysis as
+    # stale so the UI can prompt for a re-analyze. We only demote to
+    # PARSED if the doc had not yet reached COMPLETE.
+    if doc.status == FSDocumentStatus.COMPLETE:
+        doc.analysis_stale = True
+    else:
+        doc.status = FSDocumentStatus.PARSED
+    try:
+        await log_audit_event(
+            db,
+            doc_id,
+            AuditEventType.VERSION_REVERTED,
+            payload={
+                "to_version": version.version_number,
+                "version_id": str(version_id),
+                "stale": bool(getattr(doc, "analysis_stale", False)),
+            },
+        )
+    except Exception:
+        logger.exception("audit emit failed for revert_to_version doc=%s", doc_id)
     await db.commit()
     return {"data": {"reverted": True, "version_number": version.version_number}}
 
@@ -413,9 +498,7 @@ async def get_version_diff(
 
     # Load changes for this version
     changes_result = await db.execute(
-        select(FSChangeDB)
-        .where(FSChangeDB.version_id == version_id)
-        .order_by(FSChangeDB.section_index)
+        select(FSChangeDB).where(FSChangeDB.version_id == version_id).order_by(FSChangeDB.section_index)
     )
     changes = changes_result.scalars().all()
 
@@ -473,24 +556,18 @@ async def get_impact_analysis(
 
     # Load changes
     changes_result = await db.execute(
-        select(FSChangeDB)
-        .where(FSChangeDB.version_id == version_id)
-        .order_by(FSChangeDB.section_index)
+        select(FSChangeDB).where(FSChangeDB.version_id == version_id).order_by(FSChangeDB.section_index)
     )
     changes = changes_result.scalars().all()
 
     # Load task impacts
     impacts_result = await db.execute(
-        select(TaskImpactDB)
-        .where(TaskImpactDB.version_id == version_id)
-        .order_by(TaskImpactDB.created_at)
+        select(TaskImpactDB).where(TaskImpactDB.version_id == version_id).order_by(TaskImpactDB.created_at)
     )
     impacts = impacts_result.scalars().all()
 
     # Load rework estimate
-    rework_result = await db.execute(
-        select(ReworkEstimateDB).where(ReworkEstimateDB.version_id == version_id)
-    )
+    rework_result = await db.execute(select(ReworkEstimateDB).where(ReworkEstimateDB.version_id == version_id))
     rework = rework_result.scalar_one_or_none()
 
     change_schemas = [
@@ -568,9 +645,7 @@ async def get_rework_estimate(
         raise HTTPException(status_code=404, detail="Version not found")
 
     # Load rework estimate
-    rework_result = await db.execute(
-        select(ReworkEstimateDB).where(ReworkEstimateDB.version_id == version_id)
-    )
+    rework_result = await db.execute(select(ReworkEstimateDB).where(ReworkEstimateDB.version_id == version_id))
     rework = rework_result.scalar_one_or_none()
 
     rework_schema = ReworkEstimateSchema(

@@ -35,6 +35,7 @@ router = APIRouter(prefix="/api/fs", tags=["tasks"])
 
 class TaskUpdateBody(BaseModel):
     """Body for PATCH task update (manual editing)."""
+
     title: str | None = None
     description: str | None = None
     effort: str | None = None
@@ -53,9 +54,7 @@ async def list_tasks(
 ) -> APIResponse[TaskListResponse]:
     """List all tasks for a document, ordered by execution order."""
     result = await db.execute(
-        select(FSTaskDB)
-        .where(FSTaskDB.fs_id == doc_id)
-        .order_by(FSTaskDB.order, FSTaskDB.section_index)
+        select(FSTaskDB).where(FSTaskDB.fs_id == doc_id).order_by(FSTaskDB.order, FSTaskDB.section_index)
     )
     rows = result.scalars().all()
 
@@ -78,9 +77,7 @@ async def list_tasks(
         for r in rows
     ]
 
-    return APIResponse(
-        data=TaskListResponse(tasks=schemas, total=len(schemas))
-    )
+    return APIResponse(data=TaskListResponse(tasks=schemas, total=len(schemas)))
 
 
 @router.get("/{doc_id}/tasks/dependency-graph", response_model=APIResponse[DependencyGraphResponse])
@@ -89,11 +86,7 @@ async def get_dependency_graph(
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[DependencyGraphResponse]:
     """Get the dependency graph for a document's tasks as an adjacency list."""
-    result = await db.execute(
-        select(FSTaskDB)
-        .where(FSTaskDB.fs_id == doc_id)
-        .order_by(FSTaskDB.order)
-    )
+    result = await db.execute(select(FSTaskDB).where(FSTaskDB.fs_id == doc_id).order_by(FSTaskDB.order))
     rows = result.scalars().all()
 
     nodes = [r.task_id for r in rows]
@@ -179,6 +172,7 @@ async def update_task(
         row.description = body.description
     if body.effort is not None:
         from app.db.models import EffortLevel
+
         try:
             row.effort = EffortLevel(body.effort.upper())
         except ValueError:
@@ -225,9 +219,7 @@ async def get_traceability(
 ) -> APIResponse[TraceabilityResponse]:
     """Get full traceability matrix for a document."""
     # Verify document exists
-    doc_result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = doc_result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")

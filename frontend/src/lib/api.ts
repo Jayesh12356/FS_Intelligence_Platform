@@ -56,6 +56,13 @@ export interface FSDocumentDetail extends FSDocumentResponse {
   parsed_text: string | null;
   file_path: string | null;
   sections: FSSection[] | null;
+  /**
+   * True when the FS body changed (refine / accept-suggestion / accept-edge-case
+   * / accept-contradiction) after the last successful analyze. The Build CTA
+   * stays available; the document detail page surfaces a soft "Re-analyze
+   * to refresh metrics" banner so the user can re-run analysis on demand.
+   */
+  analysis_stale?: boolean;
 }
 
 export interface UploadResponse {
@@ -355,11 +362,12 @@ export async function resetDocumentStatus(
  * edge cases, and compute quality scores.
  */
 export async function analyzeDocument(
-  id: string
-): Promise<APIResponse<AnalysisResponse>> {
-  return apiFetch<AnalysisResponse>(`/api/fs/${id}/analyze`, {
-    method: "POST",
-  });
+  id: string,
+): Promise<APIResponse<AnalysisResponse | CursorTaskEnvelope>> {
+  return apiFetch<AnalysisResponse | CursorTaskEnvelope>(
+    `/api/fs/${id}/analyze`,
+    { method: "POST" },
+  );
 }
 
 // ── Analysis Progress ──────────────────────────────────
@@ -535,10 +543,13 @@ export async function getQualityDashboard(
 
 export async function refineDocument(
   id: string
-): Promise<APIResponse<RefinementResponse>> {
-  return apiFetch<RefinementResponse>(`/api/fs/${id}/refine`, {
-    method: "POST",
-  });
+): Promise<APIResponse<RefinementResponse | CursorTaskEnvelope>> {
+  return apiFetch<RefinementResponse | CursorTaskEnvelope>(
+    `/api/fs/${id}/refine`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export async function acceptRefinedDocument(
@@ -750,14 +761,17 @@ export interface ReworkResponseData {
 export async function uploadVersion(
   docId: string,
   file: File
-): Promise<APIResponse<FSVersionItem>> {
+): Promise<APIResponse<FSVersionItem | CursorTaskEnvelope>> {
   const formData = new FormData();
   formData.append("file", file);
 
-  return apiFetch<FSVersionItem>(`/api/fs/${docId}/version`, {
-    method: "POST",
-    body: formData,
-  });
+  return apiFetch<FSVersionItem | CursorTaskEnvelope>(
+    `/api/fs/${docId}/version`,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
 }
 
 /**
@@ -937,11 +951,12 @@ export async function getCodeUploadDetail(
  * Trigger reverse FS generation. (L8)
  */
 export async function generateFS(
-  id: string
-): Promise<APIResponse<GeneratedFSData>> {
-  return apiFetch<GeneratedFSData>(`/api/code/${id}/generate-fs`, {
-    method: "POST",
-  });
+  id: string,
+): Promise<APIResponse<GeneratedFSData | CursorTaskEnvelope>> {
+  return apiFetch<GeneratedFSData | CursorTaskEnvelope>(
+    `/api/code/${id}/generate-fs`,
+    { method: "POST" },
+  );
 }
 
 /**
@@ -1219,6 +1234,10 @@ export interface ActivityLogEntry {
   detail: string | null;
   user_id: string;
   created_at: string | null;
+  /** "document" | "analysis" | "build" | "collab" — used for color chips. */
+  category?: string;
+  /** Raw payload — only present when called with include_payload=true. */
+  payload?: Record<string, unknown> | null;
 }
 
 export interface ActivityLogData {
@@ -1226,16 +1245,55 @@ export interface ActivityLogData {
   total: number;
 }
 
+/**
+ * Fetch the activity-log timeline. The legacy positional signature is
+ * preserved for callers that pass numbers/strings directly; new callers
+ * are encouraged to use the options-object form so they can target a
+ * single document via ``fsId`` (powers the per-doc Lifecycle strip).
+ */
 export async function getActivityLog(
-  limit: number = 50,
+  arg1?:
+    | number
+    | {
+        limit?: number;
+        offset?: number;
+        eventType?: string;
+        documentName?: string;
+        fsId?: string;
+        category?: string;
+        includePayload?: boolean;
+      },
   offset: number = 0,
   eventType?: string,
-  documentName?: string
+  documentName?: string,
 ): Promise<APIResponse<ActivityLogData>> {
-  let url = `/api/activity-log?limit=${limit}&offset=${offset}`;
-  if (eventType) url += `&event_type=${encodeURIComponent(eventType)}`;
-  if (documentName) url += `&document_name=${encodeURIComponent(documentName)}`;
-  return apiFetch<ActivityLogData>(url);
+  let limit = 50;
+  let off = offset;
+  let evt = eventType;
+  let docName = documentName;
+  let fsId: string | undefined;
+  let category: string | undefined;
+  let includePayload = false;
+  if (typeof arg1 === "object" && arg1 !== null) {
+    limit = arg1.limit ?? 50;
+    off = arg1.offset ?? 0;
+    evt = arg1.eventType;
+    docName = arg1.documentName;
+    fsId = arg1.fsId;
+    category = arg1.category;
+    includePayload = !!arg1.includePayload;
+  } else if (typeof arg1 === "number") {
+    limit = arg1;
+  }
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  params.set("offset", String(off));
+  if (evt) params.set("event_type", evt);
+  if (docName) params.set("document_name", docName);
+  if (fsId) params.set("fs_id", fsId);
+  if (category) params.set("category", category);
+  if (includePayload) params.set("include_payload", "true");
+  return apiFetch<ActivityLogData>(`/api/activity-log?${params.toString()}`);
 }
 
 // ── L10 Integrations + Polish ─────────────────────────
@@ -1487,35 +1545,6 @@ export const getMCPSessions = listMcpSessions;
 export const getMCPSessionEvents = listMcpSessionEvents;
 export const getMCPSession = getMcpSession;
 
-// ── Build Prompt ──────────────────────────────────────
-
-export interface BuildPromptSummary {
-  quality: number;
-  tasks: number;
-  sections: number;
-  blockers: number;
-  high_ambiguities: number;
-  contradictions: number;
-  edge_cases: number;
-  status: string;
-}
-
-export interface BuildPromptData {
-  prompt: string;
-  mcp_config: Record<string, unknown>;
-  summary: BuildPromptSummary;
-}
-
-export async function getBuildPrompt(
-  docId: string,
-  stack: string = "Next.js + FastAPI",
-  outputFolder: string = "./output"
-): Promise<APIResponse<BuildPromptData>> {
-  return apiFetch<BuildPromptData>(
-    `/api/fs/${docId}/build-prompt?stack=${encodeURIComponent(stack)}&output_folder=${encodeURIComponent(outputFolder)}`
-  );
-}
-
 // ── Phase 2: Idea-to-FS ──────────────────────────────
 
 export interface IdeaGenerateResponse {
@@ -1542,12 +1571,15 @@ export async function generateFSFromIdea(
   idea: string,
   industry?: string,
   complexity?: string,
-): Promise<APIResponse<IdeaGenerateResponse>> {
-  return apiFetch<IdeaGenerateResponse>("/api/idea/generate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idea, industry, complexity }),
-  });
+): Promise<APIResponse<IdeaGenerateResponse | CursorTaskEnvelope>> {
+  return apiFetch<IdeaGenerateResponse | CursorTaskEnvelope>(
+    "/api/idea/generate",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idea, industry, complexity }),
+    },
+  );
 }
 
 export async function guidedIdeaStep(
@@ -1559,12 +1591,27 @@ export async function guidedIdeaStep(
     industry?: string;
     complexity?: string;
   },
-): Promise<APIResponse<GuidedQuestionsResponse | IdeaGenerateResponse>> {
+): Promise<
+  APIResponse<
+    GuidedQuestionsResponse | IdeaGenerateResponse | CursorTaskEnvelope
+  >
+> {
   return apiFetch("/api/idea/guided", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
   });
+}
+
+/** Narrowing helper: returns true if backend returned a Cursor paste task envelope. */
+export function isCursorTaskEnvelope(
+  v: unknown,
+): v is CursorTaskEnvelope {
+  return (
+    !!v &&
+    typeof v === "object" &&
+    (v as { mode?: string }).mode === "cursor_task"
+  );
 }
 
 // ── Phase 2: Tool Orchestration ──────────────────────
@@ -1629,12 +1676,41 @@ export async function getProviderCapabilities(): Promise<APIResponse<Record<stri
   return apiFetch<Record<string, string[]>>("/api/orchestration/capabilities");
 }
 
+export interface MCPConfigSnippet {
+  path: string;
+  snippet: Record<string, unknown>;
+  install_steps: string[];
+  agent_prompt?: string;
+  cli_command?: string;
+}
+
+export interface MCPConfigBundle {
+  cursor: MCPConfigSnippet;
+  claude_code: MCPConfigSnippet;
+  notes: string;
+  document_id?: string | null;
+  stack?: string;
+  output_folder?: string;
+}
+
+export async function getMcpConfig(
+  params: { document_id?: string; stack?: string; output_folder?: string } = {},
+): Promise<APIResponse<MCPConfigBundle>> {
+  const search = new URLSearchParams();
+  if (params.document_id) search.set("document_id", params.document_id);
+  if (params.stack) search.set("stack", params.stack);
+  if (params.output_folder) search.set("output_folder", params.output_folder);
+  const qs = search.toString();
+  const path = qs ? `/api/orchestration/mcp-config?${qs}` : "/api/orchestration/mcp-config";
+  return apiFetch<MCPConfigBundle>(path);
+}
+
 // ── Build Engine ──────────────────────────────────────
 
 export interface BuildState {
   id: string;
   document_id: string;
-  status: "PENDING" | "RUNNING" | "PASSED" | "FAILED" | "CANCELLED";
+  status: "PENDING" | "RUNNING" | "PAUSED" | "COMPLETE" | "FAILED" | "CANCELLED" | "PASSED";
   current_phase: number;
   current_task_index: number;
   completed_task_ids: string[];
@@ -1664,6 +1740,71 @@ export async function getBuildState(
   return apiFetch<BuildState | null>(`/api/fs/${docId}/build-state`, { signal: opts?.signal });
 }
 
+export interface BuildPromptSummary {
+  quality: number;
+  tasks: number;
+  sections: number;
+  blockers: number;
+  high_ambiguities: number;
+  contradictions: number;
+  edge_cases: number;
+  status: string;
+}
+
+export interface BuildPromptResponse {
+  prompt: string;
+  mcp_config: Record<string, unknown>;
+  summary: BuildPromptSummary;
+}
+
+/** Fetch the rich, analysis-aware agent prompt for a document. Used by the
+ * Build page so Cursor / Claude Code receive a single comprehensive
+ * instruction (quality, task count, blockers, key MCP tools, …) rather
+ * than the bare one-liner served by `/api/orchestration/mcp-config`. */
+export async function getBuildPrompt(
+  docId: string,
+  params: { stack?: string; output_folder?: string } = {},
+  opts?: { signal?: AbortSignal },
+): Promise<APIResponse<BuildPromptResponse>> {
+  const search = new URLSearchParams();
+  if (params.stack) search.set("stack", params.stack);
+  if (params.output_folder) search.set("output_folder", params.output_folder);
+  const qs = search.toString();
+  const path = qs
+    ? `/api/fs/${docId}/build-prompt?${qs}`
+    : `/api/fs/${docId}/build-prompt`;
+  return apiFetch<BuildPromptResponse>(path, { signal: opts?.signal });
+}
+
+export interface RunBuildResponse {
+  build_state_id: string;
+  document_id: string;
+  status: string;
+  stack: string;
+  output_folder: string;
+  provider: string;
+}
+
+/** Kick off a headless Claude Code build for the document. */
+export async function runBuild(
+  docId: string,
+  params: {
+    provider?: "claude_code";
+    stack?: string;
+    output_folder?: string;
+  } = {},
+): Promise<APIResponse<RunBuildResponse>> {
+  return apiFetch<RunBuildResponse>(`/api/fs/${docId}/build/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      provider: params.provider ?? "claude_code",
+      stack: params.stack ?? "Next.js + FastAPI",
+      output_folder: params.output_folder ?? "./output",
+    }),
+  });
+}
+
 export async function listFileRegistry(
   docId: string,
   opts?: { signal?: AbortSignal },
@@ -1672,4 +1813,125 @@ export async function listFileRegistry(
     `/api/fs/${docId}/file-registry`,
     { signal: opts?.signal },
   );
+}
+
+export interface PreBuildCheckResult {
+  go: boolean;
+  checks: Record<string, { pass: boolean; [k: string]: unknown }>;
+  blockers: string[];
+  warnings: string[];
+}
+
+export async function getPreBuildCheck(
+  docId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<APIResponse<PreBuildCheckResult>> {
+  return apiFetch<PreBuildCheckResult>(`/api/fs/${docId}/pre-build-check`, {
+    signal: opts?.signal,
+  });
+}
+
+
+// ── Cursor paste-per-action tasks ────────────────────────────────
+
+export type CursorTaskKind =
+  | "generate_fs"
+  | "analyze"
+  | "reverse_fs"
+  | "refine"
+  | "impact";
+export type CursorTaskStatus =
+  | "pending"
+  | "claimed"
+  | "done"
+  | "failed"
+  | "expired";
+
+export interface CursorTaskEnvelope {
+  mode: "cursor_task";
+  task_id: string;
+  kind: CursorTaskKind;
+  prompt: string;
+  mcp_snippet: string;
+  status: CursorTaskStatus;
+}
+
+export interface CursorTaskPoll {
+  id: string;
+  kind: CursorTaskKind;
+  status: CursorTaskStatus;
+  result_ref: string | null;
+  error: string | null;
+  created_at: string;
+  claimed_at: string | null;
+  completed_at: string | null;
+}
+
+const JSON_HEADERS = { "Content-Type": "application/json" } as const;
+
+export async function createCursorTaskGenerateFS(body: {
+  idea: string;
+  industry?: string;
+  complexity?: string;
+}): Promise<APIResponse<CursorTaskEnvelope>> {
+  return apiFetch<CursorTaskEnvelope>("/api/cursor-tasks/generate-fs", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify(body),
+  });
+}
+
+export async function createCursorTaskAnalyze(
+  docId: string,
+): Promise<APIResponse<CursorTaskEnvelope>> {
+  return apiFetch<CursorTaskEnvelope>(
+    `/api/cursor-tasks/analyze/${docId}`,
+    { method: "POST", headers: JSON_HEADERS, body: "{}" },
+  );
+}
+
+export async function createCursorTaskReverseFS(
+  uploadId: string,
+): Promise<APIResponse<CursorTaskEnvelope>> {
+  return apiFetch<CursorTaskEnvelope>(
+    `/api/cursor-tasks/reverse-fs/${uploadId}`,
+    { method: "POST", headers: JSON_HEADERS, body: "{}" },
+  );
+}
+
+export async function createCursorTaskRefine(
+  docId: string,
+): Promise<APIResponse<CursorTaskEnvelope>> {
+  return apiFetch<CursorTaskEnvelope>(
+    `/api/cursor-tasks/refine/${docId}`,
+    { method: "POST", headers: JSON_HEADERS, body: "{}" },
+  );
+}
+
+export async function createCursorTaskImpact(
+  versionId: string,
+): Promise<APIResponse<CursorTaskEnvelope>> {
+  return apiFetch<CursorTaskEnvelope>(
+    `/api/cursor-tasks/impact/${versionId}`,
+    { method: "POST", headers: JSON_HEADERS, body: "{}" },
+  );
+}
+
+export async function pollCursorTask(
+  taskId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<APIResponse<CursorTaskPoll>> {
+  return apiFetch<CursorTaskPoll>(`/api/cursor-tasks/${taskId}`, {
+    signal: opts?.signal,
+  });
+}
+
+export async function cancelCursorTask(
+  taskId: string,
+): Promise<APIResponse<CursorTaskPoll>> {
+  return apiFetch<CursorTaskPoll>(`/api/cursor-tasks/${taskId}/cancel`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: "{}",
+  });
 }

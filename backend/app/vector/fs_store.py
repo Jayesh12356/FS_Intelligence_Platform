@@ -13,11 +13,11 @@ import uuid
 from typing import List
 
 from openai import OpenAI
+from qdrant_client.http import models as qdrant_models
 
 from app.config import get_settings
 from app.parsers.base import FSChunk
 from app.vector import get_qdrant_manager
-from qdrant_client.http import models as qdrant_models
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ _EMBED_BASE_URLS = {
 # Default embedding models per provider
 _DEFAULT_EMBED_MODELS = {
     "openai": "text-embedding-3-small",
-    "groq": "text-embedding-3-small",         # Groq supports OpenAI models
+    "groq": "text-embedding-3-small",  # Groq supports OpenAI models
     "openrouter": "openai/text-embedding-3-small",
 }
 
@@ -133,18 +133,20 @@ async def store_fs_chunks(fs_id: str, chunks: List[FSChunk]) -> int:
 
     # Build Qdrant points
     points: List[qdrant_models.PointStruct] = []
-    for chunk, embedding in zip(chunks, embeddings):
+    for chunk, embedding in zip(chunks, embeddings, strict=False):
         point_id = str(uuid.uuid4())
-        points.append(qdrant_models.PointStruct(
-            id=point_id,
-            vector=embedding,
-            payload={
-                "fs_id": str(fs_id),
-                "section_heading": chunk.section_heading,
-                "chunk_index": chunk.chunk_index,
-                "text": chunk.text,
-            },
-        ))
+        points.append(
+            qdrant_models.PointStruct(
+                id=point_id,
+                vector=embedding,
+                payload={
+                    "fs_id": str(fs_id),
+                    "section_heading": chunk.section_heading,
+                    "chunk_index": chunk.chunk_index,
+                    "text": chunk.text,
+                },
+            )
+        )
 
     # Upsert into Qdrant
     qdrant = get_qdrant_manager()
@@ -220,13 +222,15 @@ def search_similar_sections(
         if exclude_fs_id and hit_fs_id == str(exclude_fs_id):
             continue
 
-        matches.append({
-            "fs_id": hit_fs_id,
-            "section_heading": payload.get("section_heading", ""),
-            "text": payload.get("text", ""),
-            "score": hit.score,
-            "point_id": str(hit.id),
-        })
+        matches.append(
+            {
+                "fs_id": hit_fs_id,
+                "section_heading": payload.get("section_heading", ""),
+                "text": payload.get("text", ""),
+                "score": hit.score,
+                "point_id": str(hit.id),
+            }
+        )
 
         if len(matches) >= limit:
             break
@@ -322,14 +326,15 @@ def search_library(
     items = []
     for hit in results:
         payload = hit.payload or {}
-        items.append({
-            "id": str(hit.id),
-            "fs_id": payload.get("fs_id", ""),
-            "section_index": payload.get("section_index", 0),
-            "section_heading": payload.get("section_heading", ""),
-            "text": payload.get("text", ""),
-            "score": hit.score,
-        })
+        items.append(
+            {
+                "id": str(hit.id),
+                "fs_id": payload.get("fs_id", ""),
+                "section_index": payload.get("section_index", 0),
+                "section_heading": payload.get("section_heading", ""),
+                "text": payload.get("text", ""),
+                "score": hit.score,
+            }
+        )
 
     return items
-

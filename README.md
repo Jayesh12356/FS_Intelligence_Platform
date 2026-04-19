@@ -73,7 +73,15 @@ OpenRouter supports role-based model routing: separate models for reasoning, bui
 
 ### Tool orchestration (Settings → LLM provider)
 
-When `ORCHESTRATION_ENABLED=true`, automatic analysis routes LLM calls through the provider chosen in the web UI (`ToolConfigDB`), typically **Direct API** (your configured `LLM_PROVIDER` / API keys) or **Claude Code** (local `claude` CLI with subscription auth). Set `ORCHESTRATION_STRICT_LLM=true` (default) so a failing non-API provider does not silently fall back to Direct API. **Cursor** remains for MCP-driven build workflows, not synchronous server-side LLM from FastAPI. See `.env.example` for `ORCHESTRATION_ENABLED`, `ORCHESTRATION_STRICT_LLM`, and `CLAUDE_CODE_CLI_PATH`.
+Orchestration is **always on** in 0.4.0. Every LLM call is routed through the provider registry (`ToolConfigDB`), with no feature flag and no silent fallback to Direct API:
+
+- **Direct API** — server-side LLM calls using your configured `LLM_PROVIDER` + API keys (OpenRouter / Anthropic / OpenAI / Groq).
+- **Claude Code** — headless `claude` CLI subprocess (subscription auth). Supports Generate FS, Analyze, Refine, Reverse FS, Impact, and Build.
+- **Cursor** — paste-per-action handoff. Every LLM-backed UI action opens a modal with a mega-prompt; you paste it into a fresh Cursor Agent chat (MCP connected), and MCP submit tools deliver the result back. **Zero** Direct-API tokens are ever spent for Cursor users.
+
+If the configured provider fails, the failure surfaces as `LLMError` — the server never charges your OpenRouter / Anthropic credits as a silent recovery. See `.env.example` for `CLAUDE_CODE_CLI_PATH`, `LLM_TIMEOUT_S`, `LLM_RETRY_ATTEMPTS`, and `CURSOR_TASK_TTL_SEC`. See [`docs/GUIDE_CURSOR.md`](docs/GUIDE_CURSOR.md) and [`docs/GUIDE_CLAUDE_CODE.md`](docs/GUIDE_CLAUDE_CODE.md) for provider-specific setup.
+
+The **Build Agent** role is configured separately in `Settings → Build Agent` (`Cursor` or `Claude Code`; Direct API is intentionally not a valid build runtime). The document detail page renders the matching CTA — **Build with Cursor** or **Build with Claude** — as the primary button and the other as secondary outline. Both CTAs route to the unified `/documents/{id}/build` page (Agent runtime tabs, MCP snippet, Kickoff instructions modal, live build-state poller; **Run Build Now** is exposed on the Claude tab and POSTs `/api/fs/{id}/build/run`). Refining a `COMPLETE` document no longer demotes it to `PARSED`; instead the new `analysis_stale` flag flips on, the Build CTAs stay visible, and an amber "re-analyze to refresh metrics" banner appears on the detail page.
 
 ---
 

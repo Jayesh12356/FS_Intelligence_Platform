@@ -9,8 +9,9 @@ import logging
 import uuid
 from typing import List
 
-from app.llm import get_llm_client
 from app.orchestration.pipeline_llm import pipeline_call_llm_json
+from app.pipeline.prompts.analysis import task as task_prompt
+from app.pipeline.prompts.shared.flags import legacy_prompts_enabled
 from app.pipeline.state import EffortLevel, FSAnalysisState, FSTask
 
 logger = logging.getLogger(__name__)
@@ -94,16 +95,20 @@ async def decompose_section_into_tasks(
         logger.debug("Skipping section %d (%s): too short for task decomposition", section_index, heading)
         return []
 
-    prompt = TASK_DECOMPOSITION_USER_PROMPT.format(
-        heading=heading,
-        content=content,
-        index=section_index + 1,
-    )
+    if legacy_prompts_enabled():
+        system = TASK_DECOMPOSITION_SYSTEM_PROMPT
+        prompt = TASK_DECOMPOSITION_USER_PROMPT.format(
+            heading=heading,
+            content=content,
+            index=section_index + 1,
+        )
+    else:
+        system, prompt = task_prompt.build(heading=heading, content=content, index=section_index + 1)
 
     try:
         result = await pipeline_call_llm_json(
             prompt=prompt,
-            system=TASK_DECOMPOSITION_SYSTEM_PROMPT,
+            system=system,
             temperature=0.0,
             max_tokens=4096,
             role="build",
@@ -167,7 +172,9 @@ async def task_decomposition_node(state: FSAnalysisState) -> FSAnalysisState:
 
     logger.info(
         "Task decomposition node: %d sections, %d with HIGH ambiguities, for fs_id=%s",
-        len(sections), len(high_ambiguity_sections), state.get("fs_id", "?"),
+        len(sections),
+        len(high_ambiguity_sections),
+        state.get("fs_id", "?"),
     )
 
     for section in sections:
@@ -197,7 +204,8 @@ async def task_decomposition_node(state: FSAnalysisState) -> FSAnalysisState:
 
     logger.info(
         "Task decomposition complete: %d tasks from %d sections",
-        len(all_tasks), len(sections),
+        len(all_tasks),
+        len(sections),
     )
 
     return {

@@ -1,6 +1,27 @@
 # Claude Code -- Fully Autonomous Workflow Guide
 
-Claude Code turns the FS Intelligence Platform into a headless, zero-touch system. You describe an idea and Claude Code generates the specification, analyzes it, refines it to production quality, and builds the entire codebase -- all without opening a browser.
+Claude Code is the only provider that can cover **both** product roles
+at once: **Document LLM** (Generate FS, Analyze, Reverse FS run through
+the local `claude` CLI) and **Build Agent** (the CLI in agent mode
+drives the full build loop over MCP). If you have a Claude
+subscription and want a single hands-free provider end-to-end, this is
+the setup to pick.
+
+> New in 0.3.3: the Build page exposes a **Run Build Now** button when
+> Build Agent is set to Claude Code. Clicking it POSTs to
+> `/api/fs/{doc_id}/build/run`, which spawns `claude -p <build-prompt>
+> --mcp-config <…> --allowedTools mcp__…` headlessly and reflects
+> progress on the existing `build-state` polling stream. No manual
+> terminal session needed for the default flow.
+>
+> New in 0.4.x: the Build page now polls `GET /api/fs/{id}/build-state`
+> live (3s cadence) once you click **Run Build Now**, and the prompt /
+> CLI command come from
+> `GET /api/orchestration/mcp-config?document_id=…&stack=…&output_folder=…`
+> with `auto_proceed='true'` baked in — the same source of truth as the
+> in-app **Kickoff instructions** modal and the
+> `reports/cursor_ide_kickoff.md` file. No more `<document_id>`
+> placeholders to hand-edit.
 
 ---
 
@@ -12,7 +33,7 @@ Claude Code turns the FS Intelligence Platform into a headless, zero-touch syste
 | Anthropic subscription | Active Claude Pro / Team / Enterprise plan |
 | CLI authentication | Run `claude login` and complete the browser flow |
 | Platform backend running | `docker compose up` or local dev server on `http://localhost:8000` |
-| Platform frontend (optional) | `cd frontend && npm run dev` on `http://localhost:3000` |
+| Platform frontend (optional, recommended) | `cd frontend && npm run dev` on `http://localhost:3000` — open `/documents/{id}/build` for a one-click MCP config copy |
 
 Verify the CLI works:
 
@@ -29,15 +50,22 @@ This option uses the web UI for input and Claude Code CLI as the LLM engine behi
 ### 1. Configure the provider
 
 1. Open `http://localhost:3000/settings`.
-2. Under **LLM Provider**, select **Claude Code (CLI Agent)**.
-3. Click **Save Config**.
+2. Under **Document LLM**, select **Claude Code**.
+3. Under **Build Agent**, select **Claude Code** (or Cursor, if you
+   prefer to steer the build live in the IDE).
+4. Click **Save Config**.
 4. Set environment variables in your backend `.env`:
 
 ```
-ORCHESTRATION_ENABLED=true
-ORCHESTRATION_STRICT_LLM=true
 CLAUDE_CODE_CLI_PATH=claude
+LLM_TIMEOUT_S=120
+LLM_RETRY_ATTEMPTS=3
 ```
+
+> Orchestration is always on in 0.4.0; there is no `ORCHESTRATION_ENABLED`
+> or `ORCHESTRATION_STRICT_LLM` flag. Selecting **Claude Code** in Settings
+> is enough to route every LLM call to the local `claude` CLI, and a
+> failure will **never** silently fall back to Direct API.
 
 5. Restart the backend.
 
@@ -85,15 +113,20 @@ cd mcp-server && python server.py &
 
 ### 2. Create an MCP config file
 
-Create `mcp-config.json` in your project root:
+> The snippet below is identical to the one served by
+> `GET /api/orchestration/mcp-config` — the same endpoint that powers
+> the in-app **Build** page (`/documents/{id}/build`). If you ever see
+> the guide drift from the Build page, the endpoint wins.
+
+Create `mcp-config.json` in your project root (run Claude Code from the
+repo root so `mcp-server/server.py` resolves):
 
 ```json
 {
   "mcpServers": {
     "fs-intelligence-platform": {
       "command": "python",
-      "args": ["server.py"],
-      "cwd": "/path/to/fs_intelligence_platform/mcp-server",
+      "args": ["mcp-server/server.py"],
       "env": {
         "BACKEND_URL": "http://localhost:8000"
       }
@@ -101,6 +134,9 @@ Create `mcp-config.json` in your project root:
   }
 }
 ```
+
+If you prefer to launch Claude Code from a different directory, use an
+absolute path in `args` instead — everything else stays the same.
 
 ### 3. Run the full autonomous loop
 
@@ -158,7 +194,7 @@ Use the handle_requirement_change prompt with:
 | `Claude CLI not found` | Run `npm install -g @anthropic-ai/claude-code` |
 | `Claude CLI failed: not logged in` | Run `claude login` |
 | `LLMError: Provider claude_code failed` | Check CLI auth: `claude --version` |
-| `ORCHESTRATION_STRICT_LLM` blocks fallback | Intentional. Fix CLI auth or switch to Direct API in Settings. |
+| `LLMError: Provider claude_code failed` surfaces in UI | Intentional — 0.4.0 never falls back to Direct API. Fix CLI auth or switch to Direct API in Settings. |
 | Analysis times out | Increase `MCP_TIMEOUT_SECONDS` in MCP server env. Default is 25s; analysis can take 60-150s. |
 
 ---
@@ -176,6 +212,6 @@ Terminal / Claude Code CLI
   │                      ├─ build tools ────────────► build state, register, verify
   │                      └─ export tools ──────────► JIRA, PDF, Confluence
   │
-  └─ -p ──► Direct LLM call (when ORCHESTRATION_ENABLED + provider=claude_code)
+  └─ -p ──► Direct LLM call (used by backend when llm_provider=claude_code)
                       Backend runs Claude CLI for each pipeline node LLM call
 ```

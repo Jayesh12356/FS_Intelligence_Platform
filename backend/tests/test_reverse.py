@@ -29,7 +29,6 @@ from app.pipeline.state import (
     ReverseGenState,
 )
 
-
 # ── Unit Tests: CodeEntity Model ────────────────────────
 
 
@@ -219,8 +218,9 @@ class TestCodeParser:
 
     def test_parse_python_file(self):
         """Python files should be parsed with AST."""
-        zip_path = _create_test_zip({
-            "myproject/main.py": '''
+        zip_path = _create_test_zip(
+            {
+                "myproject/main.py": '''
 """Main module docstring."""
 
 def greet(name: str) -> str:
@@ -237,10 +237,12 @@ class UserService:
     def delete_user(self, user_id: int) -> None:
         pass
 ''',
-        })
+            }
+        )
 
         try:
             from app.parsers.code_parser import parse_codebase
+
             snapshot = parse_codebase(zip_path)
 
             assert snapshot.total_files == 1
@@ -259,8 +261,9 @@ class UserService:
 
     def test_parse_javascript_file(self):
         """JS files should be parsed with regex."""
-        zip_path = _create_test_zip({
-            "app/server.js": '''
+        zip_path = _create_test_zip(
+            {
+                "app/server.js": """
 /**
  * Start the server
  */
@@ -275,11 +278,13 @@ class Router {
 const handleRequest = (req) => {
     return "OK";
 };
-''',
-        })
+""",
+            }
+        )
 
         try:
             from app.parsers.code_parser import parse_codebase
+
             snapshot = parse_codebase(zip_path)
 
             assert snapshot.total_files == 1
@@ -295,8 +300,9 @@ const handleRequest = (req) => {
 
     def test_parse_typescript_file(self):
         """TS files should be detected as typescript."""
-        zip_path = _create_test_zip({
-            "src/index.ts": '''
+        zip_path = _create_test_zip(
+            {
+                "src/index.ts": """
 export function main(): void {
     console.log("Hello");
 }
@@ -304,11 +310,13 @@ export function main(): void {
 export class AppService {
     start(): void {}
 }
-''',
-        })
+""",
+            }
+        )
 
         try:
             from app.parsers.code_parser import parse_codebase
+
             snapshot = parse_codebase(zip_path)
             assert snapshot.primary_language == "typescript"
             file = snapshot.files[0]
@@ -320,14 +328,17 @@ export class AppService {
 
     def test_parse_multiple_languages(self):
         """Multiple languages should be detected."""
-        zip_path = _create_test_zip({
-            "backend/app.py": 'def run(): pass',
-            "frontend/app.js": 'function render() {}',
-            "frontend/utils.ts": 'export function helper(): void {}',
-        })
+        zip_path = _create_test_zip(
+            {
+                "backend/app.py": "def run(): pass",
+                "frontend/app.js": "function render() {}",
+                "frontend/utils.ts": "export function helper(): void {}",
+            }
+        )
 
         try:
             from app.parsers.code_parser import parse_codebase
+
             snapshot = parse_codebase(zip_path)
 
             assert snapshot.total_files == 3
@@ -339,13 +350,16 @@ export class AppService {
 
     def test_skip_node_modules(self):
         """node_modules should be skipped."""
-        zip_path = _create_test_zip({
-            "app.js": 'function main() {}',
-            "node_modules/express/index.js": 'module.exports = {}',
-        })
+        zip_path = _create_test_zip(
+            {
+                "app.js": "function main() {}",
+                "node_modules/express/index.js": "module.exports = {}",
+            }
+        )
 
         try:
             from app.parsers.code_parser import parse_codebase
+
             snapshot = parse_codebase(zip_path)
             assert snapshot.total_files == 1
             assert all("node_modules" not in f.path for f in snapshot.files)
@@ -354,13 +368,16 @@ export class AppService {
 
     def test_skip_pycache(self):
         """__pycache__ should be skipped."""
-        zip_path = _create_test_zip({
-            "main.py": 'def run(): pass',
-            "__pycache__/main.cpython-312.pyc": 'binary data',
-        })
+        zip_path = _create_test_zip(
+            {
+                "main.py": "def run(): pass",
+                "__pycache__/main.cpython-312.pyc": "binary data",
+            }
+        )
 
         try:
             from app.parsers.code_parser import parse_codebase
+
             snapshot = parse_codebase(zip_path)
             assert snapshot.total_files == 1
         finally:
@@ -368,13 +385,16 @@ export class AppService {
 
     def test_skip_git_dir(self):
         """.git should be skipped."""
-        zip_path = _create_test_zip({
-            "main.py": 'def run(): pass',
-            ".git/HEAD": 'ref: refs/heads/main',
-        })
+        zip_path = _create_test_zip(
+            {
+                "main.py": "def run(): pass",
+                ".git/HEAD": "ref: refs/heads/main",
+            }
+        )
 
         try:
             from app.parsers.code_parser import parse_codebase
+
             snapshot = parse_codebase(zip_path)
             assert snapshot.total_files == 1
         finally:
@@ -382,13 +402,16 @@ export class AppService {
 
     def test_empty_zip_raises(self):
         """Empty zip with no source files should raise."""
-        zip_path = _create_test_zip({
-            "README.md": "# Hello",
-            "data.json": "{}",
-        })
+        zip_path = _create_test_zip(
+            {
+                "README.md": "# Hello",
+                "data.json": "{}",
+            }
+        )
 
         try:
             from app.parsers.code_parser import parse_codebase
+
             with pytest.raises(ValueError, match="No supported source files"):
                 parse_codebase(zip_path)
         finally:
@@ -402,6 +425,7 @@ export class AppService {
 
         try:
             from app.parsers.code_parser import parse_codebase
+
             with pytest.raises(ValueError, match="Not a valid zip"):
                 parse_codebase(tmp.name)
         finally:
@@ -410,18 +434,22 @@ export class AppService {
     def test_missing_file_raises(self):
         """Missing file should raise."""
         from app.parsers.code_parser import parse_codebase
+
         with pytest.raises(ValueError, match="not found"):
             parse_codebase("/nonexistent/path.zip")
 
     def test_single_folder_wrapper(self):
         """Zip with single root folder should unwrap."""
-        zip_path = _create_test_zip({
-            "myproject/src/main.py": 'def main(): pass',
-            "myproject/src/utils.py": 'def helper(): pass',
-        })
+        zip_path = _create_test_zip(
+            {
+                "myproject/src/main.py": "def main(): pass",
+                "myproject/src/utils.py": "def helper(): pass",
+            }
+        )
 
         try:
             from app.parsers.code_parser import parse_codebase
+
             snapshot = parse_codebase(zip_path)
             assert snapshot.total_files == 2
             # Paths should be relative to the unwrapped root
@@ -432,13 +460,16 @@ export class AppService {
 
     def test_parser_stats_are_present(self):
         """Parser should return skip/parse diagnostics for observability."""
-        zip_path = _create_test_zip({
-            "src/main.py": "def main():\n    return 1\n",
-            "src/helper.ts": "export const helper = () => 1;\n",
-            "node_modules/pkg/index.js": "module.exports = {}\n",
-        })
+        zip_path = _create_test_zip(
+            {
+                "src/main.py": "def main():\n    return 1\n",
+                "src/helper.ts": "export const helper = () => 1;\n",
+                "node_modules/pkg/index.js": "module.exports = {}\n",
+            }
+        )
         try:
             from app.parsers.code_parser import parse_codebase
+
             snapshot = parse_codebase(zip_path)
             assert isinstance(snapshot.parser_stats, dict)
             assert snapshot.parser_stats.get("parsed_files", 0) >= 2
@@ -448,21 +479,27 @@ export class AppService {
 
     def test_parser_respects_max_files_limit(self, monkeypatch):
         """Parser should stop at REVERSE_MAX_FILES_TO_PARSE."""
-        zip_path = _create_test_zip({
-            "a.py": "def a(): pass\n",
-            "b.py": "def b(): pass\n",
-            "c.py": "def c(): pass\n",
-            "d.py": "def d(): pass\n",
-        })
+        zip_path = _create_test_zip(
+            {
+                "a.py": "def a(): pass\n",
+                "b.py": "def b(): pass\n",
+                "c.py": "def c(): pass\n",
+                "d.py": "def d(): pass\n",
+            }
+        )
         try:
             from app.parsers.code_parser import parse_codebase
-            with patch("app.parsers.code_parser._build_filter_config", return_value={
-                "skip_dirs": set(),
-                "skip_files": set(),
-                "include_extensions": {".py"},
-                "max_file_size_bytes": 500000,
-                "max_files_to_parse": 2,
-            }):
+
+            with patch(
+                "app.parsers.code_parser._build_filter_config",
+                return_value={
+                    "skip_dirs": set(),
+                    "skip_files": set(),
+                    "include_extensions": {".py"},
+                    "max_file_size_bytes": 500000,
+                    "max_files_to_parse": 2,
+                },
+            ):
                 snapshot = parse_codebase(zip_path)
             assert snapshot.total_files <= 2
             assert snapshot.parser_stats.get("skipped_by_limit", 0) >= 1
@@ -548,7 +585,7 @@ class TestGenericExtraction:
     def test_js_functions(self):
         from app.parsers.code_parser import _extract_generic_entities
 
-        code = '''
+        code = """
 function handleClick(event) {
     console.log(event);
 }
@@ -556,7 +593,7 @@ function handleClick(event) {
 async function fetchData(url) {
     return fetch(url);
 }
-'''
+"""
         entities = _extract_generic_entities(code, "javascript")
         names = [e.name for e in entities]
         assert "handleClick" in names
@@ -565,10 +602,10 @@ async function fetchData(url) {
     def test_js_arrow_functions(self):
         from app.parsers.code_parser import _extract_generic_entities
 
-        code = '''
+        code = """
 const multiply = (a, b) => a * b;
 const divide = async (a, b) => a / b;
-'''
+"""
         entities = _extract_generic_entities(code, "javascript")
         names = [e.name for e in entities]
         assert "multiply" in names
@@ -577,11 +614,11 @@ const divide = async (a, b) => a / b;
     def test_js_classes(self):
         from app.parsers.code_parser import _extract_generic_entities
 
-        code = '''
+        code = """
 class UserController extends BaseController {
     constructor() {}
 }
-'''
+"""
         entities = _extract_generic_entities(code, "javascript")
         class_entities = [e for e in entities if e.entity_type == "class"]
         assert len(class_entities) == 1
@@ -591,7 +628,7 @@ class UserController extends BaseController {
     def test_go_functions(self):
         from app.parsers.code_parser import _extract_generic_entities
 
-        code = '''
+        code = """
 // ProcessOrder handles order processing
 func ProcessOrder(orderId string, items []Item) error {
     return nil
@@ -600,7 +637,7 @@ func ProcessOrder(orderId string, items []Item) error {
 func (s *Server) Start(port int) error {
     return nil
 }
-'''
+"""
         entities = _extract_generic_entities(code, "go")
         names = [e.name for e in entities]
         assert "ProcessOrder" in names
@@ -609,7 +646,7 @@ func (s *Server) Start(port int) error {
     def test_java_classes_and_methods(self):
         from app.parsers.code_parser import _extract_generic_entities
 
-        code = '''
+        code = """
 public class PaymentService extends BaseService {
     public void processPayment(String paymentId, double amount) {
         // process
@@ -619,7 +656,7 @@ public class PaymentService extends BaseService {
         return true;
     }
 }
-'''
+"""
         entities = _extract_generic_entities(code, "java")
         class_entities = [e for e in entities if e.entity_type == "class"]
         method_entities = [e for e in entities if e.entity_type == "method"]
@@ -664,7 +701,11 @@ class TestReverseQualityNode:
             "module_summaries": [],
             "user_flows": [],
             "generated_sections": [
-                {"heading": "Feature 1", "content": "This section describes the main feature in detail.", "section_index": 0},
+                {
+                    "heading": "Feature 1",
+                    "content": "This section describes the main feature in detail.",
+                    "section_index": 0,
+                },
             ],
             "raw_fs_text": "# FS",
             "report": {},
@@ -812,10 +853,12 @@ class TestReversePipelineGraph:
 
     def test_reverse_graph_builds(self):
         import app.pipeline.graph as graph_mod
+
         graph_mod._compiled_reverse_graph = None
 
-        with patch("app.pipeline.nodes.reverse_fs_node.pipeline_call_llm"), patch(
-            "app.pipeline.nodes.reverse_fs_node.pipeline_call_llm_json"
+        with (
+            patch("app.pipeline.nodes.reverse_fs_node.pipeline_call_llm"),
+            patch("app.pipeline.nodes.reverse_fs_node.pipeline_call_llm_json"),
         ):
             graph = graph_mod.build_reverse_graph()
             assert graph is not None
@@ -824,10 +867,12 @@ class TestReversePipelineGraph:
 
     def test_reverse_graph_singleton(self):
         import app.pipeline.graph as graph_mod
+
         graph_mod._compiled_reverse_graph = None
 
-        with patch("app.pipeline.nodes.reverse_fs_node.pipeline_call_llm"), patch(
-            "app.pipeline.nodes.reverse_fs_node.pipeline_call_llm_json"
+        with (
+            patch("app.pipeline.nodes.reverse_fs_node.pipeline_call_llm"),
+            patch("app.pipeline.nodes.reverse_fs_node.pipeline_call_llm_json"),
         ):
             g1 = graph_mod.get_compiled_reverse_graph()
             g2 = graph_mod.get_compiled_reverse_graph()
@@ -850,7 +895,10 @@ class TestCodeAPI:
             files={"file": ("test.txt", b"not a zip", "text/plain")},
         )
         assert response.status_code == 400
-        assert "zip" in response.json().get("detail", "").lower()
+        # API now uses `{"error": "..."}` envelope; older handlers used `detail`.
+        body = response.json()
+        msg = (body.get("detail") or body.get("error") or "").lower()
+        assert "zip" in msg, f"expected 'zip' in error message, got {body!r}"
 
     @pytest.mark.asyncio
     async def test_upload_valid_zip(self, client):
@@ -891,7 +939,7 @@ class TestCodeAPI:
         """Getting generated FS before generation should fail."""
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
-            zf.writestr("app.py", 'def run(): pass\n')
+            zf.writestr("app.py", "def run(): pass\n")
         buf.seek(0)
 
         upload_resp = await client.post(
@@ -908,7 +956,7 @@ class TestCodeAPI:
         """Getting report before generation should fail."""
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
-            zf.writestr("app.py", 'def run(): pass\n')
+            zf.writestr("app.py", "def run(): pass\n")
         buf.seek(0)
 
         upload_resp = await client.post(
@@ -933,7 +981,7 @@ class TestCodeAPI:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             zf.writestr("main.py", 'def main():\n    """Entry point."""\n    pass\n')
-            zf.writestr("utils.py", 'def helper(): pass\n')
+            zf.writestr("utils.py", "def helper(): pass\n")
         buf.seek(0)
 
         upload_resp = await client.post(
@@ -973,48 +1021,59 @@ class TestFileFiltering:
 
     def test_skip_node_modules(self):
         from app.parsers.code_parser import _should_skip_file
+
         assert _should_skip_file(Path("node_modules/express/index.js")) is True
 
     def test_skip_pycache(self):
         from app.parsers.code_parser import _should_skip_file
+
         assert _should_skip_file(Path("__pycache__/main.cpython.pyc")) is True
 
     def test_skip_git(self):
         from app.parsers.code_parser import _should_skip_file
+
         assert _should_skip_file(Path(".git/HEAD")) is True
 
     def test_skip_venv(self):
         from app.parsers.code_parser import _should_skip_file
+
         assert _should_skip_file(Path("venv/lib/site-packages/pkg.py")) is True
 
     def test_skip_unsupported_extension(self):
         from app.parsers.code_parser import _should_skip_file
+
         assert _should_skip_file(Path("readme.md")) is True
         assert _should_skip_file(Path("data.json")) is True
         assert _should_skip_file(Path("style.css")) is True
 
     def test_allow_python(self):
         from app.parsers.code_parser import _should_skip_file
+
         assert _should_skip_file(Path("main.py")) is False
 
     def test_allow_javascript(self):
         from app.parsers.code_parser import _should_skip_file
+
         assert _should_skip_file(Path("app.js")) is False
 
     def test_allow_typescript(self):
         from app.parsers.code_parser import _should_skip_file
+
         assert _should_skip_file(Path("index.ts")) is False
 
     def test_allow_java(self):
         from app.parsers.code_parser import _should_skip_file
+
         assert _should_skip_file(Path("Main.java")) is False
 
     def test_allow_go(self):
         from app.parsers.code_parser import _should_skip_file
+
         assert _should_skip_file(Path("main.go")) is False
 
     def test_skip_lock_files(self):
         from app.parsers.code_parser import _should_skip_file
+
         assert _should_skip_file(Path("package-lock.json")) is True
 
 

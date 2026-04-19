@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -98,10 +98,10 @@ async def append_event(
     session.current_step = body.message or session.current_step
     if body.status.lower() in {"failed", "error"}:
         session.status = MCPSessionStatus.FAILED
-        session.ended_at = datetime.now(timezone.utc)
+        session.ended_at = datetime.now(UTC)
     elif body.event_type == "session_completed":
         session.status = MCPSessionStatus.PASSED
-        session.ended_at = datetime.now(timezone.utc)
+        session.ended_at = datetime.now(UTC)
 
     await db.flush()
     await db.refresh(evt)
@@ -153,4 +153,3 @@ async def stream_events(
             await asyncio.sleep(1.0)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
-

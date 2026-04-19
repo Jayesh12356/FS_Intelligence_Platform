@@ -5,19 +5,24 @@ import logging
 import shutil
 import uuid
 from pathlib import Path
-from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.db.base import get_db
-from app.db.models import FSDocument, FSDocumentStatus, FSVersion, AuditEventType
 from app.db.audit import log_audit_event
-from app.parsers.section_extractor import extract_sections_from_text, rebuild_text_from_sections
-from app.parsers.base import FSSection
+from app.db.base import get_db
+from app.db.models import (
+    AmbiguityFlagDB,
+    AuditEventType,
+    ContradictionDB,
+    EdgeCaseGapDB,
+    FSDocument,
+    FSDocumentStatus,
+    FSTaskDB,
+    FSVersion,
+)
 from app.models.schemas import (
     APIResponse,
     FSDocumentDetail,
@@ -29,6 +34,8 @@ from app.models.schemas import (
     SectionEditRequest,
     UploadResponse,
 )
+from app.parsers.base import FSSection
+from app.parsers.section_extractor import extract_sections_from_text, rebuild_text_from_sections
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/fs", tags=["FS Documents"])
@@ -44,7 +51,7 @@ ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
 def _validate_file(file: UploadFile) -> None:
     """Validate file type and extension."""
-    settings = get_settings()
+    get_settings()
 
     # Check extension
     if file.filename:
@@ -89,7 +96,7 @@ async def _save_file(file: UploadFile, doc_id: uuid.UUID) -> tuple[str, int]:
 @router.post("/upload", response_model=APIResponse[UploadResponse])
 async def upload_file(
     file: UploadFile = File(...),
-    project_id: Optional[str] = Query(None, description="Optional project ID to assign document to"),
+    project_id: str | None = Query(None, description="Optional project ID to assign document to"),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[UploadResponse]:
     """Upload a PDF, DOCX, or TXT file."""
@@ -110,14 +117,18 @@ async def upload_file(
     if project_id:
         try:
             parsed_project_id = uuid.UUID(project_id)
-            from app.db.models import FSProject
             from sqlalchemy import func
+
+            from app.db.models import FSProject
+
             proj = (await db.execute(select(FSProject).where(FSProject.id == parsed_project_id))).scalar_one_or_none()
             if not proj:
                 raise HTTPException(status_code=404, detail="Project not found")
-            max_order = (await db.execute(
-                select(func.max(FSDocument.order_in_project)).where(FSDocument.project_id == parsed_project_id)
-            )).scalar() or 0
+            max_order = (
+                await db.execute(
+                    select(func.max(FSDocument.order_in_project)).where(FSDocument.project_id == parsed_project_id)
+                )
+            ).scalar() or 0
             order_in_project = max_order + 1
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid project_id format")
@@ -139,7 +150,9 @@ async def upload_file(
 
     # Log audit event (L9)
     await log_audit_event(
-        db, doc_id, AuditEventType.UPLOADED,
+        db,
+        doc_id,
+        AuditEventType.UPLOADED,
         payload={"filename": file.filename or "unknown", "file_size": file_size},
     )
 
@@ -156,7 +169,7 @@ async def upload_file(
 @router.get("/", response_model=APIResponse[FSDocumentListResponse])
 async def list_documents(
     limit: int = Query(50, ge=1, le=500),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=2**31 - 1),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[FSDocumentListResponse]:
     """List non-deleted documents with pagination.
@@ -165,17 +178,11 @@ async def list_documents(
     """
     base_filter = FSDocument.status != FSDocumentStatus.DELETED
 
-    total_result = await db.execute(
-        select(func.count()).select_from(FSDocument).where(base_filter)
-    )
+    total_result = await db.execute(select(func.count()).select_from(FSDocument).where(base_filter))
     total = int(total_result.scalar_one() or 0)
 
     result = await db.execute(
-        select(FSDocument)
-        .where(base_filter)
-        .order_by(FSDocument.created_at.desc())
-        .limit(limit)
-        .offset(offset)
+        select(FSDocument).where(base_filter).order_by(FSDocument.created_at.desc()).limit(limit).offset(offset)
     )
     documents = result.scalars().all()
 
@@ -193,13 +200,37 @@ async def get_document(
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[FSDocumentDetail]:
     """Get a single document by ID, including reconstructed sections."""
-    result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = result.scalar_one_or_none()
 
     if doc is None or doc.status == FSDocumentStatus.DELETED:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    # ── Auto-heal "PARSED but actually analyzed" docs ──────────
+    # User invariant: once a document has been analyzed it should
+    # remain COMPLETE. Older rows or imports occasionally land in
+    # PARSED with full analysis data attached (e.g. doc 970889b8…).
+    # On the first read we promote them to COMPLETE and flag the
+    # analysis as stale so the UI prompts a re-analyze without
+    # blocking the build CTA.
+    if doc.status == FSDocumentStatus.PARSED:
+        analysis_present = False
+        for table in (FSTaskDB, AmbiguityFlagDB, ContradictionDB, EdgeCaseGapDB):
+            row_id = (
+                await db.execute(select(table.id).where(table.fs_id == doc_id).limit(1))
+            ).scalar_one_or_none()
+            if row_id is not None:
+                analysis_present = True
+                break
+        if analysis_present:
+            doc.status = FSDocumentStatus.COMPLETE
+            doc.analysis_stale = True
+            await db.commit()
+            await db.refresh(doc)
+            logger.info(
+                "Auto-healed doc %s: PARSED → COMPLETE (analysis_stale=True) because analysis rows exist.",
+                doc_id,
+            )
 
     detail = FSDocumentDetail.model_validate(doc)
 
@@ -224,9 +255,7 @@ async def get_document_status(
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[dict]:
     """Get the processing status of a document."""
-    result = await db.execute(
-        select(FSDocument.status).where(FSDocument.id == doc_id)
-    )
+    result = await db.execute(select(FSDocument.status).where(FSDocument.id == doc_id))
     status = result.scalar_one_or_none()
 
     if status is None:
@@ -243,9 +272,7 @@ async def delete_document(
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[dict]:
     """Soft-delete a document (sets status to DELETED)."""
-    result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = result.scalar_one_or_none()
 
     if doc is None:
@@ -267,9 +294,7 @@ async def reset_document_status(
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[dict]:
     """Admin: reset a stuck document back to PARSED (or UPLOADED if never parsed)."""
-    result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = result.scalar_one_or_none()
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -296,8 +321,8 @@ async def parse_document_endpoint(
     Pipeline: parse → chunk → embed → store in Qdrant.
     Updates document status: UPLOADED → PARSING → PARSED.
     """
-    from app.parsers.router import parse_document
     from app.parsers.chunker import chunk_parsed_fs
+    from app.parsers.router import parse_document
     from app.vector.fs_store import store_fs_chunks
 
     # Parse the document
@@ -318,13 +343,12 @@ async def parse_document_endpoint(
     except Exception as exc:
         logger.warning(
             "Embedding storage failed for document %s (non-fatal): %s",
-            doc_id, exc,
+            doc_id,
+            exc,
         )
 
     # Reload document for response
-    result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = result.scalar_one_or_none()
 
     sections = [
@@ -338,7 +362,9 @@ async def parse_document_endpoint(
 
     # Log audit event (L9)
     await log_audit_event(
-        db, doc_id, AuditEventType.PARSED,
+        db,
+        doc_id,
+        AuditEventType.PARSED,
         payload={"sections_count": len(sections), "chunks_stored": chunks_stored},
     )
 
@@ -364,9 +390,7 @@ async def parse_document_endpoint(
 async def _create_version_snapshot(doc: FSDocument, db: AsyncSession, summary: str) -> FSVersion:
     """Create a version snapshot before editing."""
     versions_result = await db.execute(
-        select(FSVersion)
-        .where(FSVersion.fs_id == doc.id)
-        .order_by(FSVersion.version_number.desc())
+        select(FSVersion).where(FSVersion.fs_id == doc.id).order_by(FSVersion.version_number.desc())
     )
     existing = versions_result.scalars().first()
     next_num = (existing.version_number + 1) if existing else 1
@@ -402,7 +426,9 @@ async def edit_section(
 
     sections = extract_sections_from_text(doc.parsed_text)
     if section_index < 0 or section_index >= len(sections):
-        raise HTTPException(status_code=404, detail=f"Section index {section_index} out of range (0-{len(sections)-1})")
+        raise HTTPException(
+            status_code=404, detail=f"Section index {section_index} out of range (0-{len(sections) - 1})"
+        )
 
     old_heading = sections[section_index].heading
     if body.heading is not None:
@@ -420,18 +446,25 @@ async def edit_section(
 
     await _create_version_snapshot(doc, db, f"Section '{old_heading}' edited")
     doc.parsed_text = rebuild_text_from_sections(sections)
-    await log_audit_event(db, doc_id, AuditEventType.SECTION_EDITED, payload={
-        "section_index": section_index,
-        "section_heading": sections[section_index].heading,
-    })
+    await log_audit_event(
+        db,
+        doc_id,
+        AuditEventType.SECTION_EDITED,
+        payload={
+            "section_index": section_index,
+            "section_heading": sections[section_index].heading,
+        },
+    )
     await db.flush()
 
     updated = sections[section_index]
-    return APIResponse(data=FSSectionSchema(
-        heading=updated.heading,
-        content=updated.content,
-        section_index=updated.section_index,
-    ))
+    return APIResponse(
+        data=FSSectionSchema(
+            heading=updated.heading,
+            content=updated.content,
+            section_index=updated.section_index,
+        )
+    )
 
 
 @router.post("/{doc_id}/sections", response_model=APIResponse[FSSectionSchema])
@@ -462,14 +495,21 @@ async def add_section(
     doc.parsed_text = rebuild_text_from_sections(sections)
     if doc.status == FSDocumentStatus.UPLOADED:
         doc.status = FSDocumentStatus.PARSED
-    await log_audit_event(db, doc_id, AuditEventType.SECTION_ADDED, payload={
-        "heading": body.heading,
-        "insert_index": insert_idx,
-    })
+    await log_audit_event(
+        db,
+        doc_id,
+        AuditEventType.SECTION_ADDED,
+        payload={
+            "heading": body.heading,
+            "insert_index": insert_idx,
+        },
+    )
     await db.flush()
 
-    return APIResponse(data=FSSectionSchema(
-        heading=new_section.heading,
-        content=new_section.content,
-        section_index=insert_idx,
-    ))
+    return APIResponse(
+        data=FSSectionSchema(
+            heading=new_section.heading,
+            content=new_section.content,
+            section_index=insert_idx,
+        )
+    )

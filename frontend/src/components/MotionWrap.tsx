@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, type Variants } from "framer-motion";
+import { motion, useReducedMotion, type Variants } from "framer-motion";
 import { type CSSProperties, type ReactNode } from "react";
 
 const pageVariants: Variants = {
@@ -27,6 +27,10 @@ const fadeIn: Variants = {
 };
 
 export function PageMotion({ children, className }: { children: ReactNode; className?: string }) {
+  const prefersReducedMotion = useReducedMotion();
+  if (prefersReducedMotion) {
+    return <div className={className}>{children}</div>;
+  }
   return (
     <motion.div
       variants={pageVariants}
@@ -48,6 +52,14 @@ export function StaggerList({
   className?: string;
   style?: CSSProperties;
 }) {
+  const prefersReducedMotion = useReducedMotion();
+  if (prefersReducedMotion) {
+    return (
+      <div className={className} style={style}>
+        {children}
+      </div>
+    );
+  }
   return (
     <motion.div
       variants={staggerContainer}
@@ -70,6 +82,14 @@ export function StaggerItem({
   className?: string;
   style?: CSSProperties;
 }) {
+  const prefersReducedMotion = useReducedMotion();
+  if (prefersReducedMotion) {
+    return (
+      <div className={className} style={style}>
+        {children}
+      </div>
+    );
+  }
   return (
     <motion.div variants={staggerItem} className={className} style={style}>
       {children}
@@ -88,6 +108,14 @@ export function FadeIn({
   style?: CSSProperties;
   delay?: number;
 }) {
+  const prefersReducedMotion = useReducedMotion();
+  if (prefersReducedMotion) {
+    return (
+      <div className={className} style={style}>
+        {children}
+      </div>
+    );
+  }
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}

@@ -7,8 +7,9 @@ conditions are not covered. Populates state.edge_cases.
 import logging
 from typing import List
 
-from app.llm import get_llm_client
 from app.orchestration.pipeline_llm import pipeline_call_llm_json
+from app.pipeline.prompts.analysis import edge_case as edge_case_prompt
+from app.pipeline.prompts.shared.flags import legacy_prompts_enabled
 from app.pipeline.state import EdgeCaseGap, FSAnalysisState, Severity
 
 logger = logging.getLogger(__name__)
@@ -84,12 +85,16 @@ async def detect_edge_cases_in_section(
         logger.debug("Skipping section %d (%s): too short for edge case analysis", section_index, heading)
         return []
 
-    prompt = EDGE_CASE_USER_PROMPT.format(heading=heading, content=content)
+    if legacy_prompts_enabled():
+        system = EDGE_CASE_SYSTEM_PROMPT
+        prompt = EDGE_CASE_USER_PROMPT.format(heading=heading, content=content)
+    else:
+        system, prompt = edge_case_prompt.build(heading, content)
 
     try:
         result = await pipeline_call_llm_json(
             prompt=prompt,
-            system=EDGE_CASE_SYSTEM_PROMPT,
+            system=system,
             temperature=0.0,
             max_tokens=2048,
         )
@@ -117,7 +122,9 @@ async def detect_edge_cases_in_section(
 
         logger.info(
             "Section %d (%s): found %d edge case gaps",
-            section_index, heading, len(gaps),
+            section_index,
+            heading,
+            len(gaps),
         )
         return gaps
 
@@ -157,7 +164,8 @@ async def edge_case_node(state: FSAnalysisState) -> FSAnalysisState:
 
     logger.info(
         "Edge case node complete: %d gaps across %d sections",
-        len(all_edge_cases), len(sections),
+        len(all_edge_cases),
+        len(sections),
     )
 
     return {

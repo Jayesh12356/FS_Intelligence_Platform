@@ -15,7 +15,7 @@ Usage:
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -139,8 +139,8 @@ async def run_debate_benchmark(
     Returns:
         Benchmark comparison results.
     """
-    from app.pipeline.nodes.ambiguity_node import detect_ambiguities_in_section
     from app.agents.debate_crew import run_debate
+    from app.pipeline.nodes.ambiguity_node import detect_ambiguities_in_section
 
     benchmark_sections = sections or BENCHMARK_SECTIONS
 
@@ -191,10 +191,7 @@ async def run_debate_benchmark(
 
     # Remove cleared flags
     cleared_flags_set = {high_flags[i].get("flagged_text", "") for i in cleared_indices}
-    all_flags_after = [
-        f for f in all_flags_before
-        if f.get("flagged_text", "") not in cleared_flags_set
-    ]
+    all_flags_after = [f for f in all_flags_before if f.get("flagged_text", "") not in cleared_flags_set]
 
     after_metrics = _compute_precision_recall(all_flags_after, benchmark_sections)
 
@@ -209,7 +206,7 @@ async def run_debate_benchmark(
 
     # ── Phase 3: Compile and save results ──
     results = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "sections_count": len(benchmark_sections),
         "before_debate": {
             "total_flags": len(all_flags_before),

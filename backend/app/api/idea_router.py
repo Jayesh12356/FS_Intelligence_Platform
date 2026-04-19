@@ -1,9 +1,7 @@
 """Idea-to-FS generation API — convert product ideas into professional FS documents."""
 
-import uuid
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -11,14 +9,27 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import get_db
-from app.db.models import FSDocument, FSDocumentStatus, IdeaSessionDB
+from app.db.models import (
+    CursorTaskDB,
+    CursorTaskKind,
+    CursorTaskStatus,
+    FSDocument,
+    FSDocumentStatus,
+    IdeaSessionDB,
+)
+from app.llm.client import LLMError
 from app.models.schemas import APIResponse
-from app.pipeline.nodes.idea_node import (
-    generate_fs_quick,
-    generate_guided_questions,
-    generate_fs_guided,
+from app.orchestration.config_resolver import get_configured_llm_provider_name
+from app.orchestration.cursor_prompts import (
+    build_generate_fs_prompt,
+    build_mcp_snippet,
 )
 from app.parsers.section_extractor import extract_sections_from_text
+from app.pipeline.nodes.idea_node import (
+    generate_fs_guided,
+    generate_fs_quick,
+    generate_guided_questions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,17 +38,17 @@ router = APIRouter(prefix="/api/idea", tags=["idea"])
 
 class QuickGenerateRequest(BaseModel):
     idea: str = Field(..., min_length=10, description="Product idea description")
-    industry: Optional[str] = Field(None, description="Target industry")
-    complexity: Optional[str] = Field(None, description="simple | moderate | enterprise")
+    industry: str | None = Field(None, description="Target industry")
+    complexity: str | None = Field(None, description="simple | moderate | enterprise")
 
 
 class GuidedStepRequest(BaseModel):
-    session_id: Optional[str] = Field(None, description="Session ID for continuing a guided flow")
+    session_id: str | None = Field(None, description="Session ID for continuing a guided flow")
     idea: str = Field("", description="Product idea (required for step 0)")
     step: int = Field(0, description="Current step number")
-    answers: Optional[dict] = Field(None, description="Answers to previous step's questions")
-    industry: Optional[str] = None
-    complexity: Optional[str] = None
+    answers: dict | None = Field(None, description="Answers to previous step's questions")
+    industry: str | None = None
+    complexity: str | None = None
 
 
 class IdeaGenerateResponse(BaseModel):
@@ -53,18 +64,89 @@ class GuidedQuestionsResponse(BaseModel):
     questions: list[dict]
 
 
-@router.post("/generate", response_model=APIResponse[IdeaGenerateResponse])
+class CursorTaskEnvelope(BaseModel):
+    mode: str = "cursor_task"
+    task_id: str
+    kind: str
+    prompt: str
+    mcp_snippet: str
+    status: str
+
+
+async def _mint_cursor_generate_fs_task(
+    db: AsyncSession,
+    *,
+    idea: str,
+    industry: str | None,
+    complexity: str | None,
+) -> CursorTaskEnvelope:
+    """Mint a Cursor paste-per-action task and return the envelope.
+
+    The Generate FS UI calls this path when ``llm_provider == "cursor"``
+    so no pipeline LLM calls are made. The user pastes the resulting
+    prompt into Cursor; Cursor submits the FS via the MCP tool.
+    """
+    task_id = uuid.uuid4()
+    prompt = build_generate_fs_prompt(
+        task_id=task_id,
+        idea=idea,
+        industry=industry or "",
+        complexity=complexity or "",
+    )
+    task = CursorTaskDB(
+        id=task_id,
+        kind=CursorTaskKind.GENERATE_FS,
+        status=CursorTaskStatus.PENDING,
+        input_payload={
+            "idea": idea,
+            "industry": industry or "",
+            "complexity": complexity or "",
+        },
+        prompt_text=prompt,
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+    logger.info("Idea route branched to Cursor paste-per-action task %s", task.id)
+    return CursorTaskEnvelope(
+        task_id=str(task.id),
+        kind="generate_fs",
+        prompt=task.prompt_text,
+        mcp_snippet=build_mcp_snippet(),
+        status=task.status.value.lower(),
+    )
+
+
+@router.post("/generate", response_model=APIResponse)
 async def generate_fs_from_idea(
     req: QuickGenerateRequest,
     db: AsyncSession = Depends(get_db),
-) -> APIResponse[IdeaGenerateResponse]:
-    """Quick mode: generate a full FS document from a product idea."""
+) -> APIResponse:
+    """Quick mode: generate a full FS document from a product idea.
+
+    Branches on ``llm_provider``: Cursor returns a paste-per-action
+    task envelope; api and claude_code run the synchronous pipeline.
+    """
+    provider = (await get_configured_llm_provider_name()) or "api"
+    if provider == "cursor":
+        envelope = await _mint_cursor_generate_fs_task(
+            db,
+            idea=req.idea,
+            industry=req.industry,
+            complexity=req.complexity,
+        )
+        return APIResponse(data=envelope.model_dump())
+
     try:
         fs_text = await generate_fs_quick(
             idea=req.idea,
             industry=req.industry,
             complexity=req.complexity,
         )
+    except LLMError:
+        # Let the global handler surface the typed LLMError (e.g.
+        # claude_cli_unavailable as 503) instead of wrapping it as 500.
+        raise
     except Exception as exc:
         logger.exception("FS generation failed")
         raise HTTPException(status_code=500, detail=f"Generation failed: {exc}") from exc
@@ -115,12 +197,29 @@ async def guided_step(
 ) -> APIResponse:
     """Guided mode: multi-step wizard for FS generation."""
 
+    provider = (await get_configured_llm_provider_name()) or "api"
+
     if req.step == 0:
         if not req.idea or len(req.idea.strip()) < 10:
             raise HTTPException(status_code=400, detail="Idea must be at least 10 characters")
 
+        # Cursor does not do an interactive guided flow — there is one
+        # paste that produces the full FS in one shot. Route the user
+        # straight to the paste modal with a generate_fs task envelope
+        # so Settings and Create stay consistent.
+        if provider == "cursor":
+            envelope = await _mint_cursor_generate_fs_task(
+                db,
+                idea=req.idea,
+                industry=req.industry,
+                complexity=req.complexity,
+            )
+            return APIResponse(data=envelope.model_dump())
+
         try:
             questions = await generate_guided_questions(req.idea)
+        except LLMError:
+            raise
         except Exception as exc:
             logger.exception("Guided question generation failed")
             raise HTTPException(status_code=500, detail=f"Question generation failed: {exc}") from exc
@@ -147,9 +246,15 @@ async def guided_step(
     if not req.session_id:
         raise HTTPException(status_code=400, detail="session_id required for step > 0")
 
-    result = await db.execute(
-        select(IdeaSessionDB).where(IdeaSessionDB.id == uuid.UUID(req.session_id))
-    )
+    try:
+        session_uuid = uuid.UUID(req.session_id)
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"session_id must be a valid UUID, got: {req.session_id!r}",
+        ) from exc
+
+    result = await db.execute(select(IdeaSessionDB).where(IdeaSessionDB.id == session_uuid))
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -161,6 +266,29 @@ async def guided_step(
         state["answers"] = existing_answers
 
     if req.step >= 1 and state.get("answers"):
+        if provider == "cursor":
+            # Guided answers should enrich the idea, but Cursor only
+            # wants one paste. Collapse everything into a single
+            # generate_fs task prompt.
+            enriched_idea = session.idea_text
+            answers = state.get("answers") or {}
+            if answers:
+                lines = [session.idea_text, "", "Additional context:"]
+                for key, value in answers.items():
+                    lines.append(f"- {key}: {value}")
+                enriched_idea = "\n".join(lines)
+            envelope = await _mint_cursor_generate_fs_task(
+                db,
+                idea=enriched_idea,
+                industry=session.industry or None,
+                complexity=session.complexity or None,
+            )
+            state["step"] = req.step
+            state["cursor_task_id"] = envelope.task_id
+            session.conversation_state = state
+            await db.commit()
+            return APIResponse(data=envelope.model_dump())
+
         try:
             fs_text = await generate_fs_guided(
                 idea=session.idea_text,
@@ -168,6 +296,8 @@ async def guided_step(
                 industry=session.industry or None,
                 complexity=session.complexity or None,
             )
+        except LLMError:
+            raise
         except Exception as exc:
             logger.exception("Guided FS generation failed")
             raise HTTPException(status_code=500, detail=f"Generation failed: {exc}") from exc

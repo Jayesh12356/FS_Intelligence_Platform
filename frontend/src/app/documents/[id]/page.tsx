@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, type ReactNode } from "react";
-import { useParams, useSearchParams, useRouter } from "next/navigation";
+import { useEffect, useState, useCallback, type ReactNode } from "react";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
   getDocument,
@@ -19,8 +19,11 @@ import {
   exportToConfluence,
   exportPdfReport,
   exportDocxReport,
+  isCursorTaskEnvelope,
 } from "@/lib/api";
+import { useToolConfig, normalizeProvider } from "@/lib/toolConfig";
 import type {
+  CursorTaskEnvelope,
   FSDocumentDetail,
   FSSection,
   DuplicateFlag,
@@ -29,12 +32,14 @@ import type {
   TaskListData,
 } from "@/lib/api";
 import {
+  CursorTaskModal,
   PageShell,
   KpiCard,
   FadeIn,
   EmptyState,
 } from "@/components/index";
 import { StatusBadge } from "@/components/Badge";
+import { DocumentLifecycle } from "./_components/DocumentLifecycle";
 import CopyButton from "@/components/CopyButton";
 import { AnalysisProgress } from "@/components/AnalysisProgress";
 import { motion, AnimatePresence } from "framer-motion";
@@ -152,8 +157,6 @@ type TabId = "sections" | "analysis";
 
 export default function DocumentDetailPage() {
   const params = useParams();
-  const searchParams = useSearchParams();
-  const router = useRouter();
   const docId = params.id as string;
   const [doc, setDoc] = useState<FSDocumentDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -163,6 +166,8 @@ export default function DocumentDetailPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+  const [cursorTask, setCursorTask] = useState<CursorTaskEnvelope | null>(null);
+  const { config: toolConfig } = useToolConfig();
   const [sections, setSections] = useState<FSSection[]>([]);
   const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set());
   const [editingSection, setEditingSection] = useState<number | null>(null);
@@ -239,31 +244,10 @@ export default function DocumentDetailPage() {
     }
   }, [doc?.status, fetchAnalysisSummary]);
 
-  // Auto-trigger analysis when redirected from refinement acceptance
-  const autoAnalyzeTriggered = useRef(false);
-  useEffect(() => {
-    if (
-      autoAnalyzeTriggered.current ||
-      !doc ||
-      doc.status !== "PARSED" ||
-      searchParams.get("autoAnalyze") !== "1"
-    ) return;
-    autoAnalyzeTriggered.current = true;
-    router.replace(`/documents/${docId}`, { scroll: false });
-    (async () => {
-      setAnalyzing(true);
-      setAnalyzeError(null);
-      try {
-        await analyzeDocument(docId);
-        await fetchDoc();
-      } catch (err: unknown) {
-        setAnalyzeError(err instanceof Error ? err.message : "Analysis failed");
-      } finally {
-        setAnalyzing(false);
-      }
-    })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc?.status, searchParams]);
+  // (removed) The legacy ?autoAnalyze=1 redirect from the refine page is no
+  // longer needed: refinement keeps the document at COMPLETE and only flips
+  // ``analysis_stale`` so the user can re-run analysis explicitly via the
+  // banner below.
 
   // Refetch analysis data when user returns to this tab (back from subpages)
   useEffect(() => {
@@ -291,11 +275,15 @@ export default function DocumentDetailPage() {
   };
 
   const handleAnalyze = async () => {
-    setAnalyzing(true);
     setAnalyzeError(null);
+    setAnalyzing(true);
     try {
-      await analyzeDocument(docId);
-      await fetchDoc();
+      const res = await analyzeDocument(docId);
+      if (isCursorTaskEnvelope(res.data)) {
+        setCursorTask(res.data);
+      } else {
+        await fetchDoc();
+      }
     } catch (err: unknown) {
       setAnalyzeError(err instanceof Error ? err.message : "Analysis failed");
     } finally {
@@ -475,7 +463,6 @@ export default function DocumentDetailPage() {
     { href: `/documents/${doc.id}/traceability`, title: "Traceability Matrix", icon: <Link2 size={20} aria-hidden />, well: "var(--well-blue)", id: "btn-traceability-link" },
     { href: `/documents/${doc.id}/refine`, title: "Refine FS", icon: <Sparkles size={20} aria-hidden />, well: "var(--well-purple)" },
     { href: `/documents/${doc.id}/tests`, title: "Test Cases", icon: <TestTube2 size={20} aria-hidden />, well: "var(--well-peach)" },
-    { href: `/documents/${doc.id}/build`, title: "Build with Cursor", icon: <Play size={20} aria-hidden />, well: "var(--well-green)" },
   ];
 
   const ambiguityCount = ambiguities.filter((a) => !a.resolved).length;
@@ -535,6 +522,7 @@ export default function DocumentDetailPage() {
           <span style={{ fontFamily: "var(--font-mono)", wordBreak: "break-all" }}>{doc.id}</span>
           <CopyButton text={doc.id} label="Copy ID" className="btn btn-secondary btn-sm" />
         </p>
+        <DocumentLifecycle fsId={doc.id} />
       </FadeIn>
 
       {/* ── Duplicate Warning ────────────────────────────── */}
@@ -609,27 +597,75 @@ export default function DocumentDetailPage() {
           <p className="alert alert-error" style={{ marginBottom: "1.25rem", display: "block" }}>{analyzeError}</p>
         )}
 
-        {isComplete && (
-          <div className="card" style={{ marginBottom: "1.5rem" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
-              <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
-                <div className="kpi-icon" style={{ background: "var(--bg-success-subtle)", color: "var(--success)" }}>
-                  <CheckCircle2 size={22} aria-hidden />
-                </div>
-                <div>
-                  <h3 className="page-title" style={{ fontSize: "1.05rem", marginBottom: "0.25rem" }}>Analysis complete</h3>
-                  <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", margin: 0 }}>
-                    Your document is ready. Build the product with one prompt in Cursor.
-                  </p>
-                </div>
+        {isComplete && doc.analysis_stale && (
+          <div
+            className="card alert-warning"
+            role="status"
+            style={{
+              marginBottom: "1.25rem",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "1rem",
+              flexWrap: "wrap",
+              borderColor: "var(--warning, #f59e0b)",
+              background: "var(--bg-warning-subtle, rgba(245,158,11,0.08))",
+            }}
+          >
+            <div style={{ display: "flex", gap: "0.65rem", alignItems: "flex-start" }}>
+              <Zap size={18} aria-hidden style={{ marginTop: "0.15rem" }} />
+              <div>
+                <strong>FS was refined since the last analysis.</strong>
+                <p style={{ margin: "0.2rem 0 0", fontSize: "0.875rem", color: "var(--text-secondary)" }}>
+                  Re-analyze to refresh metrics. The build CTA stays available so you can ship now or after.
+                </p>
               </div>
-              <Link href={`/documents/${doc.id}/build`} className="btn btn-primary" style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}>
-                <Play size={18} aria-hidden />
-                Build with Cursor
-              </Link>
             </div>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleAnalyze}
+              disabled={analyzing}
+            >
+              {analyzing ? "Re-analyzing…" : "Re-analyze"}
+            </button>
           </div>
         )}
+
+        {isComplete && (() => {
+          const buildPref = normalizeProvider(toolConfig?.build_provider);
+          if (buildPref !== "cursor" && buildPref !== "claude_code") return null;
+          const isClaude = buildPref === "claude_code";
+          const ctaLabel = isClaude ? "Build with Claude" : "Build with Cursor";
+          const ctaSub = isClaude
+            ? "Spawns Claude Code with the rich, analysis-aware prompt and the MCP server wired in."
+            : "Opens the Cursor kickoff page with the MCP snippet and the rich, analysis-aware agent prompt.";
+          return (
+            <div className="card" style={{ marginBottom: "1.5rem" }} data-testid="build-cta-card">
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
+                <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
+                  <div className="kpi-icon" style={{ background: "var(--bg-success-subtle)", color: "var(--success)" }}>
+                    <CheckCircle2 size={22} aria-hidden />
+                  </div>
+                  <div>
+                    <h3 className="page-title" style={{ fontSize: "1.05rem", marginBottom: "0.25rem" }}>Analysis complete</h3>
+                    <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", margin: 0 }}>{ctaSub}</p>
+                  </div>
+                </div>
+                <Link
+                  href={`/documents/${doc.id}/build`}
+                  className="btn btn-primary"
+                  style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}
+                  aria-label={ctaLabel}
+                  data-testid="build-cta-link"
+                >
+                  <Play size={18} aria-hidden />
+                  {ctaLabel}
+                </Link>
+              </div>
+            </div>
+          );
+        })()}
       </FadeIn>
 
       {/* ── Re-parse fallback ────────────────────────────── */}
@@ -895,6 +931,15 @@ export default function DocumentDetailPage() {
           )}
         </FadeIn>
       )}
+
+      <CursorTaskModal
+        envelope={cursorTask}
+        onClose={() => setCursorTask(null)}
+        onDone={async () => {
+          setCursorTask(null);
+          await fetchDoc();
+        }}
+      />
     </PageShell>
   );
 }

@@ -17,8 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import FSDocument, FSDocumentStatus
 from app.parsers.base import ParsedFS
-from app.parsers.pdf_parser import parse_pdf
 from app.parsers.docx_parser import parse_docx
+from app.parsers.pdf_parser import parse_pdf
 from app.parsers.txt_parser import parse_txt
 
 logger = logging.getLogger(__name__)
@@ -71,9 +71,7 @@ async def parse_document(
         raise ValueError(f"Invalid document ID: {fs_id}")
 
     # Load the document
-    result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_uuid)
-    )
+    result = await db.execute(select(FSDocument).where(FSDocument.id == doc_uuid))
     doc = result.scalar_one_or_none()
 
     if doc is None:

@@ -32,18 +32,14 @@ async def get_audit_log(
     VERSION_ADDED, TASKS_GENERATED, EXPORTED, COMMENT_ADDED, etc.
     """
     # Verify document exists
-    doc_result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = doc_result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
     # Load all audit events
     result = await db.execute(
-        select(AuditEventDB)
-        .where(AuditEventDB.fs_id == doc_id)
-        .order_by(AuditEventDB.created_at.asc())
+        select(AuditEventDB).where(AuditEventDB.fs_id == doc_id).order_by(AuditEventDB.created_at.asc())
     )
     events = result.scalars().all()
 

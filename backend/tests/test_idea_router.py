@@ -30,9 +30,7 @@ class _FakeIdea:
 
 
 @pytest.mark.asyncio
-async def test_quick_generate_happy_path(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_quick_generate_happy_path(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeIdea(monkeypatch)
     resp = await client.post(
         "/api/idea/generate",
@@ -52,18 +50,14 @@ async def test_quick_generate_rejects_short_idea(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_guided_step0_requires_idea(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_guided_step0_requires_idea(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeIdea(monkeypatch)
     resp = await client.post("/api/idea/guided", json={"step": 0, "idea": ""})
     assert resp.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_guided_step0_returns_questions(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_guided_step0_returns_questions(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeIdea(monkeypatch)
     resp = await client.post(
         "/api/idea/guided",
@@ -77,18 +71,14 @@ async def test_guided_step0_returns_questions(
 
 
 @pytest.mark.asyncio
-async def test_guided_step1_without_session_400(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_guided_step1_without_session_400(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeIdea(monkeypatch)
     resp = await client.post("/api/idea/guided", json={"step": 1, "idea": ""})
     assert resp.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_guided_step1_unknown_session_404(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_guided_step1_unknown_session_404(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeIdea(monkeypatch)
     resp = await client.post(
         "/api/idea/guided",
@@ -102,9 +92,7 @@ async def test_guided_step1_unknown_session_404(
 
 
 @pytest.mark.asyncio
-async def test_guided_full_flow_produces_document(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_guided_full_flow_produces_document(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeIdea(monkeypatch)
     first = await client.post(
         "/api/idea/guided",

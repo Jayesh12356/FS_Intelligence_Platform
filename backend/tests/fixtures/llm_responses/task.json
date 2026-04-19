@@ -1,0 +1,47 @@
+{
+  "tasks": [
+    {
+      "title": "Scaffold FastAPI app and routers",
+      "description": "Create app.py with a FastAPI instance and an empty /todos router.",
+      "effort_hours": 1,
+      "acceptance_criteria": [
+        "GET /health returns {\"status\": \"ok\"}"
+      ],
+      "tags": ["scaffold"],
+      "section_ref": 0
+    },
+    {
+      "title": "Implement GET /todos",
+      "description": "Return the module-level todos list as JSON.",
+      "effort_hours": 1,
+      "acceptance_criteria": [
+        "GET /todos returns an array",
+        "Response shape matches {id:int, text:str}"
+      ],
+      "tags": ["api"],
+      "section_ref": 0
+    },
+    {
+      "title": "Implement POST /todos",
+      "description": "Accept JSON {text:string}, append with server-generated id.",
+      "effort_hours": 1,
+      "acceptance_criteria": [
+        "POST /todos 200 with a new todo",
+        "Invalid JSON body returns 422"
+      ],
+      "tags": ["api"],
+      "section_ref": 1
+    },
+    {
+      "title": "Implement DELETE /todos/{id}",
+      "description": "Remove todo by id; 404 if missing.",
+      "effort_hours": 1,
+      "acceptance_criteria": [
+        "DELETE succeeds for existing id",
+        "Unknown id returns 404"
+      ],
+      "tags": ["api"],
+      "section_ref": 1
+    }
+  ]
+}

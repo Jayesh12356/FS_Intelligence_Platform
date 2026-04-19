@@ -581,7 +581,7 @@ export default function QualityDashboardPage() {
                                     borderRadius: "var(--radius-md)",
                                     fontSize: "0.8125rem",
                                     lineHeight: 1.6,
-                                    color: "var(--success)",
+                                    color: "var(--success-text)",
                                     fontWeight: 500,
                                   }}
                                 >

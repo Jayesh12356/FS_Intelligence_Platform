@@ -4,6 +4,7 @@ Revision ID: 0003_duplicate_flag_fk
 Revises: 0002_ambiguity_resolution_text
 Create Date: 2026-04-17
 """
+
 from __future__ import annotations
 
 from typing import Sequence, Union
@@ -21,10 +22,7 @@ _FK_NAME = "duplicate_flags_similar_fs_id_fkey"
 def upgrade() -> None:
     # Drop any stale rows whose target document was already deleted so the
     # constraint creation succeeds.
-    op.execute(
-        "DELETE FROM duplicate_flags "
-        "WHERE similar_fs_id NOT IN (SELECT id FROM fs_documents)"
-    )
+    op.execute("DELETE FROM duplicate_flags WHERE similar_fs_id NOT IN (SELECT id FROM fs_documents)")
     bind = op.get_bind()
     dialect = bind.dialect.name
     if dialect == "postgresql":

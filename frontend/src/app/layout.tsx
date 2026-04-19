@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { Upload, FileText, RotateCcw, BookOpen, Activity, FolderOpen, Sun, Moon, Menu, X, Zap, Sparkles, Settings } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, MotionConfig } from "framer-motion";
 import { ToastProvider } from "../components/Toaster";
 
 const THEME_INIT = `
@@ -59,10 +59,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="description" content="AI-powered platform that transforms Functional Specification documents into dev-ready task breakdowns" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+        {/* Inter is loaded globally for every route via this <link>; because
+            RootLayout is a Client Component we can't use `next/font` (which
+            requires a Server Component) without a broader refactor. The
+            lint rule flags this pattern as single-page-only, but in our
+            shared layout it applies app-wide, so the warning is a false
+            positive. */}
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
         <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet" />
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
       </head>
       <body>
+        {/* Honor the OS-level "reduce motion" setting (used by axe e2e
+            and by accessibility-conscious users) so transform/opacity
+            animations from framer-motion resolve instantly to their
+            final state instead of holding mid-flight values that fail
+            color-contrast or trigger vestibular discomfort. */}
+        <MotionConfig reducedMotion="user">
         <ToastProvider>
         <div className="app-container">
           <nav className="nav">
@@ -138,6 +151,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <main className="main-content">{children}</main>
         </div>
         </ToastProvider>
+        </MotionConfig>
 
         <style>{`
           @media (max-width: 768px) {

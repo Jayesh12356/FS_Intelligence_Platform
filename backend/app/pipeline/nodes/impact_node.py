@@ -10,6 +10,8 @@ import logging
 from typing import List
 
 from app.orchestration.pipeline_llm import pipeline_call_llm_json
+from app.pipeline.prompts.impact import change_impact as change_impact_prompt
+from app.pipeline.prompts.shared.flags import legacy_prompts_enabled
 from app.pipeline.state import FSImpactState, ImpactType, TaskImpact
 
 logger = logging.getLogger(__name__)
@@ -126,18 +128,28 @@ async def analyze_change_impact(
     old_text = change.get("old_text") or "(section did not exist)"
     new_text = change.get("new_text") or "(section was deleted)"
 
-    prompt = IMPACT_USER_PROMPT.format(
-        change_type=change.get("change_type", "MODIFIED"),
-        section_heading=change.get("section_heading", "Unknown"),
-        old_text=old_text,
-        new_text=new_text,
-        task_list=task_list_str,
-    )
+    if legacy_prompts_enabled():
+        system_prompt = IMPACT_SYSTEM_PROMPT
+        user_prompt = IMPACT_USER_PROMPT.format(
+            change_type=change.get("change_type", "MODIFIED"),
+            section_heading=change.get("section_heading", "Unknown"),
+            old_text=old_text,
+            new_text=new_text,
+            task_list=task_list_str,
+        )
+    else:
+        system_prompt, user_prompt = change_impact_prompt.build(
+            change_type=change.get("change_type", "MODIFIED"),
+            section_heading=change.get("section_heading", "Unknown"),
+            old_text=old_text,
+            new_text=new_text,
+            task_list=task_list_str,
+        )
 
     try:
         result = await pipeline_call_llm_json(
-            prompt=prompt,
-            system=IMPACT_SYSTEM_PROMPT,
+            prompt=user_prompt,
+            system=system_prompt,
             temperature=0.0,
             max_tokens=4096,
             role="build",
@@ -151,11 +163,7 @@ async def analyze_change_impact(
         for item in result:
             try:
                 impact_str = item.get("impact_type", "UNAFFECTED").upper()
-                impact_type = (
-                    ImpactType(impact_str)
-                    if impact_str in ImpactType.__members__
-                    else ImpactType.UNAFFECTED
-                )
+                impact_type = ImpactType(impact_str) if impact_str in ImpactType.__members__ else ImpactType.UNAFFECTED
 
                 impact = TaskImpact(
                     task_id=item.get("task_id", ""),
@@ -171,8 +179,7 @@ async def analyze_change_impact(
         return impacts
 
     except Exception as exc:
-        logger.error("Impact analysis failed for change in %s: %s",
-                      change.get("section_heading", "?"), exc)
+        logger.error("Impact analysis failed for change in %s: %s", change.get("section_heading", "?"), exc)
         raise
 
 
@@ -192,7 +199,9 @@ async def impact_node(state: FSImpactState) -> FSImpactState:
 
     logger.info(
         "Impact node: analyzing %d changes against %d tasks for fs_id=%s",
-        len(fs_changes), len(tasks), state.get("fs_id", "?"),
+        len(fs_changes),
+        len(tasks),
+        state.get("fs_id", "?"),
     )
 
     if not fs_changes:
@@ -241,7 +250,9 @@ async def impact_node(state: FSImpactState) -> FSImpactState:
 
     logger.info(
         "Impact node complete: %d invalidated, %d require review, %d unaffected",
-        invalidated, review, unaffected,
+        invalidated,
+        review,
+        unaffected,
     )
 
     return {

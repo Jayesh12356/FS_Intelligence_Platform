@@ -1,18 +1,47 @@
-"""Bridge between the orchestration layer and the existing LLM client.
+"""Bridge between the orchestration layer and the LLM client.
 
-When ORCHESTRATION_ENABLED is true, routes LLM calls through the user-preferred
-provider from ToolConfigDB, respecting the configured fallback_chain.
-When false, delegates directly to the existing call_llm (Phase 1 behavior).
+Every LLM call made by the backend goes through :func:`orchestrated_call_llm`.
+The provider configured in ``ToolConfigDB`` (``api`` | ``claude_code`` |
+``cursor``) is resolved from the registry and called exactly once. There
+is no feature flag and there is no fallback chain.
+
+Token-protection rule (0.4.0+)
+------------------------------
+
+Subscription-backed providers (``cursor``, ``claude_code``) must **never**
+silently fall back to a different provider — least of all the Direct
+API — because that would charge the user's OpenRouter / Anthropic
+credits instead of the subscription they asked to use.
+
+Concretely, if the configured ``llm_provider`` is:
+
+* ``cursor``      — the calling route should have branched to the
+                    paste-per-action flow and never called this
+                    function. If it does, :class:`CursorLLMUnsupported`
+                    is raised and surfaced as a loud :class:`LLMError`
+                    so the bug is visible.
+* ``claude_code`` — the Claude Code CLI provider is tried exactly once.
+                    On any failure we raise :class:`LLMError`. No
+                    fallback chain is ever consulted.
+* ``api``         — the Direct-API client is the only path.
+
+There is no silent fallback path to the Direct API anywhere in this
+module. If this rule is ever weakened, add a matching assertion to
+``backend/tests/test_no_direct_api_fallback.py`` first.
 """
 
 import logging
-from typing import Any, List
+from typing import Any
 
-from app.config import get_settings
 from app.llm import get_llm_client
 from app.llm.client import LLMError
 
 logger = logging.getLogger(__name__)
+
+# Providers that MUST NOT fall back to any other provider. These are
+# subscription-backed (user's Cursor Pro / Anthropic Claude Code plan)
+# and any fallback would leak tokens to server-side credits.
+NO_FALLBACK_PROVIDERS = {"cursor", "claude_code"}
 
 
 async def _call_via_direct_api(
@@ -20,18 +49,26 @@ async def _call_via_direct_api(
 ) -> str:
     client = get_llm_client()
     return await client.call_llm(
-        prompt=prompt, system=system, max_tokens=max_tokens,
-        temperature=temperature, role=role, **kwargs,
+        prompt=prompt,
+        system=system,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        role=role,
+        **kwargs,
     )
 
 
 async def _call_via_provider(
-    provider: Any, prompt: str, system: str, max_tokens: int, temperature: float, **kwargs: Any
+    provider: Any, prompt: str, system: str, max_tokens: int, temperature: float, role: str, **kwargs: Any
 ) -> str:
     if provider.name == "api":
-        return await _call_via_direct_api(prompt, system, max_tokens, temperature, "primary", **kwargs)
+        return await _call_via_direct_api(prompt, system, max_tokens, temperature, role, **kwargs)
     return await provider.call_llm(
-        prompt=prompt, system=system, max_tokens=max_tokens, temperature=temperature, **kwargs,
+        prompt=prompt,
+        system=system,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        **kwargs,
     )
 
 
@@ -43,63 +80,55 @@ async def orchestrated_call_llm(
     role: str = "primary",
     **kwargs: Any,
 ) -> str:
-    """Drop-in replacement for call_llm that routes through the tool registry."""
-    settings = get_settings()
+    """Drop-in replacement for call_llm that routes through the tool registry.
 
-    if not settings.ORCHESTRATION_ENABLED:
-        return await _call_via_direct_api(prompt, system, max_tokens, temperature, role, **kwargs)
-
+    Strict provider isolation: ``cursor`` and ``claude_code`` are tried
+    exactly once and any failure is raised; only ``api`` (Direct API)
+    ever executes the built-in ``_call_via_direct_api`` path.
+    """
     from app.orchestration import get_tool_registry
-    from app.orchestration.config_resolver import get_configured_llm_provider_name, get_configured_fallback_chain
+    from app.orchestration.config_resolver import get_configured_llm_provider_name
 
     registry = get_tool_registry()
-    strict = settings.ORCHESTRATION_STRICT_LLM
-    preferred = await get_configured_llm_provider_name()
-    fallback_chain: List[str] = await get_configured_fallback_chain()
+    preferred = (await get_configured_llm_provider_name()) or "api"
 
+    # Resolve the single provider we will use. No fallback ever.
     try:
-        provider = registry.get_provider_for("llm", preferred, strict_preferred=strict)
+        provider = registry.get_provider_for("llm", preferred, strict_preferred=True)
     except ValueError as exc:
-        if strict and not fallback_chain:
-            raise LLMError(
-                f"Orchestration LLM routing failed: {exc}",
-                provider=preferred or "", model="",
-            ) from exc
-        logger.warning("Primary provider %s failed to resolve: %s", preferred, exc)
-        provider = None
-
-    if provider is not None:
-        try:
-            logger.info("Routing LLM call through provider: %s", provider.name)
-            return await _call_via_provider(provider, prompt, system, max_tokens, temperature, **kwargs)
-        except Exception as exc:
-            logger.warning("Provider %s call failed: %s", provider.name, exc)
-            if strict and not fallback_chain:
-                raise LLMError(
-                    f"Provider {provider.name!r} failed: {exc}",
-                    provider=provider.name, model="",
-                ) from exc
-
-    for chain_name in fallback_chain:
-        if chain_name == preferred:
-            continue
-        try:
-            chain_provider = registry.get_provider_for("llm", chain_name, strict_preferred=False)
-        except ValueError:
-            logger.warning("Fallback provider %s not found, skipping", chain_name)
-            continue
-        try:
-            logger.info("Trying fallback provider: %s", chain_provider.name)
-            return await _call_via_provider(chain_provider, prompt, system, max_tokens, temperature, **kwargs)
-        except Exception as exc:
-            logger.warning("Fallback provider %s failed: %s", chain_provider.name, exc)
-            continue
-
-    if strict:
         raise LLMError(
-            f"All providers exhausted (preferred={preferred!r}, chain={fallback_chain})",
-            provider=preferred or "", model="",
-        )
+            f"Configured LLM provider {preferred!r} is not available: {exc}",
+            provider=preferred,
+            model="",
+        ) from exc
 
-    logger.warning("All configured providers failed; final fallback to Direct API")
-    return await _call_via_direct_api(prompt, system, max_tokens, temperature, role, **kwargs)
+    logger.info("Routing LLM call through provider: %s (strict, no fallback)", provider.name)
+    try:
+        return await _call_via_provider(provider, prompt, system, max_tokens, temperature, role, **kwargs)
+    except LLMError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — wrap everything as LLMError for the handler
+        from app.orchestration.providers.cursor_provider import CursorLLMUnsupported
+
+        if isinstance(exc, CursorLLMUnsupported):
+            raise LLMError(
+                str(exc),
+                provider=provider.name,
+                model="",
+            ) from exc
+        if provider.name in NO_FALLBACK_PROVIDERS:
+            logger.error(
+                "Subscription-backed provider %s failed; refusing fallback: %s",
+                provider.name,
+                exc,
+            )
+            raise LLMError(
+                f"Provider {provider.name!r} failed and fallback is disabled (subscription-backed): {exc}",
+                provider=provider.name,
+                model="",
+            ) from exc
+        raise LLMError(
+            f"Provider {provider.name!r} failed: {exc}",
+            provider=provider.name,
+            model="",
+        ) from exc

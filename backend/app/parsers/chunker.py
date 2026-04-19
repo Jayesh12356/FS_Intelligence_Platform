@@ -38,11 +38,13 @@ def _chunk_section(section: FSSection, base_chunk_index: int) -> List[FSChunk]:
 
     # If content fits in one chunk, return it directly
     if len(content) <= MAX_CHUNK_CHARS:
-        return [FSChunk(
-            section_heading=section.heading,
-            text=content,
-            chunk_index=base_chunk_index,
-        )]
+        return [
+            FSChunk(
+                section_heading=section.heading,
+                text=content,
+                chunk_index=base_chunk_index,
+            )
+        ]
 
     # Split into sentences and group into chunks
     sentences = _split_into_sentences(content)
@@ -57,11 +59,13 @@ def _chunk_section(section: FSSection, base_chunk_index: int) -> List[FSChunk]:
         # If adding this sentence would exceed the limit, finish current chunk
         if current_length + sentence_len > MAX_CHUNK_CHARS and current_sentences:
             chunk_text = " ".join(current_sentences)
-            chunks.append(FSChunk(
-                section_heading=section.heading,
-                text=chunk_text,
-                chunk_index=chunk_idx,
-            ))
+            chunks.append(
+                FSChunk(
+                    section_heading=section.heading,
+                    text=chunk_text,
+                    chunk_index=chunk_idx,
+                )
+            )
             chunk_idx += 1
             current_sentences = []
             current_length = 0
@@ -80,11 +84,13 @@ def _chunk_section(section: FSSection, base_chunk_index: int) -> List[FSChunk]:
                 chunk_index=chunks[-1].chunk_index,
             )
         else:
-            chunks.append(FSChunk(
-                section_heading=section.heading,
-                text=chunk_text,
-                chunk_index=chunk_idx,
-            ))
+            chunks.append(
+                FSChunk(
+                    section_heading=section.heading,
+                    text=chunk_text,
+                    chunk_index=chunk_idx,
+                )
+            )
 
     return chunks
 
@@ -137,9 +143,9 @@ def chunk_text_into_sections(raw_text: str) -> List[dict]:
     # Split on common heading patterns (numbered sections, markdown-style headings)
     heading_pattern = re.compile(
         r"^(?:"
-        r"#{1,3}\s+.+"           # Markdown headings
-        r"|(?:\d+\.)+\s+.+"     # Numbered headings (1., 1.1., etc.)
-        r"|[A-Z][A-Z\s]{2,}$"    # ALL-CAPS headings
+        r"#{1,3}\s+.+"  # Markdown headings
+        r"|(?:\d+\.)+\s+.+"  # Numbered headings (1., 1.1., etc.)
+        r"|[A-Z][A-Z\s]{2,}$"  # ALL-CAPS headings
         r")",
         re.MULTILINE,
     )
@@ -148,11 +154,13 @@ def chunk_text_into_sections(raw_text: str) -> List[dict]:
 
     if not headings:
         # No headings found — treat entire text as one section
-        return [{
-            "heading": "Document",
-            "content": raw_text.strip(),
-            "section_index": 0,
-        }]
+        return [
+            {
+                "heading": "Document",
+                "content": raw_text.strip(),
+                "section_index": 0,
+            }
+        ]
 
     sections: List[dict] = []
     for i, match in enumerate(headings):
@@ -162,21 +170,26 @@ def chunk_text_into_sections(raw_text: str) -> List[dict]:
         content = raw_text[start:end].strip()
 
         if content:
-            sections.append({
-                "heading": heading,
-                "content": content,
-                "section_index": i,
-            })
+            sections.append(
+                {
+                    "heading": heading,
+                    "content": content,
+                    "section_index": i,
+                }
+            )
 
     # If no sections were created but there was text before the first heading
     if headings and headings[0].start() > 0:
-        preamble = raw_text[:headings[0].start()].strip()
+        preamble = raw_text[: headings[0].start()].strip()
         if preamble:
-            sections.insert(0, {
-                "heading": "Preamble",
-                "content": preamble,
-                "section_index": 0,
-            })
+            sections.insert(
+                0,
+                {
+                    "heading": "Preamble",
+                    "content": preamble,
+                    "section_index": 0,
+                },
+            )
             # Re-index
             for idx, s in enumerate(sections):
                 s["section_index"] = idx

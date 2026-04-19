@@ -72,7 +72,8 @@ async def duplicate_node(state: FSAnalysisState) -> FSAnalysisState:
             except Exception as exc:
                 logger.warning(
                     "duplicate_node: search failed for section %d: %s",
-                    section_index, exc,
+                    section_index,
+                    exc,
                 )
                 continue
 
@@ -85,7 +86,8 @@ async def duplicate_node(state: FSAnalysisState) -> FSAnalysisState:
 
     logger.info(
         "duplicate_node: found %d potential duplicates for fs_id=%s",
-        len(duplicates), fs_id,
+        len(duplicates),
+        fs_id,
     )
 
     return {

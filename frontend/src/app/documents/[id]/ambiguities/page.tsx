@@ -10,8 +10,9 @@ import {
   getDebateResults,
   bulkResolveAmbiguities,
   getDocument,
+  isCursorTaskEnvelope,
 } from "@/lib/api";
-import type { AmbiguityFlag, DebateResult } from "@/lib/api";
+import type { AmbiguityFlag, CursorTaskEnvelope, DebateResult } from "@/lib/api";
 import {
   PageShell,
   KpiCard,
@@ -21,6 +22,7 @@ import {
   StaggerItem,
   ScoreBar,
   EmptyState,
+  CursorTaskModal,
 } from "@/components/index";
 import Badge from "@/components/Badge";
 import { useToast } from "@/components/Toaster";
@@ -217,6 +219,7 @@ export default function AmbiguitiesPage() {
   const [error, setError] = useState<string | null>(null);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
   const [filterTab, setFilterTab] = useState<string>("all");
+  const [cursorTask, setCursorTask] = useState<CursorTaskEnvelope | null>(null);
 
   const fetchFlags = useCallback(async () => {
     setError(null);
@@ -257,8 +260,12 @@ export default function AmbiguitiesPage() {
     setAnalyzing(true);
     setError(null);
     try {
-      await analyzeDocument(docId);
-      await fetchFlags();
+      const res = await analyzeDocument(docId);
+      if (isCursorTaskEnvelope(res.data)) {
+        setCursorTask(res.data);
+      } else {
+        await fetchFlags();
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Analysis failed");
     } finally {
@@ -755,6 +762,15 @@ export default function AmbiguitiesPage() {
           }
         />
       )}
+
+      <CursorTaskModal
+        envelope={cursorTask}
+        onClose={() => setCursorTask(null)}
+        onDone={async () => {
+          setCursorTask(null);
+          await fetchFlags();
+        }}
+      />
     </PageShell>
   );
 }

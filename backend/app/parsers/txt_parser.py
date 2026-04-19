@@ -15,12 +15,12 @@ logger = logging.getLogger(__name__)
 
 # Patterns that suggest a heading in plain text
 _TXT_HEADING_PATTERNS = [
-    re.compile(r"^\d+\.?\s+\S"),               # "1. Introduction"
-    re.compile(r"^\d+\.\d+\.?\s+"),             # "1.1 Sub-section"
-    re.compile(r"^[A-Z][A-Z\s\-]{4,}$"),        # "OVERVIEW"
-    re.compile(r"^={3,}$"),                      # "===" separator
-    re.compile(r"^-{3,}$"),                      # "---" separator
-    re.compile(r"^#{1,4}\s+"),                   # Markdown-style headings
+    re.compile(r"^\d+\.?\s+\S"),  # "1. Introduction"
+    re.compile(r"^\d+\.\d+\.?\s+"),  # "1.1 Sub-section"
+    re.compile(r"^[A-Z][A-Z\s\-]{4,}$"),  # "OVERVIEW"
+    re.compile(r"^={3,}$"),  # "===" separator
+    re.compile(r"^-{3,}$"),  # "---" separator
+    re.compile(r"^#{1,4}\s+"),  # Markdown-style headings
 ]
 
 
@@ -93,11 +93,13 @@ def parse_txt(filepath: str) -> ParsedFS:
             # Save previous section
             content_text = "\n".join(current_content).strip()
             if content_text:
-                sections.append(FSSection(
-                    heading=current_heading,
-                    content=content_text,
-                    section_index=section_index,
-                ))
+                sections.append(
+                    FSSection(
+                        heading=current_heading,
+                        content=content_text,
+                        section_index=section_index,
+                    )
+                )
                 section_index += 1
             # Clean heading (remove markdown #, trailing :)
             heading = line.strip().lstrip("#").strip().rstrip(":")
@@ -109,22 +111,25 @@ def parse_txt(filepath: str) -> ParsedFS:
     # Save the last section
     content_text = "\n".join(current_content).strip()
     if content_text:
-        sections.append(FSSection(
-            heading=current_heading,
-            content=content_text,
-            section_index=section_index,
-        ))
+        sections.append(
+            FSSection(
+                heading=current_heading,
+                content=content_text,
+                section_index=section_index,
+            )
+        )
 
     # Fallback
     if not sections and raw_text.strip():
-        sections.append(FSSection(
-            heading="Document Content",
-            content=raw_text.strip(),
-            section_index=0,
-        ))
+        sections.append(
+            FSSection(
+                heading="Document Content",
+                content=raw_text.strip(),
+                section_index=0,
+            )
+        )
 
-    logger.info("Parsed TXT %s: %d lines, %d sections, %d chars",
-                filepath, len(lines), len(sections), len(raw_text))
+    logger.info("Parsed TXT %s: %d lines, %d sections, %d chars", filepath, len(lines), len(sections), len(raw_text))
 
     return ParsedFS(
         raw_text=raw_text,

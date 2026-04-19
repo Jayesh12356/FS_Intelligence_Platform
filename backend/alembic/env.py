@@ -6,16 +6,17 @@ import sys
 from logging.config import fileConfig
 from pathlib import Path
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
+
+from alembic import context
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.config import get_settings  # noqa: E402
-from app.db.base import Base  # noqa: E402
 from app.db import models  # noqa: F401,E402  (register models)
+from app.db.base import Base  # noqa: E402
 
 config = context.config
 

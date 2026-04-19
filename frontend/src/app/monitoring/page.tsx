@@ -34,8 +34,10 @@ import {
   Cpu,
   Hammer,
   Monitor,
+  Rocket,
 } from "lucide-react";
 import Link from "next/link";
+import { CategoryChip } from "@/components/CategoryChip";
 
 type MainTab = "activity" | "sessions" | "tools";
 
@@ -169,12 +171,12 @@ export default function MonitoringPage() {
       else setActivityLoading(true);
       try {
         const trimmedSearch = docSearch.trim();
-        const res = await getActivityLog(
-          50,
-          0,
-          eventTypeFilter || undefined,
-          trimmedSearch || undefined,
-        );
+        const res = await getActivityLog({
+          limit: 200,
+          offset: 0,
+          eventType: eventTypeFilter || undefined,
+          documentName: trimmedSearch || undefined,
+        });
         const rows = res.data?.events ?? [];
         setActivityEvents(rows);
         setActivityTotal(res.data?.total ?? rows.length);
@@ -315,6 +317,25 @@ export default function MonitoringPage() {
       }
     }
     return best;
+  }, [activityEvents]);
+
+  /** 7-day build KPI strip — counts pulled from the same activity feed
+   *  (no extra API call needed). Cuts the noise of scrolling to find
+   *  whether anything built recently. */
+  const buildKpis = useMemo(() => {
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    let started = 0;
+    let completed = 0;
+    let failed = 0;
+    for (const e of activityEvents) {
+      if (!e.created_at) continue;
+      const t = new Date(e.created_at).getTime();
+      if (t < cutoff) continue;
+      if (e.event_type === "BUILD_STARTED") started++;
+      else if (e.event_type === "BUILD_COMPLETED") completed++;
+      else if (e.event_type === "BUILD_FAILED") failed++;
+    }
+    return { started, completed, failed };
   }, [activityEvents]);
 
   const sortedEvents = useMemo(() => {
@@ -488,6 +509,35 @@ export default function MonitoringPage() {
               </div>
 
               <div
+                className="kpi-row"
+                style={{ marginBottom: "1.25rem" }}
+                data-testid="build-kpi-strip"
+                aria-label="Builds in last 7 days"
+              >
+                <KpiCard
+                  label="Builds started (7d)"
+                  value={buildKpis.started}
+                  icon={<Rocket size={20} />}
+                  iconBg="var(--well-blue)"
+                  delay={0}
+                />
+                <KpiCard
+                  label="Builds completed (7d)"
+                  value={buildKpis.completed}
+                  icon={<CheckCircle2 size={20} />}
+                  iconBg="var(--well-green)"
+                  delay={0.05}
+                />
+                <KpiCard
+                  label="Builds failed (7d)"
+                  value={buildKpis.failed}
+                  icon={<XCircle size={20} />}
+                  iconBg="var(--well-amber)"
+                  delay={0.1}
+                />
+              </div>
+
+              <div
                 style={{
                   display: "flex",
                   flexWrap: "wrap",
@@ -599,8 +649,11 @@ export default function MonitoringPage() {
                                 gap: "0.35rem 0.75rem",
                               }}
                             >
-                              <span style={{ fontWeight: 600, fontSize: "0.9375rem" }}>
-                                {e.event_label || humanizeEventType(e.event_type)}
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                                <CategoryChip category={e.category} />
+                                <span style={{ fontWeight: 600, fontSize: "0.9375rem" }}>
+                                  {e.event_label || humanizeEventType(e.event_type)}
+                                </span>
                               </span>
                               <span className="timeline-time" style={{ marginTop: 0 }}>
                                 {formatTime(e.created_at)}

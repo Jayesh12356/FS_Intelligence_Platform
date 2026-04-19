@@ -8,6 +8,7 @@ The baseline is a no-op. The startup hook creates missing tables from
 ``Base.metadata`` and then stamps this revision so subsequent Alembic
 migrations run forward from here.
 """
+
 from __future__ import annotations
 
 from typing import Sequence, Union

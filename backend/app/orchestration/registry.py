@@ -1,7 +1,6 @@
 """Tool Registry — manages available providers and user preferences."""
 
 import logging
-from typing import Optional
 
 from app.orchestration.base import ExecutionProvider
 
@@ -25,16 +24,28 @@ class ToolRegistry:
             self._providers[provider.name] = provider
             logger.debug("Registered provider: %s (%s)", provider.name, provider.capabilities)
 
+        # Opt-in: the deterministic mock provider is only registered when the
+        # env flag is set. This keeps production behaviour identical.
+        from app.orchestration.providers.mock_provider import (
+            MockProvider,
+            mock_provider_enabled,
+        )
+
+        if mock_provider_enabled():
+            prov = MockProvider()
+            self._providers[prov.name] = prov
+            logger.info("Registered mock LLM provider (PERFECTION_LOOP/LLM_PROVIDER=mock).")
+
     def register(self, provider: ExecutionProvider) -> None:
         self._providers[provider.name] = provider
 
-    def get(self, name: str) -> Optional[ExecutionProvider]:
+    def get(self, name: str) -> ExecutionProvider | None:
         return self._providers.get(name)
 
     def get_provider_for(
         self,
         capability: str,
-        preferred: Optional[str] = None,
+        preferred: str | None = None,
         *,
         strict_preferred: bool = False,
     ) -> ExecutionProvider:
@@ -51,9 +62,7 @@ class ToolRegistry:
                     raise ValueError(f"Unknown provider: {preferred!r}")
             elif not p.supports(capability):
                 if strict_preferred:
-                    raise ValueError(
-                        f"Provider {preferred!r} does not support capability {capability!r}"
-                    )
+                    raise ValueError(f"Provider {preferred!r} does not support capability {capability!r}")
             else:
                 return p
 

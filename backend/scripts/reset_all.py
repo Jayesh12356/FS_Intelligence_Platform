@@ -17,7 +17,7 @@ from sqlalchemy import text
 
 from app.config import get_settings
 from app.db.base import engine
-from app.vector.client import QdrantManager, COLLECTIONS
+from app.vector.client import COLLECTIONS, QdrantManager
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger("reset_all")
@@ -80,6 +80,7 @@ def reset_qdrant() -> None:
             except Exception:
                 logger.info("  Collection %s did not exist", name)
             from qdrant_client.http import models as qdrant_models
+
             qdrant.client.create_collection(
                 collection_name=name,
                 vectors_config=qdrant_models.VectorParams(

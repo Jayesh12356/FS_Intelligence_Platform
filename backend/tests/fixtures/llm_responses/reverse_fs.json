@@ -1,0 +1,8 @@
+{
+  "title": "Reverse-FS: TODO API",
+  "sections": [
+    {"heading": "Overview", "content": "A minimal FastAPI TODO API with four endpoints."},
+    {"heading": "Endpoints", "content": "GET /health, GET /todos, POST /todos, DELETE /todos/{id}."},
+    {"heading": "Non-functional", "content": "In-memory, no auth, single process."}
+  ]
+}

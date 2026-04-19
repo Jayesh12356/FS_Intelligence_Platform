@@ -1,0 +1,86 @@
+# Perfection Verification Loop configuration.
+#
+# Thresholds and budgets for the NUCLEAR gate. All values are intentionally
+# strict; loosen only with a recorded justification in reports/perfection.
+
+stopping:
+  # Cycle must pass every gate this many times in a row before we declare
+  # "perfection achieved" and exit 0.
+  consecutive_green_required: 3
+  # Hard upper bound to protect against un-reachable goals.
+  max_cycles: 50
+  # Estimated USD cap for live-smoke runs across all cycles.
+  budget_usd: 3.00
+
+coverage:
+  backend_line: 95
+  backend_branch: 90
+  frontend_line: 90
+
+mutation:
+  kill_rate: 0.90
+  paths:
+    - app/pipeline/nodes
+    - app/orchestration
+
+property:
+  iterations: 500
+
+contract:
+  # schemathesis hypothesis examples per endpoint
+  examples_per_endpoint: 50
+
+a11y:
+  # axe-core violations of these impact levels fail the gate
+  fail_on:
+    - serious
+    - critical
+
+visual:
+  pixel_delta_threshold: 0.001
+  stability_runs: 3
+
+live_smoke:
+  enabled: true
+  providers:
+    - api
+    - claude_code
+    - cursor
+  scenario_module: scripts.e2e_scenario
+  # No token cap: output completeness is required. The per-run counter
+  # from app.llm.client.get_last_run_token_count is still reported for
+  # visibility, but live_smoke.py does not gate on it.
+  expected:
+    min_tasks: 3
+    max_tasks: 15
+    min_quality: 70
+
+repair:
+  max_attempts_per_signature: 3
+  classes:
+    - DependencyMissing
+    - MigrationDrift
+    - LintAutofix
+    - TypeErrorTrivial
+    - SnapshotStale
+    - LLMTimeoutBackoff
+
+gates:
+  # Order is significant; early gates gate later gates (fail-fast).
+  - env_sanity
+  - static_backend
+  - static_frontend
+  - unit_backend
+  - unit_frontend
+  - contract_backend
+  - db_roundtrip
+  - mcp_contract
+  - property_backend
+  - coverage_backend
+  - coverage_frontend
+  - mutation_backend
+  - component_frontend
+  - e2e_playwright
+  - a11y
+  - visual
+  - live_smoke

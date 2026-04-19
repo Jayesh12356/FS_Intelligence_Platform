@@ -1,0 +1,9 @@
+{
+  "title": "TODO API (mock)",
+  "summary": "A tiny in-memory TODO REST API with four endpoints.",
+  "sections": [
+    {"heading": "Introduction", "content": "Provide a minimal in-memory TODO CRUD API."},
+    {"heading": "Functional requirements", "content": "GET/POST /todos, DELETE /todos/{id}, GET /health."},
+    {"heading": "Acceptance criteria", "content": "All four endpoints behave as described; invalid JSON yields 422; unknown id yields 404."}
+  ]
+}

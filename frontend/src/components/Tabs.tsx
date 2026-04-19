@@ -14,6 +14,16 @@ interface TabsProps {
   onChange: (key: string) => void;
   className?: string;
   "aria-label"?: string;
+  /**
+   * Optional map of `item.key -> existing element id` used to populate
+   * each tab's ``aria-controls``. We *only* emit ``aria-controls`` when
+   * a matching id is provided — pointing the attribute at a non-existent
+   * id is a critical axe violation (`aria-valid-attr-value`), so the
+   * default behaviour drops the attribute entirely. Pages that render
+   * their content directly via the activeKey (the common case here) do
+   * not need to wire this up.
+   */
+  panelIds?: Record<string, string | undefined>;
 }
 
 export default function Tabs({
@@ -22,6 +32,7 @@ export default function Tabs({
   onChange,
   className = "",
   "aria-label": ariaLabel,
+  panelIds,
 }: TabsProps) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -71,7 +82,7 @@ export default function Tabs({
             role="tab"
             type="button"
             aria-selected={isActive}
-            aria-controls={`tabpanel-${item.key}`}
+            aria-controls={panelIds?.[item.key] || undefined}
             id={`tab-${item.key}`}
             tabIndex={isActive ? 0 : -1}
             className={`tab ${isActive ? "active" : ""}`}

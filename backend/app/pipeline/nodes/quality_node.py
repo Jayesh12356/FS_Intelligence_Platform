@@ -8,13 +8,13 @@ compliance-relevant sections (payments, auth, PII, external APIs).
 import logging
 from typing import List
 
-from app.llm import get_llm_client
 from app.orchestration.pipeline_llm import pipeline_call_llm_json
+from app.pipeline.prompts.analysis import quality as quality_prompt
+from app.pipeline.prompts.shared.flags import legacy_prompts_enabled
 from app.pipeline.state import (
     ComplianceTag,
     FSAnalysisState,
     FSQualityScore,
-    Severity,
 )
 
 logger = logging.getLogger(__name__)
@@ -93,12 +93,16 @@ async def detect_compliance_tags_in_section(
     if not content or len(content.strip()) < 20:
         return []
 
-    prompt = COMPLIANCE_USER_PROMPT.format(heading=heading, content=content)
+    if legacy_prompts_enabled():
+        system = COMPLIANCE_SYSTEM_PROMPT
+        prompt = COMPLIANCE_USER_PROMPT.format(heading=heading, content=content)
+    else:
+        system, prompt = quality_prompt.build(heading, content)
 
     try:
         result = await pipeline_call_llm_json(
             prompt=prompt,
-            system=COMPLIANCE_SYSTEM_PROMPT,
+            system=system,
             temperature=0.0,
             max_tokens=1024,
         )
@@ -196,11 +200,7 @@ def compute_quality_score(
     consistency = max(0.0, min(100.0, consistency))
 
     # Overall weighted average
-    overall = (
-        WEIGHT_COMPLETENESS * completeness
-        + WEIGHT_CLARITY * clarity
-        + WEIGHT_CONSISTENCY * consistency
-    )
+    overall = WEIGHT_COMPLETENESS * completeness + WEIGHT_CLARITY * clarity + WEIGHT_CONSISTENCY * consistency
     overall = max(0.0, min(100.0, overall))
 
     return FSQualityScore(
@@ -238,7 +238,10 @@ async def quality_node(state: FSAnalysisState) -> FSAnalysisState:
 
     logger.info(
         "Quality score: completeness=%.1f, clarity=%.1f, consistency=%.1f, overall=%.1f",
-        quality.completeness, quality.clarity, quality.consistency, quality.overall,
+        quality.completeness,
+        quality.clarity,
+        quality.consistency,
+        quality.overall,
     )
 
     # Detect compliance tags
@@ -259,7 +262,8 @@ async def quality_node(state: FSAnalysisState) -> FSAnalysisState:
 
     logger.info(
         "Quality node complete: score=%.1f, %d compliance tags",
-        quality.overall, len(all_compliance_tags),
+        quality.overall,
+        len(all_compliance_tags),
     )
 
     return {

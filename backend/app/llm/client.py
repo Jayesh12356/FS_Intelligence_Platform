@@ -13,11 +13,47 @@ Provider routing:
 import json
 import logging
 import re
-from typing import Optional
+import threading
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+# ── Token accounting (per-thread, request-scoped) ──────
+#
+# The perfection-loop ``live_smoke`` driver caps a single small-spec
+# run at 15k input+output tokens. We keep a thread-local counter that
+# accumulates ``input + output`` tokens for every successful call_llm
+# response. ``reset_token_accounting`` clears the counter at the start
+# of a run; ``get_last_run_token_count`` returns the running total.
+#
+# This counter is intentionally process-local and best-effort — it is
+# only consumed by the smoke driver and observability tooling, never
+# by request-handling code paths.
+_token_lock = threading.Lock()
+_token_state: dict[str, int] = {"total": 0}
+
+
+def reset_token_accounting() -> None:
+    """Reset the running token counter to zero. Call before each smoke run."""
+    with _token_lock:
+        _token_state["total"] = 0
+
+
+def add_to_token_accounting(input_tokens: int, output_tokens: int) -> None:
+    """Increment the running counter. Used internally by ``LLMClient``."""
+    if input_tokens < 0 or output_tokens < 0:
+        return
+    with _token_lock:
+        _token_state["total"] += int(input_tokens) + int(output_tokens)
+
+
+def get_last_run_token_count() -> int:
+    """Return total ``input + output`` tokens since the last reset."""
+    with _token_lock:
+        return int(_token_state["total"])
+
 
 # ── Provider constants ─────────────────────────────────
 
@@ -74,9 +110,7 @@ class LLMClient:
                     self._role_models[role] = val
 
         if self._provider not in (PROVIDER_ANTHROPIC, PROVIDER_OPENAI, PROVIDER_GROQ, PROVIDER_OPENROUTER):
-            logger.warning(
-                "Unknown LLM_PROVIDER '%s' — falling back to anthropic", self._provider
-            )
+            logger.warning("Unknown LLM_PROVIDER '%s' — falling back to anthropic", self._provider)
             self._provider = PROVIDER_ANTHROPIC
 
     def get_model_for_role(self, role: str = "primary") -> str:
@@ -123,9 +157,11 @@ class LLMClient:
 
             if self._provider == PROVIDER_ANTHROPIC:
                 import anthropic
+
                 self._client = anthropic.AsyncAnthropic(api_key=api_key, timeout=timeout_s)
             else:
                 from openai import AsyncOpenAI
+
                 kwargs = {"api_key": api_key, "timeout": timeout_s}
                 if self._provider in _BASE_URLS:
                     kwargs["base_url"] = _BASE_URLS[self._provider]
@@ -141,7 +177,7 @@ class LLMClient:
         self,
         prompt: str,
         system: str = "",
-        model: Optional[str] = None,
+        model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.0,
         role: str = "primary",
@@ -201,9 +237,14 @@ class LLMClient:
         if usage:
             logger.info(
                 "LLM response ← provider=%s, model=%s, tokens_in=%d, tokens_out=%d",
-                self._provider, model,
+                self._provider,
+                model,
                 usage.prompt_tokens or 0,
                 usage.completion_tokens or 0,
+            )
+            add_to_token_accounting(
+                int(usage.prompt_tokens or 0),
+                int(usage.completion_tokens or 0),
             )
         if not text.strip():
             raise LLMError(
@@ -228,9 +269,14 @@ class LLMClient:
         text = message.content[0].text
         logger.info(
             "LLM response ← provider=%s, model=%s, tokens_in=%d, tokens_out=%d",
-            self._provider, model,
+            self._provider,
+            model,
             message.usage.input_tokens,
             message.usage.output_tokens,
+        )
+        add_to_token_accounting(
+            int(message.usage.input_tokens or 0),
+            int(message.usage.output_tokens or 0),
         )
         return text
 
@@ -238,7 +284,7 @@ class LLMClient:
         self,
         prompt: str,
         system: str = "",
-        model: Optional[str] = None,
+        model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.0,
         role: str = "primary",
@@ -330,8 +376,10 @@ class LLMClient:
 
 # ── Module-level convenience function ──────────────────
 
+
 async def call_llm(prompt: str, **kwargs) -> str:
     """Convenience wrapper — imports the singleton and calls it."""
     from app.llm import get_llm_client
+
     client = get_llm_client()
     return await client.call_llm(prompt, **kwargs)

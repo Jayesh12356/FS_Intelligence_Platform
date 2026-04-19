@@ -11,7 +11,7 @@ Tests:
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -153,7 +153,9 @@ class TestChunker:
         from app.parsers.chunker import chunk_parsed_fs
 
         # Create a long section (~5000 chars, should split into 2+ chunks)
-        long_content = ". ".join([f"This is sentence number {i} with some extra text to make it longer" for i in range(100)])
+        long_content = ". ".join(
+            [f"This is sentence number {i} with some extra text to make it longer" for i in range(100)]
+        )
 
         parsed = ParsedFS(
             raw_text=long_content,
@@ -208,21 +210,25 @@ class TestParserRouter:
     def test_get_parser_pdf(self):
         """PDF extension should route to pdf parser."""
         from app.parsers.router import get_parser
+
         assert get_parser(".pdf") is not None
 
     def test_get_parser_docx(self):
         """DOCX extension should route to docx parser."""
         from app.parsers.router import get_parser
+
         assert get_parser(".docx") is not None
 
     def test_get_parser_txt(self):
         """TXT extension should route to txt parser."""
         from app.parsers.router import get_parser
+
         assert get_parser(".txt") is not None
 
     def test_get_parser_unsupported(self):
         """Unsupported extension should return None."""
         from app.parsers.router import get_parser
+
         assert get_parser(".xlsx") is None
         assert get_parser(".ppt") is None
 
@@ -275,9 +281,7 @@ All requirements must be verified through automated tests.
     @pytest.mark.asyncio
     async def test_parse_nonexistent_document(self, client):
         """Parsing a non-existent document should return 400."""
-        response = await client.post(
-            "/api/fs/00000000-0000-0000-0000-000000000000/parse"
-        )
+        response = await client.post("/api/fs/00000000-0000-0000-0000-000000000000/parse")
         assert response.status_code == 400
 
     @pytest.mark.asyncio

@@ -1,0 +1,67 @@
+# graphify ignore — same syntax as .gitignore
+#
+# Keep the graph focused on the human-authored backend, frontend, mcp,
+# scripts, docs, and tests. Skip generated content, vendor dirs, runtime
+# artefacts, and binary uploads (which are user-supplied corpus, not code).
+
+# Python
+.venv/
+venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.mutmut-cache
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+.turbo/
+# NOTE: do NOT add a bare ``build/`` here. Next.js puts build output in
+# ``.next/`` and our app exposes a real route at
+# ``frontend/src/app/documents/[id]/build/`` that must remain in the
+# graph. ``scripts/graphify_build.py`` also patches graphify's hardcoded
+# ``_SKIP_DIRS`` for the same reason. Add explicit paths below if a
+# generated ``build/`` ever needs excluding.
+
+# Test artefacts and snapshots
+playwright-report/
+test-results/
+**/__snapshots__/
+**/test-results/
+**/playwright/.cache/
+
+# Runtime data and logs (not part of the conceptual graph)
+backend/uploads/
+backend/test_*.db
+backend/.e2e_runtime.json
+backend/scripts/_e2e_*.json
+backend/scripts/_tiny_code/
+backend/scripts/_tiny_code.zip
+backend/scripts/.e2e_runtime.json
+**/*.log
+**/*.sqlite
+**/*.sqlite3
+
+# graphify itself
+graphify-out/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Reports / large generated artefacts
+reports/perfection/cycle_*.md
+
+# Lockfiles (not conceptually meaningful)
+package-lock.json
+poetry.lock

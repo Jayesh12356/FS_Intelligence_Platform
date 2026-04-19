@@ -142,6 +142,28 @@ export default function UploadPage() {
     >
       <div className="upload-container">
         <FadeIn>
+          {projects.length > 0 && (
+            <div className="upload-project-picker">
+              <label className="form-label" htmlFor="project-select">
+                Assign to Project <span className="muted">(optional)</span>
+              </label>
+              <select
+                id="project-select"
+                className="form-input"
+                value={selectedProjectId}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <option value="">No project (standalone)</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.document_count} docs)
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <motion.div
             className={`upload-zone ${dragOver ? "drag-over" : ""}`}
             onDrop={onDrop}
@@ -183,31 +205,6 @@ export default function UploadPage() {
             />
           </motion.div>
         </FadeIn>
-
-        {projects.length > 0 && (
-          <FadeIn>
-            <div className="card" style={{ padding: "1rem", marginTop: "1rem" }}>
-              <label className="form-label" htmlFor="project-select">
-                Assign to Project (optional)
-              </label>
-              <select
-                id="project-select"
-                className="form-input"
-                value={selectedProjectId}
-                onChange={(e) => setSelectedProjectId(e.target.value)}
-                onClick={(e) => e.stopPropagation()}
-                style={{ maxWidth: 400 }}
-              >
-                <option value="">No project (standalone)</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.document_count} docs)
-                  </option>
-                ))}
-              </select>
-            </div>
-          </FadeIn>
-        )}
 
         <AnimatePresence mode="wait">
           {uploadState === "uploading" && (

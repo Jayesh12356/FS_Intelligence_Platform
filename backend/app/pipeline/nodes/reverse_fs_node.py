@@ -13,6 +13,16 @@ from typing import List, Tuple
 from app.config import get_settings
 from app.llm.client import LLMError
 from app.orchestration.pipeline_llm import pipeline_call_llm, pipeline_call_llm_json
+from app.pipeline.prompts.reverse import (
+    fs_sections as fs_sections_prompt,
+)
+from app.pipeline.prompts.reverse import (
+    module_summary as module_summary_prompt,
+)
+from app.pipeline.prompts.reverse import (
+    user_flows as user_flows_prompt,
+)
+from app.pipeline.prompts.shared.flags import legacy_prompts_enabled
 from app.pipeline.state import ReverseGenState
 
 logger = logging.getLogger(__name__)
@@ -146,11 +156,16 @@ async def _generate_module_summaries(
 
     for f in files:
         entities = f.get("entities", [])[:max_entities]
-        entities_str = "\n".join([
-            f"  - {e.get('entity_type', 'function')}: {e.get('name', '?')} — {e.get('signature', '')}"
-            + (f" [docstring: {e.get('docstring', '')[:100]}]" if e.get('docstring') else " [no docstring]")
-            for e in entities
-        ]) or "  (no entities extracted)"
+        entities_str = (
+            "\n".join(
+                [
+                    f"  - {e.get('entity_type', 'function')}: {e.get('name', '?')} — {e.get('signature', '')}"
+                    + (f" [docstring: {e.get('docstring', '')[:100]}]" if e.get("docstring") else " [no docstring]")
+                    for e in entities
+                ]
+            )
+            or "  (no entities extracted)"
+        )
 
         code_content = f.get("content", "")
         # Bound excerpt for deterministic token control.
@@ -158,17 +173,26 @@ async def _generate_module_summaries(
         if len(code_content) > max_excerpt_chars:
             code_excerpt += "\n\n# [truncated]"
 
-        prompt = MODULE_SUMMARY_USER.format(
-            file_path=f.get("path", ""),
-            language=f.get("language", ""),
-            entities=entities_str,
-            code_excerpt=code_excerpt,
-        )
+        if legacy_prompts_enabled():
+            system_prompt = MODULE_SUMMARY_SYSTEM
+            user_prompt = MODULE_SUMMARY_USER.format(
+                file_path=f.get("path", ""),
+                language=f.get("language", ""),
+                entities=entities_str,
+                code_excerpt=code_excerpt,
+            )
+        else:
+            system_prompt, user_prompt = module_summary_prompt.build(
+                file_path=f.get("path", ""),
+                language=f.get("language", ""),
+                entities=entities_str,
+                code_excerpt=code_excerpt,
+            )
 
         try:
             result = await pipeline_call_llm_json(
-                prompt=prompt,
-                system=MODULE_SUMMARY_SYSTEM,
+                prompt=user_prompt,
+                system=system_prompt,
                 temperature=0.0,
                 max_tokens=1024,
                 role="longcontext",
@@ -177,26 +201,30 @@ async def _generate_module_summaries(
                 result["file_path"] = f.get("path", "")
                 summaries.append(result)
             else:
-                summaries.append({
-                    "file_path": f.get("path", ""),
-                    "module_name": f.get("path", "").split("/")[-1],
-                    "purpose": "Could not analyze",
-                    "summary": "Analysis failed",
-                    "key_components": [],
-                    "dependencies": [],
-                })
+                summaries.append(
+                    {
+                        "file_path": f.get("path", ""),
+                        "module_name": f.get("path", "").split("/")[-1],
+                        "purpose": "Could not analyze",
+                        "summary": "Analysis failed",
+                        "key_components": [],
+                        "dependencies": [],
+                    }
+                )
         except LLMError:
             raise
         except Exception as exc:
             logger.warning("Module summary failed for %s: %s", f.get("path", "?"), exc)
-            summaries.append({
-                "file_path": f.get("path", ""),
-                "module_name": f.get("path", "").split("/")[-1],
-                "purpose": "Analysis failed",
-                "summary": str(exc),
-                "key_components": [],
-                "dependencies": [],
-            })
+            summaries.append(
+                {
+                    "file_path": f.get("path", ""),
+                    "module_name": f.get("path", "").split("/")[-1],
+                    "purpose": "Analysis failed",
+                    "summary": str(exc),
+                    "key_components": [],
+                    "dependencies": [],
+                }
+            )
 
     return summaries
 
@@ -215,8 +243,8 @@ def _select_summary_files(snapshot: dict) -> Tuple[List[dict], List[dict]]:
     deduped = []
     for f in candidates:
         ents = f.get("entities", [])
-        sigs = "|".join(sorted((e.get("name", "") for e in ents[:20])))
-        fp = f"{f.get('path','').split('/')[-1]}::{f.get('line_count',0)}::{sigs}"
+        sigs = "|".join(sorted(e.get("name", "") for e in ents[:20]))
+        fp = f"{f.get('path', '').split('/')[-1]}::{f.get('line_count', 0)}::{sigs}"
         key = hash(fp)
         if key in seen:
             continue
@@ -233,25 +261,36 @@ async def _identify_user_flows(
     snapshot: dict,
 ) -> List[str]:
     """Step 2: Identify main user flows from module summaries."""
-    summaries_str = "\n\n".join([
-        f"### {s.get('module_name', '?')} ({s.get('file_path', '')})\n"
-        f"Purpose: {s.get('purpose', 'unknown')}\n"
-        f"Components: {', '.join(s.get('key_components', []))}\n"
-        f"Summary: {s.get('summary', '')}"
-        for s in summaries
-    ])
-
-    prompt = USER_FLOW_USER.format(
-        module_summaries=summaries_str,
-        primary_language=snapshot.get("primary_language", ""),
-        total_files=snapshot.get("total_files", 0),
-        total_lines=snapshot.get("total_lines", 0),
+    summaries_str = "\n\n".join(
+        [
+            f"### {s.get('module_name', '?')} ({s.get('file_path', '')})\n"
+            f"Purpose: {s.get('purpose', 'unknown')}\n"
+            f"Components: {', '.join(s.get('key_components', []))}\n"
+            f"Summary: {s.get('summary', '')}"
+            for s in summaries
+        ]
     )
+
+    if legacy_prompts_enabled():
+        system_prompt = USER_FLOW_SYSTEM
+        user_prompt = USER_FLOW_USER.format(
+            module_summaries=summaries_str,
+            primary_language=snapshot.get("primary_language", ""),
+            total_files=snapshot.get("total_files", 0),
+            total_lines=snapshot.get("total_lines", 0),
+        )
+    else:
+        system_prompt, user_prompt = user_flows_prompt.build(
+            module_summaries=summaries_str,
+            primary_language=snapshot.get("primary_language", ""),
+            total_files=snapshot.get("total_files", 0),
+            total_lines=snapshot.get("total_lines", 0),
+        )
 
     try:
         result = await pipeline_call_llm_json(
-            prompt=prompt,
-            system=USER_FLOW_SYSTEM,
+            prompt=user_prompt,
+            system=system_prompt,
             temperature=0.0,
             max_tokens=4096,
             role="longcontext",
@@ -280,7 +319,7 @@ async def _generate_fs_sections(
         module_by_name[s.get("file_path", "")] = s
 
     for i, flow in enumerate(flows):
-        flow_name = flow.get("flow_name", f"Feature {i+1}")
+        flow_name = flow.get("flow_name", f"Feature {i + 1}")
         flow_desc = flow.get("description", "")
         involved = flow.get("involved_modules", [])
 
@@ -301,35 +340,48 @@ async def _generate_fs_sections(
         module_details_str = "\n\n".join(module_details_parts) or "(no module details)"
         involved_str = "\n".join([f"- {m}" for m in involved]) or "- (none identified)"
 
-        prompt = FS_SECTION_USER.format(
-            flow_name=flow_name,
-            flow_description=flow_desc,
-            involved_modules=involved_str,
-            module_details=module_details_str,
-        )
+        if legacy_prompts_enabled():
+            system_prompt = FS_SECTION_SYSTEM
+            user_prompt = FS_SECTION_USER.format(
+                flow_name=flow_name,
+                flow_description=flow_desc,
+                involved_modules=involved_str,
+                module_details=module_details_str,
+            )
+        else:
+            system_prompt, user_prompt = fs_sections_prompt.build(
+                flow_name=flow_name,
+                flow_description=flow_desc,
+                involved_modules=involved_str,
+                module_details=module_details_str,
+            )
 
         try:
             result = await pipeline_call_llm(
-                prompt=prompt,
-                system=FS_SECTION_SYSTEM,
+                prompt=user_prompt,
+                system=system_prompt,
                 temperature=0.1,
                 max_tokens=4096,
                 role="longcontext",
             )
-            sections.append({
-                "heading": flow_name,
-                "content": result.strip(),
-                "section_index": i,
-            })
+            sections.append(
+                {
+                    "heading": flow_name,
+                    "content": result.strip(),
+                    "section_index": i,
+                }
+            )
         except LLMError:
             raise
         except Exception as exc:
             logger.error("FS section generation failed for flow '%s': %s", flow_name, exc)
-            sections.append({
-                "heading": flow_name,
-                "content": f"[Generation failed: {exc}]",
-                "section_index": i,
-            })
+            sections.append(
+                {
+                    "heading": flow_name,
+                    "content": f"[Generation failed: {exc}]",
+                    "section_index": i,
+                }
+            )
 
     return sections
 

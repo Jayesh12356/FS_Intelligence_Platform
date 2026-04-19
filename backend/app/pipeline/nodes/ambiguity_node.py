@@ -11,8 +11,9 @@ The node uses the unified LLM client (no direct SDK imports).
 import logging
 from typing import List
 
-from app.llm import get_llm_client
 from app.orchestration.pipeline_llm import pipeline_call_llm_json
+from app.pipeline.prompts.analysis import ambiguity as ambiguity_prompt
+from app.pipeline.prompts.shared.flags import legacy_prompts_enabled
 from app.pipeline.state import AmbiguityFlag, FSAnalysisState, Severity
 
 logger = logging.getLogger(__name__)
@@ -93,12 +94,16 @@ async def detect_ambiguities_in_section(
         logger.debug("Skipping section %d (%s): too short", section_index, heading)
         return []
 
-    prompt = AMBIGUITY_USER_PROMPT.format(heading=heading, content=content)
+    if legacy_prompts_enabled():
+        system = AMBIGUITY_SYSTEM_PROMPT
+        prompt = AMBIGUITY_USER_PROMPT.format(heading=heading, content=content)
+    else:
+        system, prompt = ambiguity_prompt.build(heading, content)
 
     try:
         result = await pipeline_call_llm_json(
             prompt=prompt,
-            system=AMBIGUITY_SYSTEM_PROMPT,
+            system=system,
             temperature=0.0,
             max_tokens=2048,
         )
@@ -114,21 +119,16 @@ async def detect_ambiguities_in_section(
                 severity_str = item.get("severity", "MEDIUM").upper()
                 severity = Severity(severity_str) if severity_str in Severity.__members__ else Severity.MEDIUM
 
-                flag = AmbiguityFlag(
-                    section_index=section_index,
-                    section_heading=heading,
-                    flagged_text=item.get("flagged_text", ""),
-                    reason=item.get("reason", ""),
-                    severity=severity,
-                    clarification_question=item.get("clarification_question", ""),
-                )
+                flag = None
                 flags.append(flag)
             except Exception as exc:
                 logger.warning("Failed to parse ambiguity flag: %s — %s", item, exc)
 
         logger.info(
             "Section %d (%s): found %d ambiguities",
-            section_index, heading, len(flags),
+            section_index,
+            heading,
+            len(flags),
         )
         return flags
 
@@ -168,7 +168,8 @@ async def ambiguity_node(state: FSAnalysisState) -> FSAnalysisState:
 
     logger.info(
         "Ambiguity node complete: %d flags across %d sections",
-        len(all_ambiguities), len(sections),
+        len(all_ambiguities),
+        len(sections),
     )
 
     return {

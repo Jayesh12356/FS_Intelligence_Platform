@@ -37,3 +37,11 @@ backend/*.db
 # OS
 .DS_Store
 Thumbs.db
+
+# graphify — commit the graph (graph.json, GRAPH_REPORT.md, graph.html)
+# so every teammate / Cursor session starts with a fresh map; ignore the
+# extraction cache + per-session interpreter pin (machine-specific).
+graphify-out/cache/
+graphify-out/.graphify_python
+graphify-out/.graphify_*.json
+graphify-out/transcripts/

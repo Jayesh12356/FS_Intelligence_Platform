@@ -3,8 +3,9 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { listVersions, getImpactAnalysis, uploadVersion } from "@/lib/api";
-import type { FSVersionItem, ImpactAnalysisData } from "@/lib/api";
+import { listVersions, getImpactAnalysis, uploadVersion, isCursorTaskEnvelope } from "@/lib/api";
+import type { FSVersionItem, ImpactAnalysisData, CursorTaskEnvelope } from "@/lib/api";
+import CursorTaskModal from "@/components/CursorTaskModal";
 import {
   PageShell,
   KpiCard,
@@ -94,6 +95,7 @@ export default function ImpactDashboardPage() {
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedChanges, setExpandedChanges] = useState<Set<number>>(new Set());
+  const [cursorTask, setCursorTask] = useState<CursorTaskEnvelope | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchVersions = useCallback(async () => {
@@ -166,8 +168,13 @@ export default function ImpactDashboardPage() {
       setUploading(true);
       setUploadError(null);
       try {
-        await uploadVersion(docId, file);
-        await fetchVersions();
+        const res = await uploadVersion(docId, file);
+        if (res.data && isCursorTaskEnvelope(res.data)) {
+          setCursorTask(res.data);
+          await fetchVersions();
+        } else {
+          await fetchVersions();
+        }
       } catch (err: unknown) {
         setUploadError(err instanceof Error ? err.message : "Upload failed");
       } finally {
@@ -597,7 +604,7 @@ export default function ImpactDashboardPage() {
                                         style={{
                                           fontSize: "0.72rem",
                                           fontWeight: 700,
-                                          color: "#ef4444",
+                                          color: "#b91c1c",
                                           textTransform: "uppercase",
                                           letterSpacing: "0.06em",
                                           marginBottom: "0.5rem",
@@ -627,7 +634,7 @@ export default function ImpactDashboardPage() {
                                         style={{
                                           fontSize: "0.72rem",
                                           fontWeight: 700,
-                                          color: "#22c55e",
+                                          color: "#15803d",
                                           textTransform: "uppercase",
                                           letterSpacing: "0.06em",
                                           marginBottom: "0.5rem",
@@ -822,6 +829,16 @@ export default function ImpactDashboardPage() {
           description="This is the first version. Upload a new version to see change impact analysis."
         />
       )}
+
+      <CursorTaskModal
+        envelope={cursorTask}
+        onClose={() => setCursorTask(null)}
+        onDone={() => {
+          setCursorTask(null);
+          void fetchVersions();
+          if (selectedVersion) void fetchImpactData(selectedVersion);
+        }}
+      />
     </PageShell>
   );
 }

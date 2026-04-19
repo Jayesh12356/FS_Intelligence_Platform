@@ -38,7 +38,6 @@ from app.db.models import (
 )
 from app.main import app
 
-
 TEST_DATABASE_URL = "sqlite+aiosqlite:///./test_l9.db"
 
 
@@ -55,9 +54,7 @@ async def test_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    session_factory = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with session_factory() as session:
         yield session
@@ -121,9 +118,7 @@ class TestDuplicateNode:
 
         state = {
             "fs_id": str(uuid.uuid4()),
-            "parsed_sections": [
-                {"heading": "Short", "content": "hi", "section_index": 0}
-            ],
+            "parsed_sections": [{"heading": "Short", "content": "hi", "section_index": 0}],
             "errors": [],
             "duplicates": [],
         }
@@ -467,8 +462,8 @@ class TestAuditTrail:
         assert len(events) >= 2
         # Verify chronological order
         for i in range(1, len(events)):
-            if events[i]["created_at"] and events[i-1]["created_at"]:
-                assert events[i]["created_at"] >= events[i-1]["created_at"]
+            if events[i]["created_at"] and events[i - 1]["created_at"]:
+                assert events[i]["created_at"] >= events[i - 1]["created_at"]
 
     @pytest.mark.asyncio
     async def test_audit_log_nonexistent_doc(self, client: AsyncClient, test_db: AsyncSession):
@@ -542,14 +537,16 @@ class TestDuplicateRouter:
         other = await _create_test_doc(test_db)
 
         for score in [0.89, 0.95, 0.91]:
-            test_db.add(DuplicateFlagDB(
-                fs_id=doc.id,
-                section_index=0,
-                section_heading="Test",
-                similar_fs_id=other.id,
-                similar_section_heading="Test",
-                similarity_score=score,
-            ))
+            test_db.add(
+                DuplicateFlagDB(
+                    fs_id=doc.id,
+                    section_index=0,
+                    section_heading="Test",
+                    similar_fs_id=other.id,
+                    similar_section_heading="Test",
+                    similarity_score=score,
+                )
+            )
         await test_db.flush()
 
         resp = await client.get(f"/api/fs/{doc.id}/duplicates")
@@ -593,9 +590,7 @@ class TestAuditHelper:
         await log_audit_event(test_db, doc.id, AuditEventType.ANALYZED)
         await test_db.flush()
 
-        result = await test_db.execute(
-            select(AuditEventDB).where(AuditEventDB.fs_id == doc.id)
-        )
+        result = await test_db.execute(select(AuditEventDB).where(AuditEventDB.fs_id == doc.id))
         events = result.scalars().all()
         assert len(events) == 3
 
@@ -674,9 +669,17 @@ class TestDBModels:
     async def test_audit_event_types(self):
         """Verify all expected audit event types exist."""
         expected = [
-            "UPLOADED", "PARSED", "ANALYZED", "APPROVED", "REJECTED",
-            "VERSION_ADDED", "TASKS_GENERATED", "EXPORTED",
-            "COMMENT_ADDED", "COMMENT_RESOLVED", "SUBMITTED_FOR_APPROVAL",
+            "UPLOADED",
+            "PARSED",
+            "ANALYZED",
+            "APPROVED",
+            "REJECTED",
+            "VERSION_ADDED",
+            "TASKS_GENERATED",
+            "EXPORTED",
+            "COMMENT_ADDED",
+            "COMMENT_RESOLVED",
+            "SUBMITTED_FOR_APPROVAL",
         ]
         for e in expected:
             assert hasattr(AuditEventType, e)

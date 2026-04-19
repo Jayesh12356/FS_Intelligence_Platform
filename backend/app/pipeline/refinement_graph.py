@@ -18,6 +18,9 @@ from app.db.models import AmbiguityFlagDB, ContradictionDB, EdgeCaseGapDB, FSDoc
 from app.llm.client import LLMError
 from app.orchestration.pipeline_llm import pipeline_call_llm, pipeline_call_llm_json
 from app.parsers.chunker import chunk_text_into_sections
+from app.pipeline.prompts.refinement import rewriter as rewriter_prompt
+from app.pipeline.prompts.refinement import suggestion as suggestion_prompt
+from app.pipeline.prompts.shared.flags import legacy_prompts_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -83,14 +86,32 @@ async def issues_collector_node(state: RefinementState, db: AsyncSession) -> Ref
         return {**state, "errors": [*state.get("errors", []), "Document has no text to refine"]}
 
     amb_rows = (
-        await db.execute(select(AmbiguityFlagDB).where(AmbiguityFlagDB.fs_id == doc_id, AmbiguityFlagDB.resolved.is_(False)))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(AmbiguityFlagDB).where(AmbiguityFlagDB.fs_id == doc_id, AmbiguityFlagDB.resolved.is_(False))
+            )
+        )
+        .scalars()
+        .all()
+    )
     con_rows = (
-        await db.execute(select(ContradictionDB).where(ContradictionDB.fs_id == doc_id, ContradictionDB.resolved.is_(False)))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(ContradictionDB).where(ContradictionDB.fs_id == doc_id, ContradictionDB.resolved.is_(False))
+            )
+        )
+        .scalars()
+        .all()
+    )
     edge_rows = (
-        await db.execute(select(EdgeCaseGapDB).where(EdgeCaseGapDB.fs_id == doc_id, EdgeCaseGapDB.resolved.is_(False)))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(EdgeCaseGapDB).where(EdgeCaseGapDB.fs_id == doc_id, EdgeCaseGapDB.resolved.is_(False))
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     issues: list[RefinementIssue] = []
     for row in amb_rows:
@@ -124,7 +145,7 @@ async def issues_collector_node(state: RefinementState, db: AsyncSession) -> Ref
             }
         )
 
-    sections = chunk_text_into_sections(original_text)
+    chunk_text_into_sections(original_text)
     ambiguity_penalty = min(len(amb_rows) * 3.0, 15.0)
     contradiction_penalty = min(len(con_rows) * 1.5, 10.0)
     edge_penalty = min(len(edge_rows) * 2.0, 20.0)
@@ -148,17 +169,26 @@ async def suggestion_node(state: RefinementState) -> RefinementState:
 
     suggestions: list[RefinementIssue] = []
     for issue in issues:
-        prompt = (
-            f"Issue Type: {issue.get('issue_type')}\n"
-            f"Section: {issue.get('section_heading')}\n"
-            f"Defect: {issue.get('issue')}\n"
-            f"Original Text: {issue.get('original_text')}\n\n"
-            "Write one replacement that fixes the defect. Return JSON: {\"suggested_fix\": \"...\"}"
-        )
+        if legacy_prompts_enabled():
+            system = SUGGESTION_SYSTEM
+            prompt = (
+                f"Issue Type: {issue.get('issue_type')}\n"
+                f"Section: {issue.get('section_heading')}\n"
+                f"Defect: {issue.get('issue')}\n"
+                f"Original Text: {issue.get('original_text')}\n\n"
+                'Write one replacement that fixes the defect. Return JSON: {"suggested_fix": "..."}'
+            )
+        else:
+            system, prompt = suggestion_prompt.build(
+                issue_type=str(issue.get("issue_type") or ""),
+                section_heading=str(issue.get("section_heading") or ""),
+                issue=str(issue.get("issue") or ""),
+                original_text=str(issue.get("original_text") or ""),
+            )
         try:
             res = await pipeline_call_llm_json(
                 prompt=prompt,
-                system=SUGGESTION_SYSTEM,
+                system=system,
                 temperature=0.0,
                 max_tokens=220,
                 role="longcontext",
@@ -171,7 +201,8 @@ async def suggestion_node(state: RefinementState) -> RefinementState:
         except (TypeError, ValueError, KeyError) as exc:
             logger.warning(
                 "Suggestion LLM response malformed for issue %s: %s",
-                issue.get("issue_id"), exc,
+                issue.get("issue_id"),
+                exc,
             )
             suggested_fix = f"{issue.get('original_text', '')} [REFINED]"
 
@@ -190,23 +221,31 @@ async def rewriter_node(state: RefinementState) -> RefinementState:
         return {**state, "refined_text": original_text, "changes_made": 0, "diff": []}
 
     suggestion_lines = "\n".join(
-        f"FIX {i+1}: Find \"{s.get('original_text')}\" → Replace with \"{s.get('suggested_fix')}\""
+        f'FIX {i + 1}: Find "{s.get("original_text")}" → Replace with "{s.get("suggested_fix")}"'
         for i, s in enumerate(suggestions)
     )
-    prompt = (
-        "DOCUMENT TO EDIT:\n"
-        f"{original_text}\n\n"
-        f"FIXES TO APPLY ({len(suggestions)} total):\n"
-        f"{suggestion_lines}\n\n"
-        "Apply each fix at its exact location. Append [REFINED] to every modified line. Return the complete document."
-    )
+    if legacy_prompts_enabled():
+        system = REWRITER_SYSTEM
+        prompt = (
+            "DOCUMENT TO EDIT:\n"
+            f"{original_text}\n\n"
+            f"FIXES TO APPLY ({len(suggestions)} total):\n"
+            f"{suggestion_lines}\n\n"
+            "Apply each fix at its exact location. Append [REFINED] to every modified line. Return the complete document."
+        )
+    else:
+        system, prompt = rewriter_prompt.build(
+            document=original_text,
+            suggestion_lines=suggestion_lines,
+            count=len(suggestions),
+        )
 
     refined_text = ""
     try:
         refined_text = (
             await pipeline_call_llm(
                 prompt=prompt,
-                system=REWRITER_SYSTEM,
+                system=system,
                 temperature=0.0,
                 max_tokens=8192,
                 role="longcontext",
@@ -270,9 +309,6 @@ async def validation_node(state: RefinementState) -> RefinementState:
     return {**state, "accepted": True, "refined_score": refined_score}
 
 
-TARGETED_REWRITER_SYSTEM = """You perform surgical edits on an FS document. For each issue, replace ONLY the affected sentence or paragraph — touch nothing else. Append [REFINED] to every modified line. Return the full document with targeted fixes applied."""
-
-
 def _normalize_ws(text: str) -> str:
     """Collapse all whitespace to single spaces for fuzzy matching."""
     return " ".join(text.split())
@@ -328,16 +364,12 @@ async def targeted_rewriter_node(state: RefinementState) -> RefinementState:
         if applied:
             changes += 1
 
-    diff_lines = list(difflib.unified_diff(
-        original_text.splitlines(), refined_text.splitlines(), lineterm=""
-    ))
+    diff_lines = list(difflib.unified_diff(original_text.splitlines(), refined_text.splitlines(), lineterm=""))
     diff = [{"line": line} for line in diff_lines]
     return {**state, "refined_text": refined_text, "diff": diff, "changes_made": changes}
 
 
-async def run_refinement_pipeline(
-    document_id: str, db: AsyncSession, mode: str = "auto"
-) -> RefinementState:
+async def run_refinement_pipeline(document_id: str, db: AsyncSession, mode: str = "auto") -> RefinementState:
     state: RefinementState = {"document_id": document_id, "errors": []}
     state = await issues_collector_node(state, db)
     if state.get("errors"):
@@ -361,4 +393,3 @@ async def run_refinement_pipeline(
 
     state = await validation_node(state)
     return state
-

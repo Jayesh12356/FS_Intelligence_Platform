@@ -42,24 +42,27 @@ const effortConfig: Record<
     Icon: typeof Zap;
   }
 > = {
-  LOW: { color: "#22c55e", bg: "#22c55e18", label: "Low", border: "#22c55e44", variant: "success", Icon: Zap },
-  MEDIUM: { color: "#f59e0b", bg: "#f59e0b18", label: "Medium", border: "#f59e0b44", variant: "warning", Icon: Clock },
-  HIGH: { color: "#ef4444", bg: "#ef444418", label: "High", border: "#ef444444", variant: "error", Icon: Flame },
-  UNKNOWN: { color: "#6b7280", bg: "#6b728018", label: "Unknown", border: "#6b728044", variant: "neutral", Icon: HelpCircle },
+  LOW: { color: "#15803d", bg: "#22c55e18", label: "Low", border: "#22c55e44", variant: "success", Icon: Zap },
+  MEDIUM: { color: "#b45309", bg: "#f59e0b18", label: "Medium", border: "#f59e0b44", variant: "warning", Icon: Clock },
+  HIGH: { color: "#b91c1c", bg: "#ef444418", label: "High", border: "#ef444444", variant: "error", Icon: Flame },
+  UNKNOWN: { color: "#374151", bg: "#6b728018", label: "Unknown", border: "#6b728044", variant: "neutral", Icon: HelpCircle },
 };
 
+// AA-compliant ~700-shade text on the matching ~9%-tinted backgrounds.
+// We keep the lighter ~500 token only for borders/icons; small caption
+// text uses the darker shade so axe color-contrast passes (>= 4.5:1).
 const tagColors: Record<string, { bg: string; color: string }> = {
-  frontend: { bg: "#3b82f618", color: "#3b82f6" },
-  backend: { bg: "#22c55e18", color: "#22c55e" },
-  db: { bg: "#8b5cf618", color: "#8b5cf6" },
-  auth: { bg: "#ef444418", color: "#ef4444" },
-  api: { bg: "#f59e0b18", color: "#f59e0b" },
-  testing: { bg: "#06b6d418", color: "#06b6d4" },
-  security: { bg: "#ec489918", color: "#ec4899" },
-  devops: { bg: "#6366f118", color: "#6366f1" },
-  integration: { bg: "#14b8a618", color: "#14b8a6" },
-  ui: { bg: "#a855f718", color: "#a855f7" },
-  performance: { bg: "#f4735618", color: "#f47356" },
+  frontend: { bg: "#3b82f618", color: "#1d4ed8" },
+  backend: { bg: "#22c55e18", color: "#15803d" },
+  db: { bg: "#8b5cf618", color: "#6d28d9" },
+  auth: { bg: "#ef444418", color: "#b91c1c" },
+  api: { bg: "#f59e0b18", color: "#b45309" },
+  testing: { bg: "#06b6d418", color: "#0e7490" },
+  security: { bg: "#ec489918", color: "#be185d" },
+  devops: { bg: "#6366f118", color: "#4338ca" },
+  integration: { bg: "#14b8a618", color: "#0f766e" },
+  ui: { bg: "#a855f718", color: "#7e22ce" },
+  performance: { bg: "#f4735618", color: "#c2410c" },
 };
 
 function TaskCard({

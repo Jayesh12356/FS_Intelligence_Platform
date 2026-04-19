@@ -6,17 +6,17 @@ progressively as the document moves through the pipeline.
 
 from __future__ import annotations
 
-from enum import Enum
-from typing import Any, Dict, List, Optional, TypedDict
+from enum import StrEnum
+from typing import Any, Dict, List, TypedDict
 
 from pydantic import BaseModel, Field
-
 
 # ── Severity Enum ───────────────────────────────────────
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     """Severity level for ambiguity flags."""
+
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
@@ -25,8 +25,9 @@ class Severity(str, Enum):
 # ── Effort Enum ─────────────────────────────────────────
 
 
-class EffortLevel(str, Enum):
+class EffortLevel(StrEnum):
     """Effort complexity for a dev task."""
+
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
@@ -38,20 +39,20 @@ class EffortLevel(str, Enum):
 
 class AmbiguityFlag(BaseModel):
     """A single ambiguity detected in an FS document section."""
+
     section_index: int
     section_heading: str
     flagged_text: str = Field(description="Exact text that is ambiguous")
     reason: str = Field(description="Why this text is ambiguous")
     severity: Severity = Field(description="Impact severity: LOW, MEDIUM, HIGH")
-    clarification_question: str = Field(
-        description="Question to ask the functional team for clarification"
-    )
+    clarification_question: str = Field(description="Question to ask the functional team for clarification")
 
     model_config = {"from_attributes": True}
 
 
 class Contradiction(BaseModel):
     """A contradiction detected between two sections in an FS document."""
+
     section_a_index: int
     section_a_heading: str
     section_b_index: int
@@ -65,6 +66,7 @@ class Contradiction(BaseModel):
 
 class EdgeCaseGap(BaseModel):
     """A missing edge case / scenario detected in an FS section."""
+
     section_index: int
     section_heading: str
     scenario_description: str = Field(description="The edge case scenario that is not covered")
@@ -76,6 +78,7 @@ class EdgeCaseGap(BaseModel):
 
 class ComplianceTag(BaseModel):
     """A compliance-relevant tag for a section (payments, auth, PII, etc.)."""
+
     section_index: int
     section_heading: str
     tag: str = Field(description="Compliance area: payments, auth, pii, external_api, security, data_retention")
@@ -86,6 +89,7 @@ class ComplianceTag(BaseModel):
 
 class FSQualityScore(BaseModel):
     """Overall quality score for an FS document."""
+
     completeness: float = Field(description="Percentage of sections with no edge case gaps (0-100)")
     clarity: float = Field(description="Percentage of sections with no ambiguities (0-100)")
     consistency: float = Field(description="1 - contradiction_rate, as percentage (0-100)")
@@ -96,6 +100,7 @@ class FSQualityScore(BaseModel):
 
 class FSTask(BaseModel):
     """A dev task derived from FS requirements."""
+
     task_id: str = Field(description="Unique task identifier (uuid4)")
     title: str = Field(description="Short, actionable task title")
     description: str = Field(description="Detailed dev task description")
@@ -113,6 +118,7 @@ class FSTask(BaseModel):
 
 class TraceabilityEntry(BaseModel):
     """Maps a task back to its source FS section."""
+
     task_id: str
     task_title: str
     section_index: int
@@ -123,6 +129,7 @@ class TraceabilityEntry(BaseModel):
 
 class DuplicateFlag(BaseModel):
     """A cross-document duplicate requirement detected via Qdrant similarity (L9)."""
+
     section_index: int
     section_heading: str
     similar_fs_id: str
@@ -136,6 +143,7 @@ class DuplicateFlag(BaseModel):
 
 class DebateVerdict(BaseModel):
     """Result of a Red vs Blue adversarial debate on an ambiguity flag."""
+
     verdict: str = Field(description="AMBIGUOUS or CLEAR")
     red_argument: str = Field(description="RedAgent's argument for why it IS ambiguous")
     blue_argument: str = Field(description="BlueAgent's argument for why it IS clear")
@@ -148,15 +156,17 @@ class DebateVerdict(BaseModel):
 # ── L7: Change Impact Enums ─────────────────────────────
 
 
-class ChangeType(str, Enum):
+class ChangeType(StrEnum):
     """Type of change between FS versions."""
+
     ADDED = "ADDED"
     MODIFIED = "MODIFIED"
     DELETED = "DELETED"
 
 
-class ImpactType(str, Enum):
+class ImpactType(StrEnum):
     """Impact level on a task from an FS change."""
+
     INVALIDATED = "INVALIDATED"
     REQUIRES_REVIEW = "REQUIRES_REVIEW"
     UNAFFECTED = "UNAFFECTED"
@@ -167,18 +177,20 @@ class ImpactType(str, Enum):
 
 class FSChange(BaseModel):
     """A single change detected between two FS versions."""
+
     change_type: ChangeType = Field(description="ADDED, MODIFIED, or DELETED")
     section_id: str = Field(description="Section identifier (heading or index)")
     section_heading: str = Field(default="", description="Section heading text")
     section_index: int = Field(default=0, description="Section index in the document")
-    old_text: Optional[str] = Field(default=None, description="Previous version text")
-    new_text: Optional[str] = Field(default=None, description="New version text")
+    old_text: str | None = Field(default=None, description="Previous version text")
+    new_text: str | None = Field(default=None, description="New version text")
 
     model_config = {"from_attributes": True}
 
 
 class TaskImpact(BaseModel):
     """Impact of an FS change on a specific task."""
+
     task_id: str = Field(description="ID of the affected task")
     task_title: str = Field(default="", description="Title of the affected task")
     impact_type: ImpactType = Field(description="INVALIDATED, REQUIRES_REVIEW, or UNAFFECTED")
@@ -190,6 +202,7 @@ class TaskImpact(BaseModel):
 
 class ReworkEstimate(BaseModel):
     """Rework cost estimate after FS version change."""
+
     invalidated_count: int = Field(default=0, description="Number of invalidated tasks")
     review_count: int = Field(default=0, description="Number of tasks needing review")
     unaffected_count: int = Field(default=0, description="Number of unaffected tasks")
@@ -202,6 +215,7 @@ class ReworkEstimate(BaseModel):
 
 class SectionInput(BaseModel):
     """A section passed into the pipeline for analysis."""
+
     heading: str
     content: str
     section_index: int
@@ -224,6 +238,7 @@ class FSAnalysisState(TypedDict, total=False):
       - dependency_node: tasks (with depends_on, order, can_parallel) (L5)
       - traceability_node: traceability_matrix (L5)
     """
+
     # Input
     fs_id: str
     parsed_sections: List[dict]  # List of SectionInput-like dicts
@@ -265,6 +280,7 @@ class FSImpactState(TypedDict, total=False):
       - impact_node: task_impacts
       - rework_node: rework_estimate
     """
+
     # Input
     fs_id: str
     version_id: str
@@ -286,15 +302,17 @@ class FSImpactState(TypedDict, total=False):
 
 class CodeEntity(BaseModel):
     """A single code entity (function, class, etc.) extracted from a source file."""
+
     name: str = ""
     entity_type: str = "function"  # function, class, method
-    docstring: Optional[str] = None
+    docstring: str | None = None
     signature: str = ""
     line_number: int = 0
 
 
 class CodeFile(BaseModel):
     """A single source code file with extracted entities."""
+
     path: str = ""
     language: str = ""
     content: str = ""
@@ -305,6 +323,7 @@ class CodeFile(BaseModel):
 
 class CodebaseSnapshot(BaseModel):
     """Complete snapshot of a parsed codebase."""
+
     files: List[CodeFile] = Field(default_factory=list)
     primary_language: str = ""
     total_files: int = 0
@@ -315,6 +334,7 @@ class CodebaseSnapshot(BaseModel):
 
 class GeneratedFSReport(BaseModel):
     """Quality report for a generated FS document."""
+
     coverage: float = 0.0  # 0.0 to 1.0 — % of codebase documented
     gaps: List[str] = Field(default_factory=list)  # undocumented areas
     confidence: float = 0.0  # 0.0 to 1.0 — overall confidence
@@ -332,6 +352,7 @@ class ReverseGenState(TypedDict, total=False):
       - reverse_fs_node: generated_sections, raw_fs_text
       - reverse_quality_node: report
     """
+
     # Input
     code_upload_id: str
     snapshot: dict  # CodebaseSnapshot-like dict

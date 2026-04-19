@@ -17,11 +17,11 @@ logger = logging.getLogger(__name__)
 
 # Patterns that indicate a heading line
 _HEADING_PATTERNS = [
-    re.compile(r"^\d+\.?\s+[A-Z]"),           # "1. Introduction" or "1 OVERVIEW"
-    re.compile(r"^\d+\.\d+\.?\s+"),            # "1.1 Sub-section"
-    re.compile(r"^[A-Z][A-Z\s\-]{4,}$"),       # "INTRODUCTION" (all caps, 5+ chars)
+    re.compile(r"^\d+\.?\s+[A-Z]"),  # "1. Introduction" or "1 OVERVIEW"
+    re.compile(r"^\d+\.\d+\.?\s+"),  # "1.1 Sub-section"
+    re.compile(r"^[A-Z][A-Z\s\-]{4,}$"),  # "INTRODUCTION" (all caps, 5+ chars)
     re.compile(r"^(Section|Chapter|Part)\s+", re.IGNORECASE),  # "Section 3"
-    re.compile(r"^(Appendix|Annex)\s+", re.IGNORECASE),        # "Appendix A"
+    re.compile(r"^(Appendix|Annex)\s+", re.IGNORECASE),  # "Appendix A"
 ]
 
 
@@ -52,11 +52,13 @@ def _extract_sections(text: str) -> List[FSSection]:
             # Save previous section if it has content
             content_text = "\n".join(current_content).strip()
             if content_text:
-                sections.append(FSSection(
-                    heading=current_heading,
-                    content=content_text,
-                    section_index=section_index,
-                ))
+                sections.append(
+                    FSSection(
+                        heading=current_heading,
+                        content=content_text,
+                        section_index=section_index,
+                    )
+                )
                 section_index += 1
             current_heading = line.strip()
             current_content = []
@@ -66,19 +68,23 @@ def _extract_sections(text: str) -> List[FSSection]:
     # Don't forget the last section
     content_text = "\n".join(current_content).strip()
     if content_text:
-        sections.append(FSSection(
-            heading=current_heading,
-            content=content_text,
-            section_index=section_index,
-        ))
+        sections.append(
+            FSSection(
+                heading=current_heading,
+                content=content_text,
+                section_index=section_index,
+            )
+        )
 
     # If no sections were detected, create one from all content
     if not sections and text.strip():
-        sections.append(FSSection(
-            heading="Document Content",
-            content=text.strip(),
-            section_index=0,
-        ))
+        sections.append(
+            FSSection(
+                heading="Document Content",
+                content=text.strip(),
+                section_index=0,
+            )
+        )
 
     return sections
 
@@ -121,13 +127,17 @@ def parse_pdf(filepath: str) -> ParsedFS:
         logger.warning("PDF %s produced no text — may be scanned/image-only", filepath)
         return ParsedFS(
             raw_text="",
-            sections=[FSSection(heading="Document Content", content="[No extractable text — scanned PDF]", section_index=0)],
+            sections=[
+                FSSection(heading="Document Content", content="[No extractable text — scanned PDF]", section_index=0)
+            ],
             metadata={"pages": len(reader.pages), "parser": "pypdf", "warning": "no_text_extracted"},
         )
 
     sections = _extract_sections(raw_text)
 
-    logger.info("Parsed PDF %s: %d pages, %d sections, %d chars", filepath, len(reader.pages), len(sections), len(raw_text))
+    logger.info(
+        "Parsed PDF %s: %d pages, %d sections, %d chars", filepath, len(reader.pages), len(sections), len(raw_text)
+    )
 
     return ParsedFS(
         raw_text=raw_text,

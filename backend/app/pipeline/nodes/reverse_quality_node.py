@@ -54,10 +54,7 @@ def compute_coverage(snapshot: dict, generated_sections: List[dict]) -> Generate
         # Check for functions without docstrings
         undocumented_fns = [e for e in entities if not e.get("docstring")]
         if len(undocumented_fns) > 3:
-            gaps.append(
-                f"File '{f.get('path', '?')}' has {len(undocumented_fns)} "
-                f"undocumented functions/classes"
-            )
+            gaps.append(f"File '{f.get('path', '?')}' has {len(undocumented_fns)} undocumented functions/classes")
 
     # Coverage: proportion of entities with docstrings
     coverage = documented_entities / max(total_entities, 1)
@@ -76,9 +73,9 @@ def compute_coverage(snapshot: dict, generated_sections: List[dict]) -> Generate
 
     # Boost confidence if most sections have real content
     sections_with_content = sum(
-        1 for s in generated_sections
-        if len(s.get("content", "")) > 100
-        and "[Generation failed" not in s.get("content", "")
+        1
+        for s in generated_sections
+        if len(s.get("content", "")) > 100 and "[Generation failed" not in s.get("content", "")
     )
     if generated_sections:
         section_quality = sections_with_content / len(generated_sections)
@@ -99,9 +96,7 @@ def compute_coverage(snapshot: dict, generated_sections: List[dict]) -> Generate
         skipped = int(parser_stats.get("skipped_files", 0))
         parsed = int(parser_stats.get("parsed_files", 0))
         if skipped > parsed:
-            confidence_reasons.append(
-                f"Parser skipped many files ({skipped}) compared to parsed files ({parsed})."
-            )
+            confidence_reasons.append(f"Parser skipped many files ({skipped}) compared to parsed files ({parsed}).")
 
     if coverage >= 0.75:
         confidence_reasons.append("Good source coverage from documented entities.")

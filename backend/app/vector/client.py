@@ -1,7 +1,6 @@
 """Qdrant vector store client — collection management and operations."""
 
 import logging
-from typing import Optional
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qdrant_models
@@ -33,7 +32,7 @@ class QdrantManager:
         settings = get_settings()
         self._url = settings.QDRANT_URL
         self._api_key = settings.QDRANT_API_KEY or None
-        self._client: Optional[QdrantClient] = None
+        self._client: QdrantClient | None = None
 
     @property
     def client(self) -> QdrantClient:

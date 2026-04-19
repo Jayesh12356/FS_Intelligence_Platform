@@ -8,15 +8,16 @@ import json
 import logging
 from typing import Any, Dict, List
 
-logger = logging.getLogger(__name__)
-
 from app.llm.client import LLMError
+from app.pipeline.prompts.analysis import testcase as testcase_prompt
+from app.pipeline.prompts.shared.flags import legacy_prompts_enabled
 
 try:
     from app.orchestration.pipeline_llm import pipeline_call_llm
 except ImportError:
     pipeline_call_llm = None  # type: ignore[misc, assignment]
 
+logger = logging.getLogger(__name__)
 
 TESTCASE_SYSTEM_PROMPT = """You are a senior QA engineer writing test cases from acceptance criteria. Every test case you produce must be executable — a tester or automated framework can follow the steps and verify the expected result without ambiguity.
 
@@ -88,7 +89,7 @@ async def testcase_node(state: Dict[str, Any]) -> Dict[str, Any]:
         Updated state with 'test_cases' list.
     """
     tasks = state.get("tasks", [])
-    fs_id = state.get("fs_id", "")
+    state.get("fs_id", "")
     test_cases: List[Dict[str, Any]] = []
     errors: List[str] = list(state.get("errors", []))
     llm_available = pipeline_call_llm is not None
@@ -110,23 +111,27 @@ async def testcase_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
         if not criteria or not llm_available:
             # Generate a basic test case from the task description
-            test_cases.append({
-                "task_id": task_id,
-                "title": f"Verify: {title}",
-                "preconditions": "System is set up and configured",
-                "steps": [
-                    f"Execute: {description[:200]}",
-                    "Verify the expected behavior",
-                ],
-                "expected_result": f"{title} works as specified",
-                "test_type": "INTEGRATION",
-                "section_index": section_idx,
-                "section_heading": section_heading,
-            })
+            test_cases.append(
+                {
+                    "task_id": task_id,
+                    "title": f"Verify: {title}",
+                    "preconditions": "System is set up and configured",
+                    "steps": [
+                        f"Execute: {description[:200]}",
+                        "Verify the expected behavior",
+                    ],
+                    "expected_result": f"{title} works as specified",
+                    "test_type": "INTEGRATION",
+                    "section_index": section_idx,
+                    "section_heading": section_heading,
+                }
+            )
             continue
 
-        criteria_text = "\n".join(f"  {i+1}. {c}" for i, c in enumerate(criteria))
-        prompt = f"""Write executable test cases for this task. Cover the happy path and at least one failure/edge case.
+        criteria_text = "\n".join(f"  {i + 1}. {c}" for i, c in enumerate(criteria))
+        if legacy_prompts_enabled():
+            system = TESTCASE_SYSTEM_PROMPT
+            prompt = f"""Write executable test cases for this task. Cover the happy path and at least one failure/edge case.
 
 Task: {title}
 Description: {description}
@@ -142,11 +147,11 @@ Return a JSON array of 1-3 test cases. Each element must have:
 - "test_type": one of "UNIT", "INTEGRATION", "E2E", or "ACCEPTANCE"
 
 Return ONLY a JSON array."""
+        else:
+            system, prompt = testcase_prompt.build(title=title, description=description, criteria_text=criteria_text)
 
         try:
-            response = await pipeline_call_llm(
-                prompt, system=TESTCASE_SYSTEM_PROMPT, role="build"
-            )
+            response = await pipeline_call_llm(prompt, system=system, role="build")
             # Parse the JSON response
             response_text = _extract_json_array(response)
             parsed = json.loads(response_text)
@@ -157,16 +162,18 @@ Return ONLY a JSON array."""
                     if test_type not in ("UNIT", "INTEGRATION", "E2E", "ACCEPTANCE"):
                         test_type = "UNIT"
 
-                    test_cases.append({
-                        "task_id": task_id,
-                        "title": _coerce_text(tc.get("title", f"Test for {title}")),
-                        "preconditions": _coerce_text(tc.get("preconditions", "")),
-                        "steps": _coerce_steps(tc.get("steps", [])),
-                        "expected_result": _coerce_text(tc.get("expected_result", "")),
-                        "test_type": test_type,
-                        "section_index": section_idx,
-                        "section_heading": section_heading,
-                    })
+                    test_cases.append(
+                        {
+                            "task_id": task_id,
+                            "title": _coerce_text(tc.get("title", f"Test for {title}")),
+                            "preconditions": _coerce_text(tc.get("preconditions", "")),
+                            "steps": _coerce_steps(tc.get("steps", [])),
+                            "expected_result": _coerce_text(tc.get("expected_result", "")),
+                            "test_type": test_type,
+                            "section_index": section_idx,
+                            "section_heading": section_heading,
+                        }
+                    )
             else:
                 logger.warning("LLM returned non-list for task %s", task_id)
 
@@ -175,17 +182,19 @@ Return ONLY a JSON array."""
         except json.JSONDecodeError as exc:
             logger.warning("JSON parse error for task %s test cases: %s", task_id, exc)
             # Fallback: create basic test case per criterion
-            for i, criterion in enumerate(criteria):
-                test_cases.append({
-                    "task_id": task_id,
-                    "title": f"Verify: {criterion[:80]}",
-                    "preconditions": "System is configured and running",
-                    "steps": [criterion],
-                    "expected_result": f"Criterion met: {criterion}",
-                    "test_type": "ACCEPTANCE",
-                    "section_index": section_idx,
-                    "section_heading": section_heading,
-                })
+            for _i, criterion in enumerate(criteria):
+                test_cases.append(
+                    {
+                        "task_id": task_id,
+                        "title": f"Verify: {criterion[:80]}",
+                        "preconditions": "System is configured and running",
+                        "steps": [criterion],
+                        "expected_result": f"Criterion met: {criterion}",
+                        "test_type": "ACCEPTANCE",
+                        "section_index": section_idx,
+                        "section_heading": section_heading,
+                    }
+                )
         except Exception as exc:
             logger.error("Test case generation failed for task %s: %s", task_id, exc)
             errors.append(f"testcase_node: {exc}")

@@ -10,13 +10,16 @@ import {
   listVersions,
   getVersionText,
   revertToVersion,
+  isCursorTaskEnvelope,
 } from "@/lib/api";
 import type {
   FSDocumentDetail,
   RefinementResponse,
   RefinementDiffLine,
   FSVersionItem,
+  CursorTaskEnvelope,
 } from "@/lib/api";
+import CursorTaskModal from "@/components/CursorTaskModal";
 import { PageShell, KpiCard, FadeIn, EmptyState } from "@/components/index";
 import QualityGauge from "@/components/QualityGauge";
 import Badge from "@/components/Badge";
@@ -86,6 +89,7 @@ export default function RefinePage() {
   const [previewVersionId, setPreviewVersionId] = useState<string | null>(null);
   const [previewText, setPreviewText] = useState<string | null>(null);
   const [reverting, setReverting] = useState(false);
+  const [cursorTask, setCursorTask] = useState<CursorTaskEnvelope | null>(null);
 
   const fetchVersions = useCallback(async () => {
     try {
@@ -114,7 +118,11 @@ export default function RefinePage() {
     setError(null);
     try {
       const res = await getRefinementSuggestions(docId);
-      setResult(res.data);
+      if (res.data && isCursorTaskEnvelope(res.data)) {
+        setCursorTask(res.data);
+      } else {
+        setResult(res.data as RefinementResponse);
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Refinement failed");
     } finally {
@@ -128,7 +136,10 @@ export default function RefinePage() {
     setError(null);
     try {
       await applyRefinement(docId, result.refined_text);
-      router.push(`/documents/${docId}?autoAnalyze=1`);
+      // Refinement no longer demotes status to PARSED; the document stays
+      // COMPLETE with ``analysis_stale=true`` and the detail page exposes a
+      // dedicated Re-analyze CTA.
+      router.push(`/documents/${docId}`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to save refined version");
     } finally {
@@ -567,6 +578,17 @@ export default function RefinePage() {
           </AnimatePresence>
         </FadeIn>
       )}
+
+      <CursorTaskModal
+        envelope={cursorTask}
+        onClose={() => setCursorTask(null)}
+        onDone={(resultRef) => {
+          setCursorTask(null);
+          if (resultRef) {
+            router.push(`/documents/${resultRef}`);
+          }
+        }}
+      />
     </PageShell>
   );
 }

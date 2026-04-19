@@ -7,10 +7,11 @@ order via topological sort, and flags parallelisable tasks.
 
 import logging
 from collections import defaultdict, deque
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set
 
-from app.llm import get_llm_client
 from app.orchestration.pipeline_llm import pipeline_call_llm_json
+from app.pipeline.prompts.analysis import dependency as dependency_prompt
+from app.pipeline.prompts.shared.flags import legacy_prompts_enabled
 from app.pipeline.state import FSAnalysisState
 
 logger = logging.getLogger(__name__)
@@ -172,7 +173,7 @@ def find_parallel_tasks(
         depth_groups[d].append(tid)
 
     parallel_ids: Set[str] = set()
-    for d, group in depth_groups.items():
+    for _depth_level, group in depth_groups.items():
         if len(group) > 1:
             parallel_ids.update(group)
 
@@ -208,18 +209,20 @@ async def dependency_node(state: FSAnalysisState) -> FSAnalysisState:
             f"  Description: {t.get('description', '')[:200]}"
         )
 
-    prompt = DEPENDENCY_USER_PROMPT.format(
-        task_list="\n\n".join(task_descriptions)
-    )
+    task_list_text = "\n\n".join(task_descriptions)
+    if legacy_prompts_enabled():
+        system = DEPENDENCY_SYSTEM_PROMPT
+        prompt = DEPENDENCY_USER_PROMPT.format(task_list=task_list_text)
+    else:
+        system, prompt = dependency_prompt.build(task_list_text)
 
-    # Infer dependencies via LLM
     dependency_map: Dict[str, List[str]] = {}
     all_task_ids = {t["task_id"] for t in tasks}
 
     try:
         result = await pipeline_call_llm_json(
             prompt=prompt,
-            system=DEPENDENCY_SYSTEM_PROMPT,
+            system=system,
             temperature=0.0,
             max_tokens=2048,
             role="reasoning",

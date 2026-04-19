@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.base import get_db
 from app.db.audit import log_audit_event
+from app.db.base import get_db
 from app.db.models import (
     ApprovalStatus,
     AuditEventType,
@@ -40,9 +40,7 @@ async def submit_for_approval(
     Creates a PENDING approval record.
     """
     # Verify document exists and is analysed
-    doc_result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = doc_result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -55,8 +53,7 @@ async def submit_for_approval(
 
     # Check if already pending
     existing = await db.execute(
-        select(FSApprovalDB)
-        .where(FSApprovalDB.fs_id == doc_id, FSApprovalDB.status == ApprovalStatus.PENDING)
+        select(FSApprovalDB).where(FSApprovalDB.fs_id == doc_id, FSApprovalDB.status == ApprovalStatus.PENDING)
     )
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Document already has a pending approval")
@@ -72,7 +69,9 @@ async def submit_for_approval(
 
     # Log audit event
     await log_audit_event(
-        db, doc_id, AuditEventType.SUBMITTED_FOR_APPROVAL,
+        db,
+        doc_id,
+        AuditEventType.SUBMITTED_FOR_APPROVAL,
         user_id=body.approver_id,
         payload={"comment": body.comment},
     )
@@ -120,7 +119,9 @@ async def approve_document(
 
     # Log audit event
     await log_audit_event(
-        db, doc_id, AuditEventType.APPROVED,
+        db,
+        doc_id,
+        AuditEventType.APPROVED,
         user_id=body.approver_id,
         payload={"comment": body.comment, "approval_id": str(approval.id)},
     )
@@ -130,18 +131,18 @@ async def approve_document(
 
     # Auto-add sections to requirement library
     try:
-        doc_result = await db.execute(
-            select(FSDocument).where(FSDocument.id == doc_id)
-        )
+        doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
         doc = doc_result.scalar_one_or_none()
         if doc and doc.status == FSDocumentStatus.COMPLETE:
             from app.parsers.router import parse_document as do_parse
+
             parsed = await do_parse(str(doc.id), db)
             from app.vector.fs_store import store_library_item
+
             for section in parsed.sections:
-                heading = section.heading if hasattr(section, 'heading') else section.get("heading", "")
-                content = section.content if hasattr(section, 'content') else section.get("content", "")
-                idx = section.section_index if hasattr(section, 'section_index') else section.get("section_index", 0)
+                heading = section.heading if hasattr(section, "heading") else section.get("heading", "")
+                content = section.content if hasattr(section, "content") else section.get("content", "")
+                idx = section.section_index if hasattr(section, "section_index") else section.get("section_index", 0)
                 try:
                     store_library_item(
                         fs_id=str(doc_id),
@@ -194,7 +195,9 @@ async def reject_document(
 
     # Log audit event
     await log_audit_event(
-        db, doc_id, AuditEventType.REJECTED,
+        db,
+        doc_id,
+        AuditEventType.REJECTED,
         user_id=body.approver_id,
         payload={"comment": body.comment, "approval_id": str(approval.id)},
     )
@@ -221,18 +224,14 @@ async def get_approval_status(
 ) -> APIResponse[ApprovalStatusResponse]:
     """Get the current approval status and full history for a document."""
     # Verify document exists
-    doc_result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = doc_result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
     # Load all approval records
     result = await db.execute(
-        select(FSApprovalDB)
-        .where(FSApprovalDB.fs_id == doc_id)
-        .order_by(FSApprovalDB.created_at.desc())
+        select(FSApprovalDB).where(FSApprovalDB.fs_id == doc_id).order_by(FSApprovalDB.created_at.desc())
     )
     approvals = result.scalars().all()
 

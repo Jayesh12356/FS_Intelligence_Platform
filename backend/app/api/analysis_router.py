@@ -5,7 +5,7 @@ import asyncio as _asyncio
 import hashlib
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID as _UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
+from app.db.audit import log_audit_event
 from app.db.base import get_db
 from app.db.models import (
     AmbiguityFlagDB,
@@ -27,13 +27,14 @@ from app.db.models import (
     EffortLevel,
     FSDocument,
     FSDocumentStatus,
-    FSVersion,
     FSTaskDB,
+    FSVersion,
     TestCaseDB,
     TestType,
     TraceabilityEntryDB,
 )
 from app.models.schemas import (
+    AcceptRefinementRequest,
     AmbiguityFlagSchema,
     AmbiguityResolveRequest,
     AnalysisResponse,
@@ -43,7 +44,6 @@ from app.models.schemas import (
     DebateResultSchema,
     DebateResultsResponse,
     EdgeCaseGapSchema,
-    AcceptRefinementRequest,
     QualityDashboardResponse,
     QualityScoreSchema,
     RefinementDiffLineSchema,
@@ -63,11 +63,9 @@ async def get_analysis_progress_endpoint(
     doc_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
 ):
-    from app.pipeline.graph import get_analysis_progress, ANALYSIS_NODE_ORDER, ANALYSIS_NODE_LABELS
+    from app.pipeline.graph import ANALYSIS_NODE_LABELS, ANALYSIS_NODE_ORDER, get_analysis_progress
 
-    result = await db.execute(
-        select(FSDocument.status).where(FSDocument.id == doc_id)
-    )
+    result = await db.execute(select(FSDocument.status).where(FSDocument.id == doc_id))
     status_val = result.scalar_one_or_none()
     if status_val is None:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -157,8 +155,8 @@ async def _build_analysis_response_from_db(
     tasks_result = await db.execute(select(FSTaskDB).where(FSTaskDB.fs_id == doc_id))
     tasks = tasks_result.scalars().all()
 
-    from app.pipeline.nodes.quality_node import compute_quality_score
     from app.parsers.router import parse_document as do_parse
+    from app.pipeline.nodes.quality_node import compute_quality_score
 
     try:
         parsed = await do_parse(str(doc.id), db)
@@ -217,15 +215,29 @@ async def _build_analysis_response_from_db(
     )
 
 
+async def _safe_audit(
+    db: AsyncSession,
+    fs_id: uuid.UUID,
+    event_type: AuditEventType,
+    payload: dict | None = None,
+    user_id: str = "system",
+) -> None:
+    """Best-effort audit emit. Never let telemetry kill the request."""
+    try:
+        await log_audit_event(db, fs_id, event_type, user_id=user_id, payload=payload)
+    except Exception:
+        logger.exception("audit emit failed for fs_id=%s type=%s", fs_id, event_type)
+
+
 async def _persist_refined_version(
     doc: FSDocument,
     refined_text: str,
     db: AsyncSession,
+    *,
+    trigger: str = "refine",
 ) -> FSVersion:
     versions_result = await db.execute(
-        select(FSVersion)
-        .where(FSVersion.fs_id == doc.id)
-        .order_by(FSVersion.version_number.desc())
+        select(FSVersion).where(FSVersion.fs_id == doc.id).order_by(FSVersion.version_number.desc())
     )
     existing_versions = versions_result.scalars().all()
     next_version = (existing_versions[0].version_number + 1) if existing_versions else 2
@@ -259,18 +271,38 @@ async def _persist_refined_version(
     # Latest always becomes active working text.
     doc.parsed_text = refined_text
     doc.original_text = refined_text
-    doc.status = FSDocumentStatus.PARSED
+    # NOTE: we deliberately do **not** demote ``status`` to PARSED here.
+    # When the doc was already COMPLETE, the analysis artefacts (tasks,
+    # ambiguities, …) are still attached and the user wants the Build
+    # CTA to remain visible. Instead we flip ``analysis_stale`` so the
+    # UI can render a soft "re-analyze to refresh metrics" banner. A
+    # fresh analyze run (``analyze_document`` success branch) clears the
+    # flag again.
+    if doc.status == FSDocumentStatus.COMPLETE:
+        doc.analysis_stale = True
     await db.flush()
     await db.refresh(version)
+    await _safe_audit(
+        db,
+        doc.id,
+        AuditEventType.ANALYSIS_REFINED,
+        payload={
+            "trigger": trigger,
+            "version_number": version.version_number,
+            "stale": bool(getattr(doc, "analysis_stale", False)),
+        },
+    )
     return version
 
 
-@router.post("/{doc_id}/analyze", response_model=APIResponse[AnalysisResponse])
+@router.post("/{doc_id}/analyze", response_model=APIResponse)
 async def analyze_document(
     doc_id: uuid.UUID,
-    sections_filter: str = Query(None, alias="sections", description="Comma-separated section indices to re-analyze selectively"),
+    sections_filter: str = Query(
+        None, alias="sections", description="Comma-separated section indices to re-analyze selectively"
+    ),
     db: AsyncSession = Depends(get_db),
-) -> APIResponse[AnalysisResponse]:
+) -> APIResponse:
     """Trigger the full 11-node LangGraph analysis pipeline on a parsed document.
 
     Pipeline order:
@@ -286,16 +318,63 @@ async def analyze_document(
     Persists all results to PostgreSQL. Transitions document status
     PARSED → ANALYZING → COMPLETE (or ERROR on failure).
     """
+    from app.orchestration.config_resolver import get_configured_llm_provider_name
     from app.pipeline.graph import run_analysis_pipeline
 
     # Load document
-    result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = result.scalar_one_or_none()
 
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    # When Cursor is the active provider, branch to the paste-per-action
+    # flow. A single prompt is generated; the pipeline is NOT run. The
+    # UI opens the Cursor task modal with ``mode=cursor_task`` and polls
+    # ``GET /api/cursor-tasks/{task_id}`` until the user pastes and
+    # Cursor submits the analysis via MCP.
+    provider = (await get_configured_llm_provider_name()) or "api"
+    if provider == "cursor":
+        from app.db.models import (
+            CursorTaskDB,
+            CursorTaskKind,
+            CursorTaskStatus,
+        )
+        from app.orchestration.cursor_prompts import (
+            build_analyze_prompt,
+            build_mcp_snippet,
+        )
+
+        fs_text = doc.parsed_text or doc.original_text or ""
+        if not fs_text.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="FS document has no parsed text yet; upload / parse it first.",
+            )
+        task_id = uuid.uuid4()
+        prompt = build_analyze_prompt(task_id=task_id, fs_text=fs_text)
+        task = CursorTaskDB(
+            id=task_id,
+            kind=CursorTaskKind.ANALYZE,
+            status=CursorTaskStatus.PENDING,
+            related_id=doc.id,
+            input_payload={"doc_id": str(doc.id)},
+            prompt_text=prompt,
+        )
+        db.add(task)
+        await db.commit()
+        await db.refresh(task)
+        logger.info("Analyze route branched to Cursor paste-per-action task %s", task.id)
+        return APIResponse(
+            data={
+                "mode": "cursor_task",
+                "task_id": str(task.id),
+                "kind": "analyze",
+                "prompt": task.prompt_text,
+                "mcp_snippet": build_mcp_snippet(),
+                "status": task.status.value.lower(),
+            }
+        )
 
     if doc.status not in (
         FSDocumentStatus.PARSED,
@@ -313,10 +392,11 @@ async def analyze_document(
         return APIResponse(data=existing)
 
     if doc.status == FSDocumentStatus.ANALYZING:
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta
+
         stuck_threshold = timedelta(minutes=3)
-        now = datetime.now(timezone.utc)
-        last_update = doc.updated_at.replace(tzinfo=timezone.utc) if doc.updated_at.tzinfo is None else doc.updated_at
+        now = datetime.now(UTC)
+        last_update = doc.updated_at.replace(tzinfo=UTC) if doc.updated_at.tzinfo is None else doc.updated_at
         if (now - last_update) > stuck_threshold:
             logger.warning("Document %s stuck in ANALYZING for >3min — resetting to PARSED", doc_id)
             doc.status = FSDocumentStatus.PARSED
@@ -346,18 +426,16 @@ async def analyze_document(
     # Load parsed sections — either from disk (uploaded) or from stored text (idea-generated)
     if doc.file_path:
         from app.parsers.router import parse_document as do_parse
+
         parsed = await do_parse(str(doc.id), db)
         sections = [
-            {"heading": s.heading, "content": s.content, "section_index": s.section_index}
-            for s in parsed.sections
+            {"heading": s.heading, "content": s.content, "section_index": s.section_index} for s in parsed.sections
         ]
     elif doc.parsed_text:
         from app.parsers.section_extractor import extract_sections_from_text
+
         extracted = extract_sections_from_text(doc.parsed_text)
-        sections = [
-            {"heading": s.heading, "content": s.content, "section_index": s.section_index}
-            for s in extracted
-        ]
+        sections = [{"heading": s.heading, "content": s.content, "section_index": s.section_index} for s in extracted]
     else:
         doc.status = FSDocumentStatus.ERROR
         await db.commit()
@@ -366,12 +444,14 @@ async def analyze_document(
             detail="Document has neither a file path nor parsed text. Re-upload or re-generate.",
         )
 
-    changed_indices: "set[int] | None" = None
+    changed_indices: set[int] | None = None
     if sections_filter:
         try:
             changed_indices = {int(x.strip()) for x in sections_filter.split(",") if x.strip()}
-            from app.db.models import PipelineCacheDB
             from sqlalchemy import delete as sql_delete
+
+            from app.db.models import PipelineCacheDB
+
             await db.execute(sql_delete(PipelineCacheDB).where(PipelineCacheDB.document_id == doc_id))
             await db.commit()
             logger.info("Selective analysis for sections %s (cache cleared)", changed_indices)
@@ -384,7 +464,10 @@ async def analyze_document(
     try:
         try:
             pipeline_result = await run_analysis_pipeline(
-                str(doc.id), sections, db=db, cancel_event=cancel_evt,
+                str(doc.id),
+                sections,
+                db=db,
+                cancel_event=cancel_evt,
                 changed_indices=changed_indices,
             )
         except Exception as exc:
@@ -443,12 +526,17 @@ async def analyze_document(
                 await db.delete(row)
     else:
         for model_class in [
-            AmbiguityFlagDB, ContradictionDB, EdgeCaseGapDB, ComplianceTagDB,
-            FSTaskDB, TraceabilityEntryDB, DebateResultDB, DuplicateFlagDB, TestCaseDB,
+            AmbiguityFlagDB,
+            ContradictionDB,
+            EdgeCaseGapDB,
+            ComplianceTagDB,
+            FSTaskDB,
+            TraceabilityEntryDB,
+            DebateResultDB,
+            DuplicateFlagDB,
+            TestCaseDB,
         ]:
-            existing = await db.execute(
-                select(model_class).where(model_class.fs_id == doc_id)
-            )
+            existing = await db.execute(select(model_class).where(model_class.fs_id == doc_id))
             for row in existing.scalars().all():
                 await db.delete(row)
 
@@ -578,6 +666,7 @@ async def analyze_document(
 
     # Update document status
     doc.status = FSDocumentStatus.COMPLETE
+    doc.analysis_stale = False
 
     # ── Persist debate results (L6) ──
     debate_dicts = pipeline_result.get("debate_results", [])
@@ -605,6 +694,7 @@ async def analyze_document(
         similar_fs_id_str = dup.get("similar_fs_id", "")
         try:
             import uuid as uuid_mod
+
             similar_uuid = uuid_mod.UUID(similar_fs_id_str) if similar_fs_id_str else None
         except (ValueError, AttributeError):
             similar_uuid = None
@@ -649,8 +739,11 @@ async def analyze_document(
 
     # ── Log audit events (L9) ──
     from app.db.audit import log_audit_event
+
     await log_audit_event(
-        db, doc_id, AuditEventType.ANALYZED,
+        db,
+        doc_id,
+        AuditEventType.ANALYZED,
         payload={
             "ambiguities": len(db_flags),
             "contradictions": len(db_contradictions),
@@ -662,14 +755,26 @@ async def analyze_document(
     )
     if db_tasks:
         await log_audit_event(
-            db, doc_id, AuditEventType.TASKS_GENERATED,
+            db,
+            doc_id,
+            AuditEventType.TASKS_GENERATED,
             payload={"tasks_count": len(db_tasks)},
         )
 
     await db.commit()
 
     # Refresh all to get IDs
-    for item in db_flags + db_contradictions + db_edge_cases + db_compliance + db_tasks + db_traces + db_debates + db_duplicates + db_testcases:
+    for item in (
+        db_flags
+        + db_contradictions
+        + db_edge_cases
+        + db_compliance
+        + db_tasks
+        + db_traces
+        + db_debates
+        + db_duplicates
+        + db_testcases
+    ):
         await db.refresh(item)
 
     # Build response
@@ -693,12 +798,16 @@ async def analyze_document(
 
     # Build quality score schema
     quality_dict = pipeline_result.get("quality_score", {})
-    quality_schema = QualityScoreSchema(
-        completeness=quality_dict.get("completeness", 0.0),
-        clarity=quality_dict.get("clarity", 0.0),
-        consistency=quality_dict.get("consistency", 0.0),
-        overall=quality_dict.get("overall", 0.0),
-    ) if quality_dict else None
+    quality_schema = (
+        QualityScoreSchema(
+            completeness=quality_dict.get("completeness", 0.0),
+            clarity=quality_dict.get("clarity", 0.0),
+            consistency=quality_dict.get("consistency", 0.0),
+            overall=quality_dict.get("overall", 0.0),
+        )
+        if quality_dict
+        else None
+    )
 
     return APIResponse(
         data=AnalysisResponse(
@@ -737,31 +846,111 @@ async def cancel_analysis(
 
     await asyncio.sleep(1)
 
-    result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = result.scalar_one_or_none()
     if doc and doc.status == FSDocumentStatus.ANALYZING:
         doc.status = FSDocumentStatus.PARSED
         from app.db.audit import log_audit_event
+
         await log_audit_event(db, doc_id, AuditEventType.ANALYSIS_CANCELLED)
         await db.commit()
 
     return APIResponse(data={"cancelled": True, "document_id": str(doc_id)})
 
 
-@router.post("/{doc_id}/refine", response_model=APIResponse[RefinementResponse])
+@router.post("/{doc_id}/refine", response_model=APIResponse)
 async def refine_document(
     doc_id: uuid.UUID,
     mode: str = Query("auto", description="Refinement mode: auto, targeted, full"),
     db: AsyncSession = Depends(get_db),
-) -> APIResponse[RefinementResponse]:
+) -> APIResponse:
     """Run refinement pipeline and return refined FS candidate.
 
     mode=auto: targeted if <= 5 issues, full otherwise.
     mode=targeted: only fix affected paragraphs (fast, fewer tokens).
     mode=full: rewrite entire document (thorough).
+
+    When ``llm_provider == "cursor"``, we branch to a CursorTask so the
+    user pastes the refine prompt into Cursor and the MCP ``submit_refine``
+    tool pushes the refined markdown back without burning any Direct-API
+    tokens.
     """
+    from app.orchestration.config_resolver import get_configured_llm_provider_name
+
+    provider = (await get_configured_llm_provider_name()) or "api"
+    if provider == "cursor":
+        from app.db.models import (
+            AmbiguityFlagDB,
+            CursorTaskDB,
+            CursorTaskKind,
+            CursorTaskStatus,
+        )
+        from app.orchestration.cursor_prompts import (
+            build_mcp_snippet,
+            build_refine_prompt,
+        )
+
+        doc_row = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
+        doc = doc_row.scalar_one_or_none()
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+        fs_text = doc.parsed_text or doc.original_text or ""
+        if not fs_text.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="FS document has no parsed text yet; upload / parse it first.",
+            )
+        flag_rows = (
+            (
+                await db.execute(
+                    select(AmbiguityFlagDB).where(
+                        AmbiguityFlagDB.fs_id == doc_id,
+                        AmbiguityFlagDB.resolved.is_(True),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        accepted_flags = [
+            {
+                "section_index": f.section_index,
+                "section_heading": f.section_heading,
+                "flagged_text": f.flagged_text,
+                "clarification_question": f.clarification_question,
+                "resolution_text": f.resolution_text or "",
+            }
+            for f in flag_rows
+        ]
+        task_id = uuid.uuid4()
+        prompt = build_refine_prompt(
+            task_id=task_id,
+            fs_text=fs_text,
+            accepted_flags=accepted_flags,
+        )
+        task = CursorTaskDB(
+            id=task_id,
+            kind=CursorTaskKind.REFINE,
+            status=CursorTaskStatus.PENDING,
+            related_id=doc.id,
+            input_payload={"doc_id": str(doc.id), "mode": mode},
+            prompt_text=prompt,
+        )
+        db.add(task)
+        await db.commit()
+        await db.refresh(task)
+        logger.info("Refine route branched to Cursor paste-per-action task %s", task.id)
+        return APIResponse(
+            data={
+                "mode": "cursor_task",
+                "task_id": str(task.id),
+                "kind": "refine",
+                "prompt": task.prompt_text,
+                "mcp_snippet": build_mcp_snippet(),
+                "status": task.status.value.lower(),
+            }
+        )
+
     from app.pipeline.refinement_graph import run_refinement_pipeline
 
     result = await run_refinement_pipeline(str(doc_id), db, mode=mode)
@@ -880,9 +1069,21 @@ async def resolve_ambiguity(
     flag.resolved = target_resolved
     if target_resolved:
         flag.resolution_text = resolution_text
-        flag.resolved_at = datetime.now(timezone.utc)
+        flag.resolved_at = datetime.now(UTC)
     else:
         flag.resolved_at = None
+    if target_resolved:
+        await _safe_audit(
+            db,
+            doc_id,
+            AuditEventType.AMBIGUITY_RESOLVED,
+            payload={
+                "flag_id": str(flag_id),
+                "section_heading": flag.section_heading,
+                "severity": flag.severity.value if hasattr(flag.severity, "value") else str(flag.severity),
+                "has_resolution_text": bool(resolution_text),
+            },
+        )
     await db.commit()
     await db.refresh(flag)
     await _refresh_quality_score_internal(doc_id, db)
@@ -970,6 +1171,17 @@ async def resolve_contradiction(
         raise HTTPException(status_code=404, detail="Contradiction not found")
 
     row.resolved = True
+    await _safe_audit(
+        db,
+        doc_id,
+        AuditEventType.CONTRADICTION_ACCEPTED,
+        payload={
+            "contradiction_id": str(contradiction_id),
+            "section_a_heading": row.section_a_heading,
+            "section_b_heading": row.section_b_heading,
+            "mode": "manual_resolve",
+        },
+    )
     await db.commit()
     await db.refresh(row)
 
@@ -1036,6 +1248,16 @@ async def resolve_edge_case(
         raise HTTPException(status_code=404, detail="Edge case gap not found")
 
     row.resolved = True
+    await _safe_audit(
+        db,
+        doc_id,
+        AuditEventType.EDGE_CASE_ACCEPTED,
+        payload={
+            "edge_case_id": str(edge_case_id),
+            "section_heading": row.section_heading,
+            "mode": "manual_resolve",
+        },
+    )
     await db.commit()
     await db.refresh(row)
 
@@ -1083,8 +1305,18 @@ async def accept_edge_case_suggestion(
     text = doc.parsed_text or doc.original_text or ""
     text = _append_to_section(text, row.section_index, row.suggested_addition.strip())
 
-    version = await _persist_refined_version(doc, text, db)
+    await _persist_refined_version(doc, text, db, trigger="edge_case_accepted")
     row.resolved = True
+    await _safe_audit(
+        db,
+        doc_id,
+        AuditEventType.EDGE_CASE_ACCEPTED,
+        payload={
+            "edge_case_id": str(edge_case_id),
+            "section_heading": row.section_heading,
+            "impact": row.impact.value if hasattr(row.impact, "value") else str(row.impact),
+        },
+    )
     await db.commit()
     await db.refresh(row)
 
@@ -1104,6 +1336,7 @@ async def accept_edge_case_suggestion(
 def _append_to_section(text: str, section_index: int, addition: str) -> str:
     """Append text at the end of a specific section in the document."""
     from app.parsers.section_extractor import extract_sections_from_text
+
     sections = extract_sections_from_text(text)
     target = None
     for s in sections:
@@ -1149,8 +1382,19 @@ async def accept_contradiction_suggestion(
     text = doc.parsed_text or doc.original_text or ""
     text = _append_to_section(text, row.section_a_index, row.suggested_resolution.strip())
 
-    await _persist_refined_version(doc, text, db)
+    await _persist_refined_version(doc, text, db, trigger="contradiction_accepted")
     row.resolved = True
+    await _safe_audit(
+        db,
+        doc_id,
+        AuditEventType.CONTRADICTION_ACCEPTED,
+        payload={
+            "contradiction_id": str(contradiction_id),
+            "section_a_heading": row.section_a_heading,
+            "section_b_heading": row.section_b_heading,
+            "severity": row.severity.value if hasattr(row.severity, "value") else str(row.severity),
+        },
+    )
     await db.commit()
     await db.refresh(row)
 
@@ -1184,10 +1428,12 @@ async def bulk_accept_edge_cases(
         raise HTTPException(status_code=404, detail="Document not found")
 
     rows_result = await db.execute(
-        select(EdgeCaseGapDB).where(
+        select(EdgeCaseGapDB)
+        .where(
             EdgeCaseGapDB.fs_id == doc_id,
             EdgeCaseGapDB.resolved.is_(False),
-        ).order_by(EdgeCaseGapDB.section_index)
+        )
+        .order_by(EdgeCaseGapDB.section_index)
     )
     rows = rows_result.scalars().all()
 
@@ -1200,7 +1446,13 @@ async def bulk_accept_edge_cases(
         row.resolved = True
 
     if accepted > 0:
-        await _persist_refined_version(doc, text, db)
+        await _persist_refined_version(doc, text, db, trigger="edge_case_bulk_accept")
+        await _safe_audit(
+            db,
+            doc_id,
+            AuditEventType.EDGE_CASE_ACCEPTED,
+            payload={"mode": "bulk_accept", "accepted": accepted},
+        )
     await db.commit()
     return APIResponse(data={"accepted": accepted, "resolved": len(rows)})
 
@@ -1236,10 +1488,12 @@ async def bulk_accept_contradictions(
         raise HTTPException(status_code=404, detail="Document not found")
 
     rows_result = await db.execute(
-        select(ContradictionDB).where(
+        select(ContradictionDB)
+        .where(
             ContradictionDB.fs_id == doc_id,
             ContradictionDB.resolved.is_(False),
-        ).order_by(ContradictionDB.section_a_index)
+        )
+        .order_by(ContradictionDB.section_a_index)
     )
     rows = rows_result.scalars().all()
 
@@ -1252,7 +1506,13 @@ async def bulk_accept_contradictions(
         row.resolved = True
 
     if accepted > 0:
-        await _persist_refined_version(doc, text, db)
+        await _persist_refined_version(doc, text, db, trigger="contradiction_bulk_accept")
+        await _safe_audit(
+            db,
+            doc_id,
+            AuditEventType.CONTRADICTION_ACCEPTED,
+            payload={"mode": "bulk_accept", "accepted": accepted},
+        )
     await db.commit()
     return APIResponse(data={"accepted": accepted, "resolved": len(rows)})
 
@@ -1305,9 +1565,7 @@ async def get_quality_dashboard(
     Returns quality score, contradictions, edge cases, and compliance tags.
     """
     # Verify document exists
-    doc_result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = doc_result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -1342,15 +1600,13 @@ async def get_quality_dashboard(
     edge_cases = edge_cases_result.scalars().all()
 
     compliance_result = await db.execute(
-        select(ComplianceTagDB)
-        .where(ComplianceTagDB.fs_id == doc_id)
-        .order_by(ComplianceTagDB.section_index)
+        select(ComplianceTagDB).where(ComplianceTagDB.fs_id == doc_id).order_by(ComplianceTagDB.section_index)
     )
     compliance_tags = compliance_result.scalars().all()
 
     # Recompute quality score from persisted data
-    from app.pipeline.nodes.quality_node import compute_quality_score
     from app.parsers.section_extractor import extract_sections_from_text
+    from app.pipeline.nodes.quality_node import compute_quality_score
 
     text = (doc.parsed_text or doc.original_text or "").strip()
     try:
@@ -1430,9 +1686,7 @@ async def get_debate_results(
     that were challenged by the Red vs Blue agent debate (L6).
     """
     # Verify document exists
-    doc_result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = doc_result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")

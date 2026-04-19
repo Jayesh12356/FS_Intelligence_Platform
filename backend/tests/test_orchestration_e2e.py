@@ -45,14 +45,21 @@ class StubCLIProvider(ExecutionProvider):
         self.call_log: list[tuple[str, dict[str, Any]]] = []
 
     async def call_llm(
-        self, prompt: str, system: str = "", max_tokens: int = 4096,
-        temperature: float = 0.0, **kwargs: Any,
+        self,
+        prompt: str,
+        system: str = "",
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
+        **kwargs: Any,
     ) -> str:
         self.call_log.append(("call_llm", {"prompt": prompt, "system": system}))
         return self._response
 
     async def build_task(
-        self, task_context: dict, output_folder: str, **kwargs: Any,
+        self,
+        task_context: dict,
+        output_folder: str,
+        **kwargs: Any,
     ) -> BuildResult:
         self.call_log.append(("build_task", {"task": task_context, "out": output_folder}))
         return BuildResult(success=self._build_ok, output="built")
@@ -122,12 +129,13 @@ async def test_registry_health_check_collects_all(
 
 
 @pytest.mark.asyncio
-async def test_strict_mode_blocks_fallback_to_direct_api_when_stub_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("ORCHESTRATION_ENABLED", "true")
-    monkeypatch.setenv("ORCHESTRATION_STRICT_LLM", "true")
+async def test_strict_mode_blocks_fallback_to_direct_api_when_stub_fails() -> None:
+    """When the configured provider fails, Direct-API is never consulted.
 
+    0.4.0 deleted the ``ORCHESTRATION_STRICT_LLM`` flag along with the
+    fallback chain — the bridge is now strict by default. This test
+    exists to guarantee that regression.
+    """
     from app.config import get_settings
     from app.llm.client import LLMError
     from app.orchestration import get_tool_registry
@@ -135,8 +143,6 @@ async def test_strict_mode_blocks_fallback_to_direct_api_when_stub_fails(
 
     get_settings.cache_clear()
     try:
-        assert get_settings().ORCHESTRATION_STRICT_LLM is True
-
         registry = get_tool_registry()
         stub = StubCLIProvider(name="stub_strict")
         registry.register(stub)
@@ -148,10 +154,6 @@ async def test_strict_mode_blocks_fallback_to_direct_api_when_stub_fails(
             patch(
                 "app.orchestration.config_resolver.get_configured_llm_provider_name",
                 new=AsyncMock(return_value="stub_strict"),
-            ),
-            patch(
-                "app.orchestration.config_resolver.get_configured_fallback_chain",
-                new=AsyncMock(return_value=[]),
             ),
             patch.object(stub, "call_llm", new=AsyncMock(side_effect=RuntimeError("stub down"))),
             patch(
@@ -167,12 +169,8 @@ async def test_strict_mode_blocks_fallback_to_direct_api_when_stub_fails(
 
 
 @pytest.mark.asyncio
-async def test_loose_mode_uses_stub_response_end_to_end(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("ORCHESTRATION_ENABLED", "true")
-    monkeypatch.setenv("ORCHESTRATION_STRICT_LLM", "false")
-
+async def test_stub_provider_responds_end_to_end() -> None:
+    """A healthy custom provider routes normally through the bridge."""
     from app.config import get_settings
     from app.orchestration import get_tool_registry
     from app.orchestration.llm_bridge import orchestrated_call_llm
@@ -183,15 +181,9 @@ async def test_loose_mode_uses_stub_response_end_to_end(
         stub = StubCLIProvider(name="stub_loose", response="stub-answer")
         registry.register(stub)
 
-        with (
-            patch(
-                "app.orchestration.config_resolver.get_configured_llm_provider_name",
-                new=AsyncMock(return_value="stub_loose"),
-            ),
-            patch(
-                "app.orchestration.config_resolver.get_configured_fallback_chain",
-                new=AsyncMock(return_value=["api"]),
-            ),
+        with patch(
+            "app.orchestration.config_resolver.get_configured_llm_provider_name",
+            new=AsyncMock(return_value="stub_loose"),
         ):
             out = await orchestrated_call_llm("hi")
         assert out == "stub-answer"
@@ -201,14 +193,20 @@ async def test_loose_mode_uses_stub_response_end_to_end(
 
 
 @pytest.mark.asyncio
-async def test_strict_mode_exhausts_fallback_chain_before_raising(
+async def test_strict_mode_never_falls_back_to_other_providers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Even in strict mode, a fallback chain should be tried before raising."""
-    monkeypatch.setenv("ORCHESTRATION_ENABLED", "true")
-    monkeypatch.setenv("ORCHESTRATION_STRICT_LLM", "true")
+    """Strict mode must raise instead of silently switching providers.
 
+    0.4.0 removed the fallback chain entirely — when the configured
+    provider fails, ``orchestrated_call_llm`` surfaces ``LLMError``
+    without ever consulting the Direct-API client or any stub second
+    provider. This guards against token-leak regressions where Cursor/
+    Claude-Code users were charged on OpenRouter because the bridge
+    quietly fell back to ``api``.
+    """
     from app.config import get_settings
+    from app.llm.client import LLMError
     from app.orchestration import get_tool_registry
     from app.orchestration.llm_bridge import orchestrated_call_llm
 
@@ -216,7 +214,7 @@ async def test_strict_mode_exhausts_fallback_chain_before_raising(
     try:
         registry = get_tool_registry()
         primary = StubCLIProvider(name="stub_primary")
-        secondary = StubCLIProvider(name="stub_secondary", response="from-secondary")
+        secondary = StubCLIProvider(name="stub_secondary", response="must-not-run")
         registry.register(primary)
         registry.register(secondary)
 
@@ -225,13 +223,12 @@ async def test_strict_mode_exhausts_fallback_chain_before_raising(
                 "app.orchestration.config_resolver.get_configured_llm_provider_name",
                 new=AsyncMock(return_value="stub_primary"),
             ),
-            patch(
-                "app.orchestration.config_resolver.get_configured_fallback_chain",
-                new=AsyncMock(return_value=["stub_secondary"]),
-            ),
             patch.object(primary, "call_llm", new=AsyncMock(side_effect=RuntimeError("down"))),
+            patch.object(secondary, "call_llm", new=AsyncMock(return_value="must-not-run")),
         ):
-            out = await orchestrated_call_llm("hi")
-        assert out == "from-secondary"
+            with pytest.raises(LLMError):
+                await orchestrated_call_llm("hi")
+
+            secondary.call_llm.assert_not_called()  # type: ignore[attr-defined]
     finally:
         get_settings.cache_clear()

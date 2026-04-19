@@ -67,18 +67,14 @@ def compute_rework_estimate(
         if impact_type == "INVALIDATED":
             invalidated_count += 1
             total_rework_days += effort_days
-            invalidated_tasks.append(
-                task_titles.get(task_id, task_id)
-            )
+            invalidated_tasks.append(task_titles.get(task_id, task_id))
             if change_section:
                 affected_sections.add(change_section)
 
         elif impact_type == "REQUIRES_REVIEW":
             review_count += 1
             total_rework_days += effort_days * REVIEW_EFFORT_MULTIPLIER
-            review_tasks.append(
-                task_titles.get(task_id, task_id)
-            )
+            review_tasks.append(task_titles.get(task_id, task_id))
             if change_section:
                 affected_sections.add(change_section)
 
@@ -91,20 +87,12 @@ def compute_rework_estimate(
     # Generate summary
     summary_lines = []
     if invalidated_count > 0:
-        summary_lines.append(
-            f"{invalidated_count} task(s) invalidated requiring full rework"
-        )
+        summary_lines.append(f"{invalidated_count} task(s) invalidated requiring full rework")
     if review_count > 0:
-        summary_lines.append(
-            f"{review_count} task(s) require review and possible adjustment"
-        )
+        summary_lines.append(f"{review_count} task(s) require review and possible adjustment")
     if unaffected_count > 0:
-        summary_lines.append(
-            f"{unaffected_count} task(s) remain unaffected"
-        )
-    summary_lines.append(
-        f"Estimated total rework: {total_rework_days} days"
-    )
+        summary_lines.append(f"{unaffected_count} task(s) remain unaffected")
+    summary_lines.append(f"Estimated total rework: {total_rework_days} days")
 
     changes_summary = ". ".join(summary_lines) + "."
 
@@ -133,7 +121,8 @@ async def rework_node(state: FSImpactState) -> FSImpactState:
 
     logger.info(
         "Rework node: computing estimate from %d impacts for fs_id=%s",
-        len(task_impacts), state.get("fs_id", "?"),
+        len(task_impacts),
+        state.get("fs_id", "?"),
     )
 
     try:

@@ -27,7 +27,9 @@ async def traceability_node(state: FSAnalysisState) -> FSAnalysisState:
 
     logger.info(
         "Traceability node: mapping %d tasks to %d sections for fs_id=%s",
-        len(tasks), len(sections), state.get("fs_id", "?"),
+        len(tasks),
+        len(sections),
+        state.get("fs_id", "?"),
     )
 
     # Build section index lookup

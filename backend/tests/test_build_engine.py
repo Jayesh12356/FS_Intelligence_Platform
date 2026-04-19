@@ -26,20 +26,22 @@ async def seeded_doc(test_db: AsyncSession) -> str:
     )
     test_db.add(doc)
     for i, title in enumerate(["Auth login", "Dashboard stats"]):
-        test_db.add(FSTaskDB(
-            fs_id=doc_id,
-            task_id=f"TASK-{i+1}",
-            title=title,
-            description=f"Implement {title}",
-            section_index=i,
-            section_heading=f"Section {i}",
-            depends_on=[],
-            acceptance_criteria=["Done when tested"],
-            effort="MEDIUM",
-            tags=["backend"],
-            order=i,
-            status=TaskStatus.PENDING,
-        ))
+        test_db.add(
+            FSTaskDB(
+                fs_id=doc_id,
+                task_id=f"TASK-{i + 1}",
+                title=title,
+                description=f"Implement {title}",
+                section_index=i,
+                section_heading=f"Section {i}",
+                depends_on=[],
+                acceptance_criteria=["Done when tested"],
+                effort="MEDIUM",
+                tags=["backend"],
+                order=i,
+                status=TaskStatus.PENDING,
+            )
+        )
     await test_db.commit()
     return str(doc_id)
 

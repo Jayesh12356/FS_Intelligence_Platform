@@ -14,7 +14,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -114,6 +114,7 @@ async def upload_codebase(
 
     # Parse codebase immediately
     import anyio
+
     from app.parsers.code_parser import parse_codebase
 
     try:
@@ -139,7 +140,10 @@ async def upload_codebase(
 
         logger.info(
             "Codebase parsed: %s — %d files, %d lines, primary: %s",
-            file.filename, snapshot.total_files, snapshot.total_lines, snapshot.primary_language,
+            file.filename,
+            snapshot.total_files,
+            snapshot.total_lines,
+            snapshot.primary_language,
         )
 
     except Exception as exc:
@@ -162,23 +166,22 @@ async def upload_codebase(
 # ── Generate FS ─────────────────────────────────────────
 
 
-@router.post("/{upload_id}/generate-fs", response_model=APIResponse[GeneratedFSResponse])
+@router.post("/{upload_id}/generate-fs", response_model=APIResponse)
 async def generate_fs(
     upload_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-) -> APIResponse[GeneratedFSResponse]:
+) -> APIResponse:
     """Trigger reverse FS generation from a parsed codebase.
 
     Runs the reverse pipeline (reverse_fs_node → reverse_quality_node)
     and stores the result as an FSDocument.
     """
-    from app.pipeline.graph import run_reverse_pipeline
+    from app.orchestration.config_resolver import get_configured_llm_provider_name
     from app.parsers.code_parser import parse_codebase
+    from app.pipeline.graph import run_reverse_pipeline
 
     # Load code upload
-    result = await db.execute(
-        select(CodeUploadDB).where(CodeUploadDB.id == upload_id)
-    )
+    result = await db.execute(select(CodeUploadDB).where(CodeUploadDB.id == upload_id))
     upload = result.scalar_one_or_none()
     if not upload:
         raise HTTPException(status_code=404, detail="Code upload not found")
@@ -189,12 +192,76 @@ async def generate_fs(
             detail=f"Codebase must be parsed before generating FS. Current status: {upload.status.value}",
         )
 
+    # When Cursor is the active provider, branch to the paste-per-
+    # action flow. No pipeline call — the UI opens the Cursor task
+    # modal and Cursor submits the reverse FS via MCP.
+    provider = (await get_configured_llm_provider_name()) or "api"
+    if provider == "cursor":
+        from app.db.models import (
+            CursorTaskDB,
+            CursorTaskKind,
+            CursorTaskStatus,
+        )
+        from app.orchestration.cursor_prompts import (
+            build_mcp_snippet,
+            build_reverse_fs_prompt,
+        )
+
+        manifest = {
+            "primary_language": upload.primary_language,
+            "total_files": upload.total_files,
+            "total_lines": upload.total_lines,
+            "languages": upload.languages or {},
+        }
+        file_excerpts: list[dict] = []
+        snap = upload.snapshot_data or {}
+        for entry in (snap.get("files") or [])[:20]:
+            file_excerpts.append(
+                {
+                    "path": entry.get("path", ""),
+                    "language": entry.get("language", ""),
+                    "excerpt": (entry.get("summary") or entry.get("content") or "")[:1200],
+                }
+            )
+        task_id = uuid.uuid4()
+        prompt = build_reverse_fs_prompt(
+            task_id=task_id,
+            code_manifest=manifest,
+            file_excerpts=file_excerpts,
+        )
+        task = CursorTaskDB(
+            id=task_id,
+            kind=CursorTaskKind.REVERSE_FS,
+            status=CursorTaskStatus.PENDING,
+            related_id=upload.id,
+            input_payload={
+                "upload_id": str(upload.id),
+                "manifest": manifest,
+            },
+            prompt_text=prompt,
+        )
+        db.add(task)
+        await db.commit()
+        await db.refresh(task)
+        logger.info("Reverse FS route branched to Cursor task %s", task.id)
+        return APIResponse(
+            data={
+                "mode": "cursor_task",
+                "task_id": str(task.id),
+                "kind": "reverse_fs",
+                "prompt": task.prompt_text,
+                "mcp_snippet": build_mcp_snippet(),
+                "status": task.status.value.lower(),
+            }
+        )
+
     # Set status to generating
     upload.status = CodeUploadStatus.GENERATING
     await db.flush()
 
     # Re-parse to get full snapshot with content (DB version has content stripped)
     import anyio
+
     try:
         snapshot = await anyio.to_thread.run_sync(parse_codebase, upload.zip_path)
         snapshot_dict = snapshot.model_dump()
@@ -246,7 +313,8 @@ async def generate_fs(
 
     logger.info(
         "FS generated for %s: %d sections, coverage=%.0f%%, confidence=%.0f%%",
-        upload_id, len(generated_sections),
+        upload_id,
+        len(generated_sections),
         (report.get("coverage", 0) * 100),
         (report.get("confidence", 0) * 100),
     )
@@ -292,9 +360,7 @@ async def get_generated_fs(
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[GeneratedFSResponse]:
     """Get the generated FS document for a code upload."""
-    result = await db.execute(
-        select(CodeUploadDB).where(CodeUploadDB.id == upload_id)
-    )
+    result = await db.execute(select(CodeUploadDB).where(CodeUploadDB.id == upload_id))
     upload = result.scalar_one_or_none()
     if not upload:
         raise HTTPException(status_code=404, detail="Code upload not found")
@@ -348,9 +414,7 @@ async def get_report(
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[CodeReportSchema]:
     """Get the quality report for a generated FS."""
-    result = await db.execute(
-        select(CodeUploadDB).where(CodeUploadDB.id == upload_id)
-    )
+    result = await db.execute(select(CodeUploadDB).where(CodeUploadDB.id == upload_id))
     upload = result.scalar_one_or_none()
     if not upload:
         raise HTTPException(status_code=404, detail="Code upload not found")
@@ -382,19 +446,14 @@ async def get_report(
 @router.get("/uploads", response_model=APIResponse[CodeUploadListResponse])
 async def list_uploads(
     limit: int = Query(50, ge=1, le=500),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=2**31 - 1),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[CodeUploadListResponse]:
     """List code uploads with pagination."""
     total_result = await db.execute(select(func.count()).select_from(CodeUploadDB))
     total = int(total_result.scalar_one() or 0)
 
-    result = await db.execute(
-        select(CodeUploadDB)
-        .order_by(CodeUploadDB.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
+    result = await db.execute(select(CodeUploadDB).order_by(CodeUploadDB.created_at.desc()).limit(limit).offset(offset))
     uploads = result.scalars().all()
 
     schemas = [CodeUploadResponse.model_validate(u) for u in uploads]
@@ -414,9 +473,7 @@ async def get_upload_detail(
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[CodeUploadDetailResponse]:
     """Get detailed info about a code upload."""
-    result = await db.execute(
-        select(CodeUploadDB).where(CodeUploadDB.id == upload_id)
-    )
+    result = await db.execute(select(CodeUploadDB).where(CodeUploadDB.id == upload_id))
     upload = result.scalar_one_or_none()
     if not upload:
         raise HTTPException(status_code=404, detail="Code upload not found")

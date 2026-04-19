@@ -23,6 +23,7 @@ async def test_selective_skips_cross_cutting_nodes(test_db):
         async def _fake(state):
             called.append(name)
             return state
+
         return _fake
 
     # Patch every node function used in run_analysis_pipeline's db branch
@@ -40,7 +41,7 @@ async def test_selective_skips_cross_cutting_nodes(test_db):
         "duplicate_node",
         "testcase_node",
     ]:
-        fake = AsyncMock(side_effect=lambda s, _n=node: (called.append(_n) or s))
+        fake = AsyncMock(side_effect=lambda s, _n=node: called.append(_n) or s)
         patches.append(patch(f"app.pipeline.graph.{node}", fake))
 
     for p in patches:
@@ -77,10 +78,12 @@ async def test_selective_filters_sections_list():
             observed.append(s["section_index"])
         return state
 
-    with patch("app.pipeline.graph.ambiguity_node", AsyncMock(side_effect=spy_ambiguity)), \
-         patch("app.pipeline.graph.parse_node", AsyncMock(side_effect=lambda s: s)), \
-         patch("app.pipeline.graph.debate_node", AsyncMock(side_effect=lambda s: s)), \
-         patch("app.pipeline.graph.edge_case_node", AsyncMock(side_effect=lambda s: s)):
+    with (
+        patch("app.pipeline.graph.ambiguity_node", AsyncMock(side_effect=spy_ambiguity)),
+        patch("app.pipeline.graph.parse_node", AsyncMock(side_effect=lambda s: s)),
+        patch("app.pipeline.graph.debate_node", AsyncMock(side_effect=lambda s: s)),
+        patch("app.pipeline.graph.edge_case_node", AsyncMock(side_effect=lambda s: s)),
+    ):
         await run_analysis_pipeline(
             "22222222-2222-2222-2222-222222222222",
             sections,

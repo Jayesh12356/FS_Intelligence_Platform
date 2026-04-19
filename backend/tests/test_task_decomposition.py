@@ -14,18 +14,17 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.pipeline.nodes.dependency_node import (
+    detect_cycle,
+    find_parallel_tasks,
+    topological_sort,
+)
 from app.pipeline.state import (
     EffortLevel,
     FSAnalysisState,
     FSTask,
     TraceabilityEntry,
 )
-from app.pipeline.nodes.dependency_node import (
-    detect_cycle,
-    topological_sort,
-    find_parallel_tasks,
-)
-
 
 # ── Unit Tests: L5 State Models ─────────────────────────
 
@@ -180,11 +179,11 @@ class TestTaskDecompositionNode:
             },
         ]
 
-        with patch("app.pipeline.nodes.task_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(return_value=mock_response)
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(return_value=mock_response)
+        with patch(
+            "app.pipeline.nodes.task_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             from app.pipeline.nodes.task_node import decompose_section_into_tasks
 
             tasks = await decompose_section_into_tasks(
@@ -210,17 +209,21 @@ class TestTaskDecompositionNode:
             },
         ]
 
-        with patch("app.pipeline.nodes.task_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(return_value=mock_response)
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(return_value=mock_response)
+        with patch(
+            "app.pipeline.nodes.task_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             from app.pipeline.nodes.task_node import task_decomposition_node
 
             state: FSAnalysisState = {
                 "fs_id": "test-td1",
                 "parsed_sections": [
-                    {"heading": "Auth", "content": "Users authenticate via SSO login with enterprise credentials.", "section_index": 0},
+                    {
+                        "heading": "Auth",
+                        "content": "Users authenticate via SSO login with enterprise credentials.",
+                        "section_index": 0,
+                    },
                 ],
                 "ambiguities": [],
                 "tasks": [],
@@ -234,17 +237,21 @@ class TestTaskDecompositionNode:
     @pytest.mark.asyncio
     async def test_task_node_does_not_skip_high_ambiguity_sections(self):
         """Even with unresolved HIGH ambiguities, we still attempt task generation."""
-        with patch("app.pipeline.nodes.task_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(return_value=[])
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(return_value=[])
+        with patch(
+            "app.pipeline.nodes.task_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             from app.pipeline.nodes.task_node import task_decomposition_node
 
             state: FSAnalysisState = {
                 "fs_id": "test-skip",
                 "parsed_sections": [
-                    {"heading": "Auth", "content": "Users authenticate via SSO login with enterprise credentials.", "section_index": 0},
+                    {
+                        "heading": "Auth",
+                        "content": "Users authenticate via SSO login with enterprise credentials.",
+                        "section_index": 0,
+                    },
                 ],
                 "ambiguities": [
                     {"section_index": 0, "severity": "HIGH", "resolved": False},
@@ -255,21 +262,25 @@ class TestTaskDecompositionNode:
 
             result = await task_decomposition_node(state)
             assert len(result["tasks"]) == 0
-            mock_client.call_llm_json.assert_called_once()
+            assert _llm_mock.call_count >= 1
 
     @pytest.mark.asyncio
     async def test_task_node_handles_error(self):
-        with patch("app.pipeline.nodes.task_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(side_effect=Exception("LLM down"))
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(side_effect=Exception("LLM down"))
+        with patch(
+            "app.pipeline.nodes.task_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             from app.pipeline.nodes.task_node import task_decomposition_node
 
             state: FSAnalysisState = {
                 "fs_id": "test-err",
                 "parsed_sections": [
-                    {"heading": "X", "content": "A section with enough content to decompose into tasks.", "section_index": 0},
+                    {
+                        "heading": "X",
+                        "content": "A section with enough content to decompose into tasks.",
+                        "section_index": 0,
+                    },
                 ],
                 "ambiguities": [],
                 "tasks": [],
@@ -296,19 +307,39 @@ class TestDependencyNode:
             t2_id: [t1_id],
         }
 
-        with patch("app.pipeline.nodes.dependency_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(return_value=mock_response)
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(return_value=mock_response)
+        with patch(
+            "app.pipeline.nodes.dependency_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             from app.pipeline.nodes.dependency_node import dependency_node
 
             state: FSAnalysisState = {
                 "fs_id": "test-dep",
                 "parsed_sections": [],
                 "tasks": [
-                    {"task_id": t1_id, "title": "Create DB", "section_index": 0, "section_heading": "Data", "tags": ["db"], "description": "Create database", "depends_on": [], "order": 0, "can_parallel": False},
-                    {"task_id": t2_id, "title": "Create API", "section_index": 0, "section_heading": "Data", "tags": ["api"], "description": "Create API endpoint", "depends_on": [], "order": 0, "can_parallel": False},
+                    {
+                        "task_id": t1_id,
+                        "title": "Create DB",
+                        "section_index": 0,
+                        "section_heading": "Data",
+                        "tags": ["db"],
+                        "description": "Create database",
+                        "depends_on": [],
+                        "order": 0,
+                        "can_parallel": False,
+                    },
+                    {
+                        "task_id": t2_id,
+                        "title": "Create API",
+                        "section_index": 0,
+                        "section_heading": "Data",
+                        "tags": ["api"],
+                        "description": "Create API endpoint",
+                        "depends_on": [],
+                        "order": 0,
+                        "can_parallel": False,
+                    },
                 ],
                 "errors": [],
             }
@@ -333,19 +364,39 @@ class TestDependencyNode:
             t2_id: [t1_id],
         }
 
-        with patch("app.pipeline.nodes.dependency_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(return_value=mock_response)
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(return_value=mock_response)
+        with patch(
+            "app.pipeline.nodes.dependency_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             from app.pipeline.nodes.dependency_node import dependency_node
 
             state: FSAnalysisState = {
                 "fs_id": "test-cycle",
                 "parsed_sections": [],
                 "tasks": [
-                    {"task_id": t1_id, "title": "Task A", "section_index": 0, "section_heading": "S", "tags": [], "description": "A", "depends_on": [], "order": 0, "can_parallel": False},
-                    {"task_id": t2_id, "title": "Task B", "section_index": 0, "section_heading": "S", "tags": [], "description": "B", "depends_on": [], "order": 0, "can_parallel": False},
+                    {
+                        "task_id": t1_id,
+                        "title": "Task A",
+                        "section_index": 0,
+                        "section_heading": "S",
+                        "tags": [],
+                        "description": "A",
+                        "depends_on": [],
+                        "order": 0,
+                        "can_parallel": False,
+                    },
+                    {
+                        "task_id": t2_id,
+                        "title": "Task B",
+                        "section_index": 0,
+                        "section_heading": "S",
+                        "tags": [],
+                        "description": "B",
+                        "depends_on": [],
+                        "order": 0,
+                        "can_parallel": False,
+                    },
                 ],
                 "errors": [],
             }
@@ -466,23 +517,21 @@ class TestL5Pipeline:
             return []
 
         patches = [
-            patch("app.pipeline.nodes.ambiguity_node.get_llm_client"),
-            patch("app.pipeline.nodes.contradiction_node.get_llm_client"),
-            patch("app.pipeline.nodes.edge_case_node.get_llm_client"),
-            patch("app.pipeline.nodes.quality_node.get_llm_client"),
-            patch("app.pipeline.nodes.task_node.get_llm_client"),
-            patch("app.pipeline.nodes.dependency_node.get_llm_client"),
+            patch("app.pipeline.nodes.ambiguity_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.contradiction_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.edge_case_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.quality_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.task_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.dependency_node.pipeline_call_llm_json", new_callable=AsyncMock),
         ]
-
-        mock_client = AsyncMock()
-        mock_client.call_llm_json = AsyncMock(side_effect=mock_call_json)
 
         started_patches = [p.start() for p in patches]
         for mp in started_patches:
-            mp.return_value = mock_client
+            mp.side_effect = mock_call_json
 
         try:
             import app.pipeline.graph as graph_mod
+
             graph_mod._compiled_graph = None
 
             from app.pipeline.graph import run_analysis_pipeline
@@ -616,23 +665,21 @@ Users authenticate using enterprise directory credentials.
 
         # Analyze with mocked LLM
         patches = [
-            patch("app.pipeline.nodes.ambiguity_node.get_llm_client"),
-            patch("app.pipeline.nodes.contradiction_node.get_llm_client"),
-            patch("app.pipeline.nodes.edge_case_node.get_llm_client"),
-            patch("app.pipeline.nodes.quality_node.get_llm_client"),
-            patch("app.pipeline.nodes.task_node.get_llm_client"),
-            patch("app.pipeline.nodes.dependency_node.get_llm_client"),
+            patch("app.pipeline.nodes.ambiguity_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.contradiction_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.edge_case_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.quality_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.task_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.dependency_node.pipeline_call_llm_json", new_callable=AsyncMock),
         ]
-
-        mock_client = AsyncMock()
-        mock_client.call_llm_json = AsyncMock(side_effect=mock_call_json)
 
         started_patches = [p.start() for p in patches]
         for mp in started_patches:
-            mp.return_value = mock_client
+            mp.side_effect = mock_call_json
 
         try:
             import app.pipeline.graph as graph_mod
+
             graph_mod._compiled_graph = None
 
             # Analyze

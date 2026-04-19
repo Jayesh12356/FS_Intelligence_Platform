@@ -14,31 +14,29 @@ Covers:
 import csv
 import io
 import json
-import pytest
 import uuid
-
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.main import app
+# ── Fixtures ───────────────────────────────────────────
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 from app.db.base import Base, engine, get_db
 from app.db.models import (
+    AmbiguityFlagDB,
+    AmbiguitySeverity,
+    EffortLevel,
     FSDocument,
     FSDocumentStatus,
     FSTaskDB,
-    EffortLevel,
     TestCaseDB,
     TestType,
     TraceabilityEntryDB,
-    AmbiguityFlagDB,
-    AmbiguitySeverity,
 )
-
-# ── Fixtures ───────────────────────────────────────────
-
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from app.main import app
 
 TEST_DB_URL = "sqlite+aiosqlite:///./test_l10.db"
 test_engine = create_async_engine(TEST_DB_URL, echo=False)
@@ -173,6 +171,7 @@ class TestConfig:
 
     def test_jira_settings_exist(self):
         from app.config import Settings
+
         s = Settings()
         assert hasattr(s, "JIRA_URL")
         assert hasattr(s, "JIRA_EMAIL")
@@ -181,6 +180,7 @@ class TestConfig:
 
     def test_confluence_settings_exist(self):
         from app.config import Settings
+
         s = Settings()
         assert hasattr(s, "CONFLUENCE_URL")
         assert hasattr(s, "CONFLUENCE_EMAIL")
@@ -189,11 +189,13 @@ class TestConfig:
 
     def test_jira_defaults(self):
         from app.config import Settings
+
         s = Settings()
         assert s.JIRA_PROJECT_KEY == "FSP"
 
     def test_confluence_defaults(self):
         from app.config import Settings
+
         s = Settings()
         assert s.CONFLUENCE_SPACE_KEY == "FSP"
 
@@ -236,20 +238,18 @@ class TestDBModels:
     @pytest.mark.asyncio
     async def test_test_case_relationship(self, db_session, doc_with_test_cases):
         from sqlalchemy import select
-        result = await db_session.execute(
-            select(TestCaseDB).where(TestCaseDB.fs_id == doc_with_test_cases.id)
-        )
+
+        result = await db_session.execute(select(TestCaseDB).where(TestCaseDB.fs_id == doc_with_test_cases.id))
         test_cases = result.scalars().all()
         assert len(test_cases) == 3
 
     @pytest.mark.asyncio
     async def test_test_case_cascade_delete(self, db_session, doc_with_test_cases):
         from sqlalchemy import select
+
         await db_session.delete(doc_with_test_cases)
         await db_session.commit()
-        result = await db_session.execute(
-            select(TestCaseDB).where(TestCaseDB.fs_id == doc_with_test_cases.id)
-        )
+        result = await db_session.execute(select(TestCaseDB).where(TestCaseDB.fs_id == doc_with_test_cases.id))
         assert len(result.scalars().all()) == 0
 
 
@@ -262,6 +262,7 @@ class TestJiraClient:
     @pytest.mark.asyncio
     async def test_simulated_epic(self):
         from app.integrations.jira import JiraClient
+
         client = JiraClient()
         result = await client.create_epic("Test FS", "Test description")
         assert "key" in result
@@ -270,6 +271,7 @@ class TestJiraClient:
     @pytest.mark.asyncio
     async def test_simulated_story(self):
         from app.integrations.jira import JiraClient
+
         client = JiraClient()
         task = {
             "task_id": "T-001",
@@ -286,6 +288,7 @@ class TestJiraClient:
     @pytest.mark.asyncio
     async def test_export_fs_tasks(self):
         from app.integrations.jira import JiraClient
+
         client = JiraClient()
         tasks = [
             {"task_id": "T-001", "title": "Task 1", "description": "Desc 1"},
@@ -299,12 +302,14 @@ class TestJiraClient:
     @pytest.mark.asyncio
     async def test_is_configured_false(self):
         from app.integrations.jira import JiraClient
+
         client = JiraClient()
         assert client.is_configured is False
 
     @pytest.mark.asyncio
     async def test_story_with_acceptance_criteria(self):
         from app.integrations.jira import JiraClient
+
         client = JiraClient()
         task = {
             "task_id": "T-003",
@@ -327,6 +332,7 @@ class TestConfluenceClient:
     @pytest.mark.asyncio
     async def test_simulated_page(self):
         from app.integrations.confluence import ConfluenceClient
+
         client = ConfluenceClient()
         result = await client.create_page("Test Page", "<p>Content</p>")
         assert result["simulated"] is True
@@ -335,12 +341,14 @@ class TestConfluenceClient:
     @pytest.mark.asyncio
     async def test_is_configured_false(self):
         from app.integrations.confluence import ConfluenceClient
+
         client = ConfluenceClient()
         assert client.is_configured is False
 
     @pytest.mark.asyncio
     async def test_build_page_content(self):
         from app.integrations.confluence import ConfluenceClient
+
         client = ConfluenceClient()
         content = client._build_page_content(
             sections=[{"heading": "Section 1", "content": "Content 1", "section_index": 0}],
@@ -357,6 +365,7 @@ class TestConfluenceClient:
     @pytest.mark.asyncio
     async def test_build_page_empty(self):
         from app.integrations.confluence import ConfluenceClient
+
         client = ConfluenceClient()
         content = client._build_page_content(sections=[], quality_score=None)
         assert "No content" in content
@@ -364,6 +373,7 @@ class TestConfluenceClient:
     @pytest.mark.asyncio
     async def test_create_fs_page(self):
         from app.integrations.confluence import ConfluenceClient
+
         client = ConfluenceClient()
         result = await client.create_fs_page(
             title="My FS",
@@ -382,6 +392,7 @@ class TestTestcaseNode:
     @pytest.mark.asyncio
     async def test_no_tasks(self):
         from app.pipeline.nodes.testcase_node import testcase_node
+
         state = {"tasks": [], "fs_id": "test", "errors": []}
         result = await testcase_node(state)
         assert result["test_cases"] == []
@@ -396,14 +407,16 @@ class TestTestcaseNode:
         tc_mod.pipeline_call_llm = None
         try:
             state = {
-                "tasks": [{
-                    "task_id": "T-001",
-                    "title": "Basic task",
-                    "description": "A simple task",
-                    "acceptance_criteria": [],
-                    "section_index": 0,
-                    "section_heading": "Section 1",
-                }],
+                "tasks": [
+                    {
+                        "task_id": "T-001",
+                        "title": "Basic task",
+                        "description": "A simple task",
+                        "acceptance_criteria": [],
+                        "section_index": 0,
+                        "section_heading": "Section 1",
+                    }
+                ],
                 "fs_id": "test",
                 "errors": [],
             }
@@ -419,25 +432,29 @@ class TestTestcaseNode:
         import app.pipeline.nodes.testcase_node as tc_mod
         from app.pipeline.nodes.testcase_node import testcase_node
 
-        mock_response = json.dumps([
-            {
-                "title": "Test login flow",
-                "preconditions": "User exists",
-                "steps": ["Enter credentials", "Click login"],
-                "expected_result": "User logged in",
-                "test_type": "E2E",
-            }
-        ])
+        mock_response = json.dumps(
+            [
+                {
+                    "title": "Test login flow",
+                    "preconditions": "User exists",
+                    "steps": ["Enter credentials", "Click login"],
+                    "expected_result": "User logged in",
+                    "test_type": "E2E",
+                }
+            ]
+        )
 
         state = {
-            "tasks": [{
-                "task_id": "T-001",
-                "title": "Login",
-                "description": "Implement login",
-                "acceptance_criteria": ["User can login"],
-                "section_index": 0,
-                "section_heading": "Auth",
-            }],
+            "tasks": [
+                {
+                    "task_id": "T-001",
+                    "title": "Login",
+                    "description": "Implement login",
+                    "acceptance_criteria": ["User can login"],
+                    "section_index": 0,
+                    "section_heading": "Auth",
+                }
+            ],
             "fs_id": "test",
             "errors": [],
         }
@@ -459,14 +476,16 @@ class TestTestcaseNode:
         from app.pipeline.nodes.testcase_node import testcase_node
 
         state = {
-            "tasks": [{
-                "task_id": "T-001",
-                "title": "Login",
-                "description": "Implement login",
-                "acceptance_criteria": ["User can login", "Error on bad password"],
-                "section_index": 0,
-                "section_heading": "Auth",
-            }],
+            "tasks": [
+                {
+                    "task_id": "T-001",
+                    "title": "Login",
+                    "description": "Implement login",
+                    "acceptance_criteria": ["User can login", "Error on bad password"],
+                    "section_index": 0,
+                    "section_heading": "Auth",
+                }
+            ],
             "fs_id": "test",
             "errors": [],
         }
@@ -488,14 +507,16 @@ class TestTestcaseNode:
         from app.pipeline.nodes.testcase_node import testcase_node
 
         state = {
-            "tasks": [{
-                "task_id": "T-001",
-                "title": "Task",
-                "description": "Desc",
-                "acceptance_criteria": [],
-                "section_index": 0,
-                "section_heading": "Section",
-            }],
+            "tasks": [
+                {
+                    "task_id": "T-001",
+                    "title": "Task",
+                    "description": "Desc",
+                    "acceptance_criteria": [],
+                    "section_index": 0,
+                    "section_heading": "Section",
+                }
+            ],
             "fs_id": "test",
             "errors": [],
         }
@@ -515,8 +536,22 @@ class TestTestcaseNode:
 
         state = {
             "tasks": [
-                {"task_id": "T-001", "title": "Login", "description": "Login flow", "acceptance_criteria": [], "section_index": 0, "section_heading": "Auth"},
-                {"task_id": "T-002", "title": "Dashboard", "description": "Dashboard view", "acceptance_criteria": [], "section_index": 1, "section_heading": "UI"},
+                {
+                    "task_id": "T-001",
+                    "title": "Login",
+                    "description": "Login flow",
+                    "acceptance_criteria": [],
+                    "section_index": 0,
+                    "section_heading": "Auth",
+                },
+                {
+                    "task_id": "T-002",
+                    "title": "Dashboard",
+                    "description": "Dashboard view",
+                    "acceptance_criteria": [],
+                    "section_index": 1,
+                    "section_heading": "UI",
+                },
             ],
             "fs_id": "test",
             "errors": [],
@@ -691,6 +726,7 @@ class TestReportGeneration:
         class MockTask:
             task_id = "T-001"
             title = "Test Task"
+
             class effort:
                 value = "MEDIUM"
 
@@ -733,6 +769,7 @@ class TestPipelineIntegration:
 
     def test_testcase_node_in_graph(self):
         from app.pipeline.graph import build_analysis_graph
+
         graph = build_analysis_graph()
         # The compiled graph should contain testcase_node
         node_names = [n for n in graph.nodes if n != "__start__" and n != "__end__"]
@@ -740,6 +777,7 @@ class TestPipelineIntegration:
 
     def test_graph_has_correct_node_count(self):
         from app.pipeline.graph import build_analysis_graph
+
         graph = build_analysis_graph()
         # 11 nodes: parse, ambiguity, debate, contradiction, edge_case, quality,
         # task_decomposition, dependency, traceability, duplicate, testcase
@@ -749,6 +787,7 @@ class TestPipelineIntegration:
     def test_initial_state_has_test_cases(self):
         """Verify the initial pipeline state includes test_cases field."""
         from app.pipeline.state import FSAnalysisState
+
         # TypedDict keys should include test_cases
         assert "test_cases" in FSAnalysisState.__annotations__
 
@@ -761,6 +800,7 @@ class TestSchemas:
 
     def test_test_case_schema(self):
         from app.models.schemas import TestCaseSchema
+
         tc = TestCaseSchema(
             task_id="T-001",
             title="Test login",
@@ -773,6 +813,7 @@ class TestSchemas:
 
     def test_jira_export_response(self):
         from app.models.schemas import JiraExportResponse
+
         resp = JiraExportResponse(
             epic={"id": "1", "key": "FSP-1"},
             stories=[{"id": "2", "key": "FSP-2"}],
@@ -784,6 +825,7 @@ class TestSchemas:
 
     def test_confluence_export_response(self):
         from app.models.schemas import ConfluenceExportResponse
+
         resp = ConfluenceExportResponse(
             page_id="123",
             page_url="https://example.com/page",
@@ -794,6 +836,7 @@ class TestSchemas:
 
     def test_report_export_response(self):
         from app.models.schemas import ReportExportResponse
+
         resp = ReportExportResponse(
             filename="report.pdf",
             format="pdf",
@@ -804,6 +847,7 @@ class TestSchemas:
 
     def test_test_case_list_response(self):
         from app.models.schemas import TestCaseListResponse, TestCaseSchema
+
         tc = TestCaseSchema(task_id="T-001", title="Test", steps=[], expected_result="OK")
         resp = TestCaseListResponse(
             test_cases=[tc],

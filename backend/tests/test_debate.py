@@ -23,7 +23,6 @@ from app.pipeline.state import (
     Severity,
 )
 
-
 # ── Unit Tests: DebateVerdict Model ─────────────────────
 
 
@@ -476,17 +475,19 @@ class TestPipelineWithDebate:
     def test_graph_has_debate_node(self):
         """The compiled graph should contain a debate_node."""
         import app.pipeline.graph as graph_mod
+
         graph_mod._compiled_graph = None
 
         # Patch all LLM-dependent nodes to avoid real calls
-        with patch("app.pipeline.nodes.ambiguity_node.get_llm_client"), \
-             patch("app.pipeline.nodes.debate_node.run_debate", new_callable=AsyncMock), \
-             patch("app.pipeline.nodes.contradiction_node.get_llm_client"), \
-             patch("app.pipeline.nodes.edge_case_node.get_llm_client"), \
-             patch("app.pipeline.nodes.quality_node.get_llm_client"), \
-             patch("app.pipeline.nodes.task_node.get_llm_client"), \
-             patch("app.pipeline.nodes.dependency_node.get_llm_client"):
-
+        with (
+            patch("app.pipeline.nodes.ambiguity_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.debate_node.run_debate", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.contradiction_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.edge_case_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.quality_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.task_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.dependency_node.pipeline_call_llm_json", new_callable=AsyncMock),
+        ):
             graph = graph_mod.build_analysis_graph()
 
             # The graph should have the debate_node

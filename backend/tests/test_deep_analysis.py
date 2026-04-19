@@ -14,16 +14,15 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.pipeline.nodes.quality_node import compute_quality_score
 from app.pipeline.state import (
-    Contradiction,
     ComplianceTag,
+    Contradiction,
     EdgeCaseGap,
     FSAnalysisState,
     FSQualityScore,
     Severity,
 )
-from app.pipeline.nodes.quality_node import compute_quality_score
-
 
 # ── Unit Tests: L4 State Models ─────────────────────────
 
@@ -198,11 +197,11 @@ class TestContradictionNode:
             },
         ]
 
-        with patch("app.pipeline.nodes.contradiction_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(return_value=mock_response)
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(return_value=mock_response)
+        with patch(
+            "app.pipeline.nodes.contradiction_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             from app.pipeline.nodes.contradiction_node import detect_contradictions_between_sections
 
             results = await detect_contradictions_between_sections(
@@ -229,18 +228,22 @@ class TestContradictionNode:
             },
         ]
 
-        with patch("app.pipeline.nodes.contradiction_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(return_value=mock_response)
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(return_value=mock_response)
+        with patch(
+            "app.pipeline.nodes.contradiction_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             from app.pipeline.nodes.contradiction_node import contradiction_node
 
             state: FSAnalysisState = {
                 "fs_id": "test-c1",
                 "parsed_sections": [
                     {"heading": "Reqs A", "content": "Store data for 90 days minimum.", "section_index": 0},
-                    {"heading": "Reqs B", "content": "Delete data after processing within 24 hours.", "section_index": 1},
+                    {
+                        "heading": "Reqs B",
+                        "content": "Delete data after processing within 24 hours.",
+                        "section_index": 1,
+                    },
                 ],
                 "ambiguities": [],
                 "contradictions": [],
@@ -254,11 +257,11 @@ class TestContradictionNode:
     @pytest.mark.asyncio
     async def test_contradiction_node_handles_error(self):
         """LLM failure should not crash the node."""
-        with patch("app.pipeline.nodes.contradiction_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(side_effect=Exception("LLM down"))
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(side_effect=Exception("LLM down"))
+        with patch(
+            "app.pipeline.nodes.contradiction_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             from app.pipeline.nodes.contradiction_node import contradiction_node
 
             state: FSAnalysisState = {
@@ -281,8 +284,12 @@ class TestContradictionNode:
         from app.pipeline.nodes.contradiction_node import detect_contradictions_between_sections
 
         results = await detect_contradictions_between_sections(
-            heading_a="A", content_a="Short.", index_a=0,
-            heading_b="B", content_b="Also short.", index_b=1,
+            heading_a="A",
+            content_a="Short.",
+            index_a=0,
+            heading_b="B",
+            content_b="Also short.",
+            index_b=1,
         )
         assert len(results) == 0
 
@@ -309,11 +316,11 @@ class TestEdgeCaseNode:
             },
         ]
 
-        with patch("app.pipeline.nodes.edge_case_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(return_value=mock_response)
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(return_value=mock_response)
+        with patch(
+            "app.pipeline.nodes.edge_case_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             from app.pipeline.nodes.edge_case_node import detect_edge_cases_in_section
 
             gaps = await detect_edge_cases_in_section(
@@ -337,17 +344,21 @@ class TestEdgeCaseNode:
             },
         ]
 
-        with patch("app.pipeline.nodes.edge_case_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(return_value=mock_response)
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(return_value=mock_response)
+        with patch(
+            "app.pipeline.nodes.edge_case_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             from app.pipeline.nodes.edge_case_node import edge_case_node
 
             state: FSAnalysisState = {
                 "fs_id": "test-ec1",
                 "parsed_sections": [
-                    {"heading": "Auth", "content": "Users log in with username and password to access the dashboard.", "section_index": 0},
+                    {
+                        "heading": "Auth",
+                        "content": "Users log in with username and password to access the dashboard.",
+                        "section_index": 0,
+                    },
                 ],
                 "ambiguities": [],
                 "edge_cases": [],
@@ -360,17 +371,21 @@ class TestEdgeCaseNode:
     @pytest.mark.asyncio
     async def test_edge_case_node_handles_error(self):
         """LLM failure should not crash the node."""
-        with patch("app.pipeline.nodes.edge_case_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(side_effect=Exception("LLM down"))
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(side_effect=Exception("LLM down"))
+        with patch(
+            "app.pipeline.nodes.edge_case_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             from app.pipeline.nodes.edge_case_node import edge_case_node
 
             state: FSAnalysisState = {
                 "fs_id": "test-err",
                 "parsed_sections": [
-                    {"heading": "X", "content": "A section with enough content to analyze properly.", "section_index": 0},
+                    {
+                        "heading": "X",
+                        "content": "A section with enough content to analyze properly.",
+                        "section_index": 0,
+                    },
                 ],
                 "ambiguities": [],
                 "edge_cases": [],
@@ -394,18 +409,26 @@ class TestQualityNode:
             {"tag": "auth", "reason": "Login mentioned."},
         ]
 
-        with patch("app.pipeline.nodes.quality_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(return_value=mock_response)
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(return_value=mock_response)
+        with patch(
+            "app.pipeline.nodes.quality_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             from app.pipeline.nodes.quality_node import quality_node
 
             state: FSAnalysisState = {
                 "fs_id": "test-q1",
                 "parsed_sections": [
-                    {"heading": "Auth", "content": "Users authenticate via SSO login with enterprise credentials.", "section_index": 0},
-                    {"heading": "Data", "content": "The system stores user data in encrypted databases at rest.", "section_index": 1},
+                    {
+                        "heading": "Auth",
+                        "content": "Users authenticate via SSO login with enterprise credentials.",
+                        "section_index": 0,
+                    },
+                    {
+                        "heading": "Data",
+                        "content": "The system stores user data in encrypted databases at rest.",
+                        "section_index": 1,
+                    },
                 ],
                 "ambiguities": [
                     {"section_index": 0, "flagged_text": "test"},
@@ -433,17 +456,21 @@ class TestQualityNode:
     @pytest.mark.asyncio
     async def test_quality_node_handles_llm_error(self):
         """LLM failure for compliance should not crash — score still computed."""
-        with patch("app.pipeline.nodes.quality_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(side_effect=Exception("LLM down"))
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(side_effect=Exception("LLM down"))
+        with patch(
+            "app.pipeline.nodes.quality_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             from app.pipeline.nodes.quality_node import quality_node
 
             state: FSAnalysisState = {
                 "fs_id": "test-err",
                 "parsed_sections": [
-                    {"heading": "X", "content": "Some content that is long enough to be analyzed properly.", "section_index": 0},
+                    {
+                        "heading": "X",
+                        "content": "Some content that is long enough to be analyzed properly.",
+                        "section_index": 0,
+                    },
                 ],
                 "ambiguities": [],
                 "contradictions": [],
@@ -468,11 +495,20 @@ class TestL4Pipeline:
     async def test_full_pipeline_with_all_nodes(self):
         """Full pipeline runs all 5 nodes with mocked LLM."""
         ambiguity_response = [
-            {"flagged_text": "appropriate measures", "reason": "Vague", "severity": "LOW", "clarification_question": "Specify."},
+            {
+                "flagged_text": "appropriate measures",
+                "reason": "Vague",
+                "severity": "LOW",
+                "clarification_question": "Specify.",
+            },
         ]
         contradiction_response = []
         edge_case_response = [
-            {"scenario_description": "No error handling", "impact": "MEDIUM", "suggested_addition": "Add error handler."},
+            {
+                "scenario_description": "No error handling",
+                "impact": "MEDIUM",
+                "suggested_addition": "Add error handler.",
+            },
         ]
         compliance_response = [
             {"tag": "security", "reason": "Mentions encryption."},
@@ -483,35 +519,44 @@ class TestL4Pipeline:
         async def mock_call_json(*args, **kwargs):
             nonlocal call_count
             call_count += 1
-            prompt = kwargs.get("prompt", args[0] if args else "")
+            system = str(kwargs.get("system", "")).lower()
 
-            if "ambiguities" in str(kwargs.get("system", "")):
+            # Match on unique phrases from each node's actual system prompt.
+            if "first attempt" in system or "requirements analyst with 20 years" in system:
                 return ambiguity_response
-            elif "CONTRADICTIONS" in str(kwargs.get("system", "")).upper():
+            elif "cross-reference validation" in system:
                 return contradiction_response
-            elif "EDGE CASES" in str(kwargs.get("system", "")).upper():
+            elif "qa architect" in system or "production incidents" in system:
                 return edge_case_response
-            elif "compliance" in str(kwargs.get("system", "")).lower():
+            elif "compliance officer" in system:
                 return compliance_response
             return []
 
-        # Patch all LLM clients in all nodes
+        # Patch every JSON-returning LLM call in every analysis node so the
+        # pipeline never escapes to the real LLM. `testcase_node` uses the
+        # text-returning `pipeline_call_llm`, patched separately.
         patches = [
-            patch("app.pipeline.nodes.ambiguity_node.get_llm_client"),
-            patch("app.pipeline.nodes.contradiction_node.get_llm_client"),
-            patch("app.pipeline.nodes.edge_case_node.get_llm_client"),
-            patch("app.pipeline.nodes.quality_node.get_llm_client"),
+            patch("app.pipeline.nodes.ambiguity_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.contradiction_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.edge_case_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.quality_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.task_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.dependency_node.pipeline_call_llm_json", new_callable=AsyncMock),
         ]
-
-        mock_client = AsyncMock()
-        mock_client.call_llm_json = AsyncMock(side_effect=mock_call_json)
+        testcase_patch = patch(
+            "app.pipeline.nodes.testcase_node.pipeline_call_llm",
+            new=AsyncMock(return_value="[]"),
+        )
 
         started_patches = [p.start() for p in patches]
         for mp in started_patches:
-            mp.return_value = mock_client
+            mp.side_effect = mock_call_json
+        testcase_patch.start()
+        patches.append(testcase_patch)
 
         try:
             import app.pipeline.graph as graph_mod
+
             graph_mod._compiled_graph = None
 
             from app.pipeline.graph import run_analysis_pipeline
@@ -617,14 +662,14 @@ class TestL4API:
         ]
 
         async def mock_call_json(*args, **kwargs):
-            system = str(kwargs.get("system", ""))
-            if "ambiguities" in system.lower() or "ambiguous" in system.lower():
+            system = str(kwargs.get("system", "")).lower()
+            if "first attempt" in system or "requirements analyst with 20 years" in system:
                 return ambiguity_response
-            elif "contradiction" in system.lower():
+            elif "cross-reference validation" in system:
                 return contradiction_response
-            elif "edge case" in system.lower():
+            elif "qa architect" in system or "production incidents" in system:
                 return edge_case_response
-            elif "compliance" in system.lower():
+            elif "compliance officer" in system:
                 return compliance_response
             return []
 
@@ -642,23 +687,30 @@ Users authenticate using enterprise credentials.
         # Parse
         await client.post(f"/api/fs/{doc_id}/parse")
 
-        # Analyze with mocked LLM
+        # Analyze with mocked LLM (patch every node so the pipeline never
+        # hits the real LLM). testcase_node uses the text-returning helper.
         patches = [
-            patch("app.pipeline.nodes.ambiguity_node.get_llm_client"),
-            patch("app.pipeline.nodes.contradiction_node.get_llm_client"),
-            patch("app.pipeline.nodes.edge_case_node.get_llm_client"),
-            patch("app.pipeline.nodes.quality_node.get_llm_client"),
+            patch("app.pipeline.nodes.ambiguity_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.contradiction_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.edge_case_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.quality_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.task_node.pipeline_call_llm_json", new_callable=AsyncMock),
+            patch("app.pipeline.nodes.dependency_node.pipeline_call_llm_json", new_callable=AsyncMock),
         ]
-
-        mock_client = AsyncMock()
-        mock_client.call_llm_json = AsyncMock(side_effect=mock_call_json)
+        testcase_patch = patch(
+            "app.pipeline.nodes.testcase_node.pipeline_call_llm",
+            new=AsyncMock(return_value="[]"),
+        )
 
         started_patches = [p.start() for p in patches]
         for mp in started_patches:
-            mp.return_value = mock_client
+            mp.side_effect = mock_call_json
+        testcase_patch.start()
+        patches.append(testcase_patch)
 
         try:
             import app.pipeline.graph as graph_mod
+
             graph_mod._compiled_graph = None
 
             response = await client.post(f"/api/fs/{doc_id}/analyze")

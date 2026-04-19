@@ -40,4 +40,3 @@ class TestMCPMonitoringAPI:
         res = await client.get("/api/mcp/sessions")
         assert res.status_code == 200
         assert "sessions" in res.json()["data"]
-

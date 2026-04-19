@@ -2,16 +2,17 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
 class BuildResult:
     """Result from a build task execution."""
+
     success: bool
     files_created: list[str] = field(default_factory=list)
     output: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class ExecutionProvider(ABC):

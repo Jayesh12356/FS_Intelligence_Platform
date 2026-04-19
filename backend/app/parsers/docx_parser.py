@@ -47,9 +47,18 @@ def parse_docx(filepath: str) -> ParsedFS:
     section_index = 0
     all_text_parts: List[str] = []
 
-    heading_styles = {"Heading 1", "Heading 2", "Heading 3", "Heading 4",
-                      "heading 1", "heading 2", "heading 3", "heading 4",
-                      "Title", "Subtitle"}
+    heading_styles = {
+        "Heading 1",
+        "Heading 2",
+        "Heading 3",
+        "Heading 4",
+        "heading 1",
+        "heading 2",
+        "heading 3",
+        "heading 4",
+        "Title",
+        "Subtitle",
+    }
 
     for para in doc.paragraphs:
         text = para.text.strip()
@@ -63,11 +72,13 @@ def parse_docx(filepath: str) -> ParsedFS:
             # Save previous section
             content_text = "\n".join(current_content).strip()
             if content_text:
-                sections.append(FSSection(
-                    heading=current_heading,
-                    content=content_text,
-                    section_index=section_index,
-                ))
+                sections.append(
+                    FSSection(
+                        heading=current_heading,
+                        content=content_text,
+                        section_index=section_index,
+                    )
+                )
                 section_index += 1
             current_heading = text
             current_content = []
@@ -80,24 +91,33 @@ def parse_docx(filepath: str) -> ParsedFS:
     # Save the last section
     content_text = "\n".join(current_content).strip()
     if content_text:
-        sections.append(FSSection(
-            heading=current_heading,
-            content=content_text,
-            section_index=section_index,
-        ))
+        sections.append(
+            FSSection(
+                heading=current_heading,
+                content=content_text,
+                section_index=section_index,
+            )
+        )
 
     raw_text = "\n\n".join(all_text_parts)
 
     # Fallback: if no headings detected, wrap all content in one section
     if not sections and raw_text.strip():
-        sections.append(FSSection(
-            heading="Document Content",
-            content=raw_text.strip(),
-            section_index=0,
-        ))
+        sections.append(
+            FSSection(
+                heading="Document Content",
+                content=raw_text.strip(),
+                section_index=0,
+            )
+        )
 
-    logger.info("Parsed DOCX %s: %d paragraphs, %d sections, %d chars",
-                filepath, len(doc.paragraphs), len(sections), len(raw_text))
+    logger.info(
+        "Parsed DOCX %s: %d paragraphs, %d sections, %d chars",
+        filepath,
+        len(doc.paragraphs),
+        len(sections),
+        len(raw_text),
+    )
 
     return ParsedFS(
         raw_text=raw_text,

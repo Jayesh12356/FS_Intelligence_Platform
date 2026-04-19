@@ -6,13 +6,14 @@ Usage:
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import httpx
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
 
 def _looks_unconfigured(value: str) -> bool:
     v = (value or "").strip().lower()
@@ -30,6 +31,7 @@ def _looks_unconfigured(value: str) -> bool:
 
 class ConfluenceError(Exception):
     """Raised when a Confluence API call fails."""
+
     pass
 
 
@@ -43,9 +45,7 @@ class ConfluenceClient:
         self.api_token = settings.CONFLUENCE_API_TOKEN
         self.space_key = settings.CONFLUENCE_SPACE_KEY
         self._configured = not (
-            _looks_unconfigured(self.base_url)
-            or _looks_unconfigured(self.email)
-            or _looks_unconfigured(self.api_token)
+            _looks_unconfigured(self.base_url) or _looks_unconfigured(self.email) or _looks_unconfigured(self.api_token)
         )
 
     @property
@@ -58,10 +58,10 @@ class ConfluenceClient:
     def _build_page_content(
         self,
         sections: List[Dict[str, Any]],
-        quality_score: Optional[Dict[str, Any]] = None,
-        ambiguities: Optional[List[Dict[str, Any]]] = None,
-        tasks: Optional[List[Dict[str, Any]]] = None,
-        traceability: Optional[List[Dict[str, Any]]] = None,
+        quality_score: Dict[str, Any] | None = None,
+        ambiguities: List[Dict[str, Any]] | None = None,
+        tasks: List[Dict[str, Any]] | None = None,
+        traceability: List[Dict[str, Any]] | None = None,
     ) -> str:
         """Build Confluence Storage Format (XHTML) for the FS page."""
         parts = []
@@ -69,59 +69,61 @@ class ConfluenceClient:
         # Quality Score Section
         if quality_score:
             overall = quality_score.get("overall", 0)
-            parts.append(f'<h2>Quality Score: {overall:.0%}</h2>')
-            parts.append('<table><tbody>')
+            parts.append(f"<h2>Quality Score: {overall:.0%}</h2>")
+            parts.append("<table><tbody>")
             for key in ["completeness", "clarity", "consistency"]:
                 val = quality_score.get(key, 0)
-                parts.append(f'<tr><td><strong>{key.title()}</strong></td><td>{val:.0%}</td></tr>')
-            parts.append('</tbody></table>')
+                parts.append(f"<tr><td><strong>{key.title()}</strong></td><td>{val:.0%}</td></tr>")
+            parts.append("</tbody></table>")
 
         # FS Sections
         if sections:
-            parts.append('<h2>Functional Specification Sections</h2>')
+            parts.append("<h2>Functional Specification Sections</h2>")
             for s in sections:
                 heading = s.get("heading", s.get("section_heading", ""))
                 content = s.get("content", s.get("text", ""))
                 idx = s.get("section_index", 0)
-                parts.append(f'<h3>{idx + 1}. {heading}</h3>')
-                parts.append(f'<p>{content}</p>')
+                parts.append(f"<h3>{idx + 1}. {heading}</h3>")
+                parts.append(f"<p>{content}</p>")
 
         # Ambiguity Summary
         if ambiguities:
-            parts.append(f'<h2>Ambiguity Flags ({len(ambiguities)})</h2>')
-            parts.append('<table><thead><tr><th>Section</th><th>Severity</th><th>Issue</th></tr></thead><tbody>')
+            parts.append(f"<h2>Ambiguity Flags ({len(ambiguities)})</h2>")
+            parts.append("<table><thead><tr><th>Section</th><th>Severity</th><th>Issue</th></tr></thead><tbody>")
             for a in ambiguities:
                 parts.append(
-                    f'<tr><td>{a.get("section_heading", "")}</td>'
-                    f'<td>{a.get("severity", "")}</td>'
-                    f'<td>{a.get("reason", "")}</td></tr>'
+                    f"<tr><td>{a.get('section_heading', '')}</td>"
+                    f"<td>{a.get('severity', '')}</td>"
+                    f"<td>{a.get('reason', '')}</td></tr>"
                 )
-            parts.append('</tbody></table>')
+            parts.append("</tbody></table>")
 
         # Task Breakdown
         if tasks:
-            parts.append(f'<h2>Task Breakdown ({len(tasks)})</h2>')
-            parts.append('<table><thead><tr><th>ID</th><th>Title</th><th>Effort</th><th>Section</th></tr></thead><tbody>')
+            parts.append(f"<h2>Task Breakdown ({len(tasks)})</h2>")
+            parts.append(
+                "<table><thead><tr><th>ID</th><th>Title</th><th>Effort</th><th>Section</th></tr></thead><tbody>"
+            )
             for t in tasks:
                 parts.append(
-                    f'<tr><td>{t.get("task_id", "")}</td>'
-                    f'<td>{t.get("title", "")}</td>'
-                    f'<td>{t.get("effort", "")}</td>'
-                    f'<td>{t.get("section_heading", "")}</td></tr>'
+                    f"<tr><td>{t.get('task_id', '')}</td>"
+                    f"<td>{t.get('title', '')}</td>"
+                    f"<td>{t.get('effort', '')}</td>"
+                    f"<td>{t.get('section_heading', '')}</td></tr>"
                 )
-            parts.append('</tbody></table>')
+            parts.append("</tbody></table>")
 
         # Traceability Matrix
         if traceability:
-            parts.append('<h2>Traceability Matrix</h2>')
-            parts.append('<table><thead><tr><th>Task ID</th><th>Task Title</th><th>Section</th></tr></thead><tbody>')
+            parts.append("<h2>Traceability Matrix</h2>")
+            parts.append("<table><thead><tr><th>Task ID</th><th>Task Title</th><th>Section</th></tr></thead><tbody>")
             for t in traceability:
                 parts.append(
-                    f'<tr><td>{t.get("task_id", "")}</td>'
-                    f'<td>{t.get("task_title", "")}</td>'
-                    f'<td>{t.get("section_heading", "")}</td></tr>'
+                    f"<tr><td>{t.get('task_id', '')}</td>"
+                    f"<td>{t.get('task_title', '')}</td>"
+                    f"<td>{t.get('section_heading', '')}</td></tr>"
                 )
-            parts.append('</tbody></table>')
+            parts.append("</tbody></table>")
 
         return "\n".join(parts) if parts else "<p>No content generated.</p>"
 
@@ -129,7 +131,7 @@ class ConfluenceClient:
         self,
         title: str,
         content: str,
-        space_key: Optional[str] = None,
+        space_key: str | None = None,
     ) -> Dict[str, Any]:
         """Create a Confluence page.
 
@@ -190,10 +192,10 @@ class ConfluenceClient:
         self,
         title: str,
         sections: List[Dict[str, Any]],
-        quality_score: Optional[Dict[str, Any]] = None,
-        ambiguities: Optional[List[Dict[str, Any]]] = None,
-        tasks: Optional[List[Dict[str, Any]]] = None,
-        traceability: Optional[List[Dict[str, Any]]] = None,
+        quality_score: Dict[str, Any] | None = None,
+        ambiguities: List[Dict[str, Any]] | None = None,
+        tasks: List[Dict[str, Any]] | None = None,
+        traceability: List[Dict[str, Any]] | None = None,
     ) -> Dict[str, Any]:
         """Export a full FS analysis as a Confluence page.
 

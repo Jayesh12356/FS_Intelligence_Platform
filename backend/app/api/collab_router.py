@@ -1,15 +1,15 @@
 """Collaboration API — comments on FS document sections (L9)."""
 
 import logging
-import uuid
 import re
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.base import get_db
 from app.db.audit import log_audit_event
+from app.db.base import get_db
 from app.db.models import (
     AuditEventType,
     FSCommentDB,
@@ -42,9 +42,7 @@ async def add_comment(
 ) -> APIResponse[FSCommentSchema]:
     """Add a comment to a specific section of an FS document."""
     # Verify document exists
-    doc_result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = doc_result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -76,7 +74,9 @@ async def add_comment(
 
     # Log audit event
     await log_audit_event(
-        db, doc_id, AuditEventType.COMMENT_ADDED,
+        db,
+        doc_id,
+        AuditEventType.COMMENT_ADDED,
         user_id=body.user_id,
         payload={
             "section_index": section_index,
@@ -109,9 +109,7 @@ async def list_comments(
 ) -> APIResponse[CommentListResponse]:
     """List all comments for an FS document, ordered by section then date."""
     # Verify document exists
-    doc_result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = doc_result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -126,9 +124,7 @@ async def list_comments(
     # Load mentions for each comment
     schemas = []
     for c in comments:
-        mentions_result = await db.execute(
-            select(FSMentionDB).where(FSMentionDB.comment_id == c.id)
-        )
+        mentions_result = await db.execute(select(FSMentionDB).where(FSMentionDB.comment_id == c.id))
         mentions = mentions_result.scalars().all()
 
         schemas.append(
@@ -178,7 +174,9 @@ async def resolve_comment(
 
     # Log audit event
     await log_audit_event(
-        db, doc_id, AuditEventType.COMMENT_RESOLVED,
+        db,
+        doc_id,
+        AuditEventType.COMMENT_RESOLVED,
         user_id=comment.user_id,
         payload={"comment_id": str(comment.id), "section_index": comment.section_index},
     )
@@ -187,9 +185,7 @@ async def resolve_comment(
     await db.refresh(comment)
 
     # Load mentions
-    mentions_result = await db.execute(
-        select(FSMentionDB).where(FSMentionDB.comment_id == comment.id)
-    )
+    mentions_result = await db.execute(select(FSMentionDB).where(FSMentionDB.comment_id == comment.id))
     mentions = mentions_result.scalars().all()
 
     return APIResponse(

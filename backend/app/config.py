@@ -3,6 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import List
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,7 +45,9 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "local"
     UPLOAD_DIR: str = "uploads"
     MAX_UPLOAD_SIZE_MB: int = 20
-    CORS_ALLOW_ORIGINS: str = "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001,http://frontend:3000"
+    CORS_ALLOW_ORIGINS: str = (
+        "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001,http://frontend:3000"
+    )
     # Hybrid large-archive mode for reverse FS
     REVERSE_LARGE_UPLOAD_ENABLED: bool = True
     REVERSE_MAX_ARCHIVE_SIZE_MB: int = 300
@@ -77,20 +80,26 @@ class Settings(BaseSettings):
     CONFLUENCE_API_TOKEN: str = ""
     CONFLUENCE_SPACE_KEY: str = "FSP"
 
-    # ── Phase 2: Orchestration ────────────────────────
-    ORCHESTRATION_ENABLED: bool = False
-    # When True (default), a failing non-api LLM provider does not fall back
-    # to Direct API. Set to False explicitly to allow silent cross-provider
-    # failover when you don't care which provider answered.
-    ORCHESTRATION_STRICT_LLM: bool = True
+    # ── Orchestration (0.4.0: always on, strict, no fallback) ──────────
+    # Every LLM call goes through the provider registry. The registry
+    # routes ``api`` to the Direct-API client, ``claude_code`` to the CLI
+    # subprocess provider, and ``cursor`` to the paste-per-action flow
+    # (which never issues a server-side LLM call). There is no feature
+    # flag — orchestration cannot be disabled because doing so would
+    # silently route Cursor/Claude-Code to the Direct API and charge
+    # OpenRouter/Anthropic credits the user did not authorise.
     CLAUDE_CODE_CLI_PATH: str = "claude"
     # Request timeout for individual LLM invocations (seconds).
     LLM_TIMEOUT_S: float = 120.0
     # Retry count for transient LLM failures (network / 5xx).
     LLM_RETRY_ATTEMPTS: int = 3
-    # URL the backend can use to reach itself (used e.g. by CursorProvider
-    # health check which pings /api/mcp/sessions). Override in deployed envs.
+    # URL the backend can use to reach itself (used e.g. by Cursor task
+    # TTL sweeper logging). Override in deployed envs.
     BACKEND_SELF_URL: str = "http://localhost:8000"
+    # Default TTL for per-action Cursor tasks (seconds) — after this
+    # window, a PENDING or CLAIMED task is marked EXPIRED by the sweeper
+    # so the UI stops polling forever.
+    CURSOR_TASK_TTL_SEC: int = 900
 
     # ── MCP monitoring + safety guards ─────────────────
     MCP_MONITORING_ENABLED: bool = True

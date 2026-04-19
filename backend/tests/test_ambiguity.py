@@ -16,10 +16,9 @@ import pytest
 from app.pipeline.state import (
     AmbiguityFlag,
     FSAnalysisState,
-    Severity,
     SectionInput,
+    Severity,
 )
-
 
 # ── Unit Tests: State & Models ──────────────────────────
 
@@ -91,11 +90,11 @@ class TestAmbiguityNode:
             },
         ]
 
-        with patch("app.pipeline.nodes.ambiguity_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(return_value=mock_response)
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(return_value=mock_response)
+        with patch(
+            "app.pipeline.nodes.ambiguity_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             from app.pipeline.nodes.ambiguity_node import detect_ambiguities_in_section
 
             flags = await detect_ambiguities_in_section(
@@ -133,11 +132,11 @@ class TestAmbiguityNode:
             },
         ]
 
-        with patch("app.pipeline.nodes.ambiguity_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(return_value=mock_response)
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(return_value=mock_response)
+        with patch(
+            "app.pipeline.nodes.ambiguity_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             from app.pipeline.nodes.ambiguity_node import ambiguity_node
 
             state: FSAnalysisState = {
@@ -161,11 +160,11 @@ class TestAmbiguityNode:
     @pytest.mark.asyncio
     async def test_ambiguity_node_handles_llm_error(self):
         """LLM failure should not crash the node — just add error."""
-        with patch("app.pipeline.nodes.ambiguity_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(side_effect=Exception("LLM down"))
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(side_effect=Exception("LLM down"))
+        with patch(
+            "app.pipeline.nodes.ambiguity_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             from app.pipeline.nodes.ambiguity_node import ambiguity_node
 
             state: FSAnalysisState = {
@@ -204,13 +203,14 @@ class TestPipelineGraph:
             },
         ]
 
-        with patch("app.pipeline.nodes.ambiguity_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(return_value=mock_response)
-            mock_get.return_value = mock_client
-
+        _llm_mock = AsyncMock(return_value=mock_response)
+        with patch(
+            "app.pipeline.nodes.ambiguity_node.pipeline_call_llm_json",
+            new=_llm_mock,
+        ):
             # Reset compiled graph to pick up mocks
             import app.pipeline.graph as graph_mod
+
             graph_mod._compiled_graph = None
 
             from app.pipeline.graph import run_analysis_pipeline
@@ -294,13 +294,38 @@ The system should be reliable and handle user requests efficiently.
         # Parse
         await client.post(f"/api/fs/{doc_id}/parse")
 
-        # Analyze with mocked LLM
-        with patch("app.pipeline.nodes.ambiguity_node.get_llm_client") as mock_get:
-            mock_client = AsyncMock()
-            mock_client.call_llm_json = AsyncMock(return_value=mock_response)
-            mock_get.return_value = mock_client
+        # Analyze with mocked LLM. We patch every pipeline node so the
+        # analyze flow never escapes to the real LLM; only the ambiguity node
+        # returns a non-empty payload, everything else returns an empty list.
+        async def _dispatch(*args, **kwargs):
+            system = str(kwargs.get("system", "")).lower()
+            if "first attempt" in system or "requirements analyst with 20 years" in system:
+                return mock_response
+            return []
 
+        patches = [
+            patch(f"app.pipeline.nodes.{node}.pipeline_call_llm_json", new_callable=AsyncMock)
+            for node in (
+                "ambiguity_node",
+                "contradiction_node",
+                "edge_case_node",
+                "quality_node",
+                "task_node",
+                "dependency_node",
+            )
+        ]
+        testcase_patch = patch(
+            "app.pipeline.nodes.testcase_node.pipeline_call_llm",
+            new=AsyncMock(return_value="[]"),
+        )
+        started = [p.start() for p in patches]
+        for mp in started:
+            mp.side_effect = _dispatch
+        testcase_patch.start()
+        patches.append(testcase_patch)
+        try:
             import app.pipeline.graph as graph_mod
+
             graph_mod._compiled_graph = None
 
             response = await client.post(f"/api/fs/{doc_id}/analyze")
@@ -312,6 +337,9 @@ The system should be reliable and handle user requests efficiently.
             assert data["high_count"] >= 1
 
             graph_mod._compiled_graph = None
+        finally:
+            for p in patches:
+                p.stop()
 
         # List ambiguities
         response = await client.get(f"/api/fs/{doc_id}/ambiguities")

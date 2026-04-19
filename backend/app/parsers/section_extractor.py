@@ -59,11 +59,13 @@ def extract_sections_from_text(text: str) -> List[FSSection]:
         if _is_heading(line):
             content_text = "\n".join(current_content).strip()
             if content_text:
-                sections.append(FSSection(
-                    heading=current_heading,
-                    content=content_text,
-                    section_index=section_index,
-                ))
+                sections.append(
+                    FSSection(
+                        heading=current_heading,
+                        content=content_text,
+                        section_index=section_index,
+                    )
+                )
                 section_index += 1
             heading = line.strip().lstrip("#").strip().rstrip(":")
             current_heading = heading if heading else line.strip()
@@ -73,18 +75,22 @@ def extract_sections_from_text(text: str) -> List[FSSection]:
 
     content_text = "\n".join(current_content).strip()
     if content_text:
-        sections.append(FSSection(
-            heading=current_heading,
-            content=content_text,
-            section_index=section_index,
-        ))
+        sections.append(
+            FSSection(
+                heading=current_heading,
+                content=content_text,
+                section_index=section_index,
+            )
+        )
 
     if not sections and text.strip():
-        sections.append(FSSection(
-            heading="Document Content",
-            content=text.strip(),
-            section_index=0,
-        ))
+        sections.append(
+            FSSection(
+                heading="Document Content",
+                content=text.strip(),
+                section_index=0,
+            )
+        )
 
     return sections
 

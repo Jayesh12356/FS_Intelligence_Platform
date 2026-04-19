@@ -8,8 +8,9 @@ import logging
 from itertools import combinations
 from typing import List
 
-from app.llm import get_llm_client
 from app.orchestration.pipeline_llm import pipeline_call_llm_json
+from app.pipeline.prompts.analysis import contradiction as contradiction_prompt
+from app.pipeline.prompts.shared.flags import legacy_prompts_enabled
 from app.pipeline.state import Contradiction, FSAnalysisState, Severity
 
 logger = logging.getLogger(__name__)
@@ -94,19 +95,30 @@ async def detect_contradictions_between_sections(
     if len(content_a.strip()) < 20 or len(content_b.strip()) < 20:
         return []
 
-    prompt = CONTRADICTION_USER_PROMPT.format(
-        heading_a=heading_a,
-        content_a=content_a,
-        index_a=index_a + 1,
-        heading_b=heading_b,
-        content_b=content_b,
-        index_b=index_b + 1,
-    )
+    if legacy_prompts_enabled():
+        system = CONTRADICTION_SYSTEM_PROMPT
+        prompt = CONTRADICTION_USER_PROMPT.format(
+            heading_a=heading_a,
+            content_a=content_a,
+            index_a=index_a + 1,
+            heading_b=heading_b,
+            content_b=content_b,
+            index_b=index_b + 1,
+        )
+    else:
+        system, prompt = contradiction_prompt.build(
+            heading_a=heading_a,
+            content_a=content_a,
+            index_a=index_a + 1,
+            heading_b=heading_b,
+            content_b=content_b,
+            index_b=index_b + 1,
+        )
 
     try:
         result = await pipeline_call_llm_json(
             prompt=prompt,
-            system=CONTRADICTION_SYSTEM_PROMPT,
+            system=system,
             temperature=0.0,
             max_tokens=2048,
             role="reasoning",
@@ -115,7 +127,9 @@ async def detect_contradictions_between_sections(
         if not isinstance(result, list):
             logger.warning(
                 "LLM returned non-list for contradiction check (%s vs %s): %s",
-                heading_a, heading_b, type(result),
+                heading_a,
+                heading_b,
+                type(result),
             )
             return []
 
@@ -140,14 +154,18 @@ async def detect_contradictions_between_sections(
 
         logger.info(
             "Contradiction check (%s vs %s): found %d",
-            heading_a, heading_b, len(contradictions),
+            heading_a,
+            heading_b,
+            len(contradictions),
         )
         return contradictions
 
     except Exception as exc:
         logger.error(
             "Contradiction detection failed (%s vs %s): %s",
-            heading_a, heading_b, exc,
+            heading_a,
+            heading_b,
+            exc,
         )
         return []
 
@@ -183,8 +201,12 @@ async def contradiction_node(state: FSAnalysisState) -> FSAnalysisState:
 
         try:
             found = await detect_contradictions_between_sections(
-                heading_a, content_a, index_a,
-                heading_b, content_b, index_b,
+                heading_a,
+                content_a,
+                index_a,
+                heading_b,
+                content_b,
+                index_b,
             )
             for c in found:
                 all_contradictions.append(c.model_dump())
@@ -195,7 +217,8 @@ async def contradiction_node(state: FSAnalysisState) -> FSAnalysisState:
 
     logger.info(
         "Contradiction node complete: %d contradictions across %d sections",
-        len(all_contradictions), len(sections),
+        len(all_contradictions),
+        len(sections),
     )
 
     return {

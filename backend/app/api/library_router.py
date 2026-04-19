@@ -109,9 +109,7 @@ async def suggest_requirements(
     each section in the document.
     """
     # Verify document exists and is parsed
-    doc_result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = doc_result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -125,6 +123,7 @@ async def suggest_requirements(
     # Load parsed sections
     try:
         from app.parsers.router import parse_document as do_parse
+
         parsed = await do_parse(str(doc.id), db)
         sections = parsed.sections
     except Exception as exc:

@@ -9,9 +9,10 @@ interface ModalProps {
   title?: string;
   children: ReactNode;
   footer?: ReactNode;
+  maxWidth?: number | string;
 }
 
-export default function Modal({ open, onClose, title, children, footer }: ModalProps) {
+export default function Modal({ open, onClose, title, children, footer, maxWidth = 480 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
@@ -102,25 +103,55 @@ export default function Modal({ open, onClose, title, children, footer }: ModalP
             transition={{ duration: 0.2 }}
             onClick={(e) => e.stopPropagation()}
             style={{
-              background: "var(--bg-card)", borderRadius: "var(--radius-xl)",
-              width: "100%", maxWidth: 480, maxHeight: "85vh",
-              overflow: "auto", boxShadow: "var(--shadow-xl)",
+              background: "var(--bg-card)",
+              borderRadius: "var(--radius-xl)",
+              width: "100%",
+              maxWidth,
+              maxHeight: "90vh",
+              boxShadow: "var(--shadow-xl)",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
             }}
           >
             {title && (
-              <div id={titleId} style={{
-                padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--border-subtle)",
-                fontWeight: 600, fontSize: "1.0625rem",
-              }}>
+              <div
+                id={titleId}
+                style={{
+                  padding: "1.25rem 1.5rem",
+                  borderBottom: "1px solid var(--border-subtle)",
+                  fontWeight: 600,
+                  fontSize: "1.0625rem",
+                  background: "var(--bg-card)",
+                  flexShrink: 0,
+                }}
+              >
                 {title}
               </div>
             )}
-            <div style={{ padding: "1.5rem" }}>{children}</div>
+            <div
+              style={{
+                padding: "1.5rem",
+                overflowY: "auto",
+                overflowX: "hidden",
+                flex: "1 1 auto",
+                minHeight: 0,
+              }}
+            >
+              {children}
+            </div>
             {footer && (
-              <div style={{
-                padding: "1rem 1.5rem", borderTop: "1px solid var(--border-subtle)",
-                display: "flex", justifyContent: "flex-end", gap: "0.5rem",
-              }}>
+              <div
+                style={{
+                  padding: "1rem 1.5rem",
+                  borderTop: "1px solid var(--border-subtle)",
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: "0.5rem",
+                  background: "var(--bg-card)",
+                  flexShrink: 0,
+                }}
+              >
                 {footer}
               </div>
             )}

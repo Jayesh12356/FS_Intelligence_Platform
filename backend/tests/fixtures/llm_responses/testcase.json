@@ -1,0 +1,7 @@
+{
+  "test_cases": [
+    {"name": "GET /health returns 200 ok", "steps": ["call GET /health"], "expected": "status=ok"},
+    {"name": "POST /todos appends a todo", "steps": ["POST /todos {text:'x'}"], "expected": "201 with integer id"},
+    {"name": "DELETE unknown id -> 404", "steps": ["DELETE /todos/9999"], "expected": "404"}
+  ]
+}

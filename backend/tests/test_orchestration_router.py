@@ -27,8 +27,12 @@ async def test_get_config_creates_default(client: AsyncClient) -> None:
     assert resp.status_code == 200
     data = resp.json()["data"]
     for field in (
-        "llm_provider", "build_provider", "frontend_provider",
-        "fallback_chain", "cursor_config", "claude_code_config",
+        "llm_provider",
+        "build_provider",
+        "frontend_provider",
+        "fallback_chain",
+        "cursor_config",
+        "claude_code_config",
     ):
         assert field in data
 

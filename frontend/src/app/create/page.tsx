@@ -18,12 +18,15 @@ import {
   Monitor,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { PageShell, Tabs } from "@/components/index";
+import { CursorTaskModal, PageShell, Tabs } from "@/components/index";
 import {
   generateFSFromIdea,
   guidedIdeaStep,
+  isCursorTaskEnvelope,
+  type CursorTaskEnvelope,
   type GuidedQuestion,
 } from "@/lib/api";
+import { useToolConfig } from "@/lib/toolConfig";
 
 const INDUSTRIES = [
   "FinTech", "HealthTech", "EdTech", "E-Commerce", "SaaS", "Social Media",
@@ -95,6 +98,8 @@ function QuickCreate({ router }: { router: ReturnType<typeof useRouter> }) {
   const [complexity, setComplexity] = useState("moderate");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [cursorTask, setCursorTask] = useState<CursorTaskEnvelope | null>(null);
+  useToolConfig();
 
   const handleGenerate = useCallback(async () => {
     if (idea.trim().length < 10) {
@@ -102,6 +107,7 @@ function QuickCreate({ router }: { router: ReturnType<typeof useRouter> }) {
       return;
     }
     setError("");
+
     setLoading(true);
     try {
       const res = await generateFSFromIdea(
@@ -109,8 +115,11 @@ function QuickCreate({ router }: { router: ReturnType<typeof useRouter> }) {
         industry || undefined,
         complexity || undefined,
       );
-      if (res.data?.document_id) {
-        router.push(`/documents/${res.data.document_id}`);
+      const data = res.data;
+      if (isCursorTaskEnvelope(data)) {
+        setCursorTask(data);
+      } else if (data && "document_id" in data && data.document_id) {
+        router.push(`/documents/${data.document_id}`);
       } else {
         setError(res.error || "Generation failed. Please try again.");
       }
@@ -155,10 +164,12 @@ function QuickCreate({ router }: { router: ReturnType<typeof useRouter> }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginTop: "1.25rem" }}>
         <div>
-          <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 500, marginBottom: "0.5rem", color: "var(--text-secondary)" }}>
+          <label htmlFor="quick-industry" style={{ display: "block", fontSize: "0.85rem", fontWeight: 500, marginBottom: "0.5rem", color: "var(--text-secondary)" }}>
             Industry (optional)
           </label>
           <select
+            id="quick-industry"
+            aria-label="Industry"
             value={industry}
             onChange={(e) => setIndustry(e.target.value)}
             disabled={loading}
@@ -176,10 +187,12 @@ function QuickCreate({ router }: { router: ReturnType<typeof useRouter> }) {
         </div>
 
         <div>
-          <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 500, marginBottom: "0.5rem", color: "var(--text-secondary)" }}>
+          <label htmlFor="quick-complexity" style={{ display: "block", fontSize: "0.85rem", fontWeight: 500, marginBottom: "0.5rem", color: "var(--text-secondary)" }}>
             Complexity
           </label>
           <select
+            id="quick-complexity"
+            aria-label="Complexity"
             value={complexity}
             onChange={(e) => setComplexity(e.target.value)}
             disabled={loading}
@@ -224,6 +237,15 @@ function QuickCreate({ router }: { router: ReturnType<typeof useRouter> }) {
           </>
         )}
       </button>
+
+      <CursorTaskModal
+        envelope={cursorTask}
+        onClose={() => setCursorTask(null)}
+        onDone={(resultRef) => {
+          setCursorTask(null);
+          if (resultRef) router.push(`/documents/${resultRef}`);
+        }}
+      />
     </div>
   );
 }
@@ -238,6 +260,8 @@ function GuidedCreate({ router }: { router: ReturnType<typeof useRouter> }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [cursorTask, setCursorTask] = useState<CursorTaskEnvelope | null>(null);
+  useToolConfig();
 
   const handleStartGuided = useCallback(async () => {
     if (idea.trim().length < 10) {
@@ -245,6 +269,7 @@ function GuidedCreate({ router }: { router: ReturnType<typeof useRouter> }) {
       return;
     }
     setError("");
+
     setLoading(true);
     try {
       const res = await guidedIdeaStep({
@@ -253,13 +278,21 @@ function GuidedCreate({ router }: { router: ReturnType<typeof useRouter> }) {
         industry: industry || undefined,
         complexity: complexity || undefined,
       });
-      const data = res.data as { session_id?: string; questions?: GuidedQuestion[] };
-      if (data?.session_id && data?.questions) {
-        setSessionId(data.session_id);
-        setQuestions(data.questions);
-        setStep(0);
+      const data = res.data;
+      if (isCursorTaskEnvelope(data)) {
+        setCursorTask(data);
       } else {
-        setError(res.error || "Failed to start guided flow.");
+        const payload = data as {
+          session_id?: string;
+          questions?: GuidedQuestion[];
+        } | undefined;
+        if (payload?.session_id && payload?.questions) {
+          setSessionId(payload.session_id);
+          setQuestions(payload.questions);
+          setStep(0);
+        } else {
+          setError(res.error || "Failed to start guided flow.");
+        }
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to start.");
@@ -270,6 +303,7 @@ function GuidedCreate({ router }: { router: ReturnType<typeof useRouter> }) {
 
   const handleSubmitAnswers = useCallback(async () => {
     setError("");
+
     setLoading(true);
     try {
       const res = await guidedIdeaStep({
@@ -280,11 +314,16 @@ function GuidedCreate({ router }: { router: ReturnType<typeof useRouter> }) {
         industry: industry || undefined,
         complexity: complexity || undefined,
       });
-      const data = res.data as { document_id?: string };
-      if (data?.document_id) {
-        router.push(`/documents/${data.document_id}`);
+      const data = res.data;
+      if (isCursorTaskEnvelope(data)) {
+        setCursorTask(data);
       } else {
-        setError(res.error || "FS generation failed.");
+        const payload = data as { document_id?: string } | undefined;
+        if (payload?.document_id) {
+          router.push(`/documents/${payload.document_id}`);
+        } else {
+          setError(res.error || "FS generation failed.");
+        }
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Generation failed.");
@@ -328,10 +367,12 @@ function GuidedCreate({ router }: { router: ReturnType<typeof useRouter> }) {
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginTop: "1.25rem" }}>
           <div>
-            <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 500, marginBottom: "0.5rem", color: "var(--text-secondary)" }}>
+            <label htmlFor="guided-industry" style={{ display: "block", fontSize: "0.85rem", fontWeight: 500, marginBottom: "0.5rem", color: "var(--text-secondary)" }}>
               Industry (optional)
             </label>
             <select
+              id="guided-industry"
+              aria-label="Industry"
               value={industry}
               onChange={(e) => setIndustry(e.target.value)}
               disabled={loading}
@@ -349,10 +390,12 @@ function GuidedCreate({ router }: { router: ReturnType<typeof useRouter> }) {
           </div>
 
           <div>
-            <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 500, marginBottom: "0.5rem", color: "var(--text-secondary)" }}>
+            <label htmlFor="guided-complexity" style={{ display: "block", fontSize: "0.85rem", fontWeight: 500, marginBottom: "0.5rem", color: "var(--text-secondary)" }}>
               Complexity
             </label>
             <select
+              id="guided-complexity"
+              aria-label="Complexity"
               value={complexity}
               onChange={(e) => setComplexity(e.target.value)}
               disabled={loading}
@@ -397,6 +440,15 @@ function GuidedCreate({ router }: { router: ReturnType<typeof useRouter> }) {
             </>
           )}
         </button>
+
+        <CursorTaskModal
+          envelope={cursorTask}
+          onClose={() => setCursorTask(null)}
+          onDone={(resultRef) => {
+            setCursorTask(null);
+            if (resultRef) router.push(`/documents/${resultRef}`);
+          }}
+        />
       </div>
     );
   }
@@ -521,6 +573,15 @@ function GuidedCreate({ router }: { router: ReturnType<typeof useRouter> }) {
           )}
         </button>
       </div>
+
+      <CursorTaskModal
+        envelope={cursorTask}
+        onClose={() => setCursorTask(null)}
+        onDone={(resultRef) => {
+          setCursorTask(null);
+          if (resultRef) router.push(`/documents/${resultRef}`);
+        }}
+      />
     </div>
   );
 }
@@ -543,7 +604,7 @@ const WORKFLOW_MODES = [
     title: "Claude Code (Headless)",
     color: "var(--well-purple)",
     steps: [
-      "Set LLM Provider to Claude Code in Settings",
+      "Set Document LLM to Claude Code in Settings",
       "Or use CLI: claude --mcp-config mcp-config.json",
       "Run start_full_autonomous_loop prompt with your idea",
       "Claude handles FS generation, analysis, build, and export",
@@ -552,15 +613,15 @@ const WORKFLOW_MODES = [
   },
   {
     icon: Cpu,
-    title: "Cursor (MCP Agent)",
+    title: "Cursor (paste per action)",
     color: "var(--well-amber, rgba(245,158,11,0.1))",
     steps: [
-      "Configure MCP server in .cursor/mcp.json",
-      "Open Cursor Agent and invoke start_full_autonomous_loop",
-      "Watch Cursor generate FS, analyze, build in real time",
-      "Monitor progress on the web UI simultaneously",
+      "Set Document LLM to Cursor in Settings",
+      "Click Generate / Analyze / Reverse FS — a paste dialog opens",
+      "Paste the prompt into a new Cursor chat (MCP enabled)",
+      "Cursor submits the result via MCP — we pay zero Direct API tokens",
     ],
-    note: "Full IDE visibility. 88 MCP tools for granular control.",
+    note: "One paste per action. No background workers, no leaks — the UI updates as soon as Cursor submits.",
   },
 ];
 

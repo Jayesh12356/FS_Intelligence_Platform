@@ -31,18 +31,14 @@ async def list_duplicates(
     by searching Qdrant for cosine similarity > 0.88 across different documents.
     """
     # Verify document exists
-    doc_result = await db.execute(
-        select(FSDocument).where(FSDocument.id == doc_id)
-    )
+    doc_result = await db.execute(select(FSDocument).where(FSDocument.id == doc_id))
     doc = doc_result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
     # Load duplicate flags
     result = await db.execute(
-        select(DuplicateFlagDB)
-        .where(DuplicateFlagDB.fs_id == doc_id)
-        .order_by(DuplicateFlagDB.similarity_score.desc())
+        select(DuplicateFlagDB).where(DuplicateFlagDB.fs_id == doc_id).order_by(DuplicateFlagDB.similarity_score.desc())
     )
     flags = result.scalars().all()
 

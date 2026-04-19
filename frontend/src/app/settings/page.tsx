@@ -26,12 +26,25 @@ import {
   type ProviderInfo,
   type ToolConfig,
 } from "@/lib/api";
+import { notifyToolConfigUpdated } from "@/lib/toolConfig";
 
-const CAPABILITY_LABELS: Record<string, { label: string; icon: typeof Cpu }> = {
-  llm: { label: "LLM Provider", icon: Cpu },
-  build: { label: "Build Provider", icon: Hammer },
-  frontend: { label: "Frontend Provider", icon: Monitor },
-  fullstack: { label: "Full-Stack Provider", icon: Zap },
+const CAPABILITY_LABELS: Record<
+  string,
+  { label: string; icon: typeof Cpu; caption: string }
+> = {
+  llm: {
+    label: "Document LLM",
+    icon: Cpu,
+    caption:
+      "Powers Generate FS, Analyze, and Reverse FS. Direct API and Claude Code run synchronously on the backend; Cursor opens a one-click paste dialog for each action so the IDE does the work — zero Direct API tokens are spent on the Cursor path.",
+  },
+  build: {
+    label: "Build Agent",
+    icon: Hammer,
+    caption:
+      "Powers the Build step. Runs autonomously inside Cursor (via MCP) or headless Claude Code, writing files into your output folder.",
+  },
+  fullstack: { label: "Full-Stack Provider", icon: Zap, caption: "" },
 };
 
 function parseJsonObject(text: string): Record<string, unknown> | Error {
@@ -114,8 +127,6 @@ export default function SettingsPage() {
       const res = await updateToolConfig({
         llm_provider: config.llm_provider,
         build_provider: config.build_provider,
-        frontend_provider: config.frontend_provider,
-        fallback_chain: config.fallback_chain,
         cursor_config: cursorParsed,
         claude_code_config: claudeParsed,
       });
@@ -124,6 +135,7 @@ export default function SettingsPage() {
         setCursorConfigText(JSON.stringify(res.data.cursor_config ?? {}, null, 2));
         setClaudeConfigText(JSON.stringify(res.data.claude_code_config ?? {}, null, 2));
         setSaveMsg("Configuration saved successfully");
+        notifyToolConfigUpdated(res.data);
         setTimeout(() => setSaveMsg(""), 3000);
       }
     } catch (err) {
@@ -165,7 +177,15 @@ export default function SettingsPage() {
   const providersForCap = (cap: string) => {
     const base = providers.filter((p) => p.capabilities.includes(cap));
     if (cap === "llm") {
+      // Honour the provider-side `llm_selectable` flag. Cursor is
+      // selectable and runs as paste-per-action: each Generate FS /
+      // Analyze / Reverse FS / Refine / Impact click mints its own
+      // CursorTask and opens a copy-paste modal. No server-side LLM
+      // call is made on the Cursor path.
       return base.filter((p) => p.llm_selectable !== false);
+    }
+    if (cap === "build") {
+      return base.filter((p) => p.name !== "api");
     }
     return base;
   };
@@ -217,7 +237,7 @@ export default function SettingsPage() {
         <div style={{
           padding: "0.75rem 1rem", borderRadius: "0.5rem", marginBottom: "1rem",
           background: saveMsg.includes("success") ? "var(--success-bg, rgba(34,197,94,0.1))" : "var(--error-bg)",
-          color: saveMsg.includes("success") ? "var(--success)" : "var(--error)",
+          color: saveMsg.includes("success") ? "var(--success-text)" : "var(--error-text)",
           fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "0.5rem",
         }}>
           {saveMsg.includes("success") ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
@@ -225,24 +245,48 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Provider Selection Cards */}
+      {/* Provider Selection Cards — two cards, one per role */}
       <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-        {(["llm", "build", "frontend"] as const).map((cap) => {
+        <div
+          style={{
+            padding: "0.9rem 1rem",
+            borderRadius: "0.75rem",
+            background: "var(--well-blue)",
+            border: "1px solid var(--border-subtle)",
+            fontSize: "0.82rem",
+            lineHeight: 1.55,
+            color: "var(--text-secondary)",
+            display: "flex",
+            gap: "0.6rem",
+            alignItems: "flex-start",
+          }}
+        >
+          <Info size={16} style={{ color: "var(--accent-primary)", flexShrink: 0, marginTop: 2 }} />
+          <div>
+            <strong style={{ color: "var(--text-primary)" }}>Three-step product, two provider roles.</strong>{" "}
+            Pick who writes your Document (Generate FS / Analyze / Reverse FS) and
+            who drives the Build (Cursor Agent or headless Claude Code). Direct
+            API handles documents fast; Cursor and Claude Code are the only
+            providers that can write multi-file code.
+          </div>
+        </div>
+
+        {(["llm", "build"] as const).map((cap) => {
           const capInfo = CAPABILITY_LABELS[cap];
           const Icon = capInfo?.icon ?? Cpu;
           const available = providersForCap(cap);
           const currentValue = config
-            ? cap === "llm" ? config.llm_provider
-              : cap === "build" ? config.build_provider
-              : config.frontend_provider
+            ? cap === "llm"
+              ? config.llm_provider
+              : config.build_provider
             : "";
 
           return (
             <div key={cap} className="card" style={{ padding: "1.5rem" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.6rem" }}>
                 <div style={{
                   width: 36, height: 36, borderRadius: "0.625rem",
-                  background: cap === "llm" ? "var(--well-blue)" : cap === "build" ? "var(--well-amber)" : "var(--well-purple)",
+                  background: cap === "llm" ? "var(--well-blue)" : "var(--well-amber)",
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}>
                   <Icon size={18} style={{ color: "var(--accent-primary)" }} />
@@ -251,14 +295,14 @@ export default function SettingsPage() {
                   {capInfo?.label ?? cap}
                 </h3>
               </div>
-              {cap === "llm" && (
+              {capInfo?.caption && (
                 <p style={{
                   margin: "0 0 1rem",
                   fontSize: "0.8rem",
-                  lineHeight: 1.45,
+                  lineHeight: 1.5,
                   color: "var(--text-tertiary)",
                 }}>
-                  All three providers can run complete analysis. Direct API uses your configured keys. Claude Code tries the CLI first, falling back to Direct API if needed. Cursor drives workflows via MCP tools in the IDE.
+                  {capInfo.caption}
                 </p>
               )}
 
@@ -273,8 +317,7 @@ export default function SettingsPage() {
                         if (!config) return;
                         const updated = { ...config };
                         if (cap === "llm") updated.llm_provider = p.name;
-                        else if (cap === "build") updated.build_provider = p.name;
-                        else updated.frontend_provider = p.name;
+                        else updated.build_provider = p.name;
                         setConfig(updated);
                       }}
                       style={{
@@ -291,15 +334,26 @@ export default function SettingsPage() {
                         </span>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.75rem" }}>
-                        {health === true && <CheckCircle2 size={12} style={{ color: "var(--success)" }} />}
-                        {health === false && <XCircle size={12} style={{ color: "var(--error)" }} />}
+                        {health === true && <CheckCircle2 size={12} style={{ color: "var(--success)" }} aria-hidden />}
+                        {health === false && <XCircle size={12} style={{ color: "var(--error)" }} aria-hidden />}
                         {health == null && <span style={{ color: "var(--text-tertiary)" }}>Not tested</span>}
-                        {health === true && <span style={{ color: "var(--success)" }}>Healthy</span>}
-                        {health === false && <span style={{ color: "var(--error)" }}>Unavailable</span>}
+                        {health === true && <span style={{ color: "var(--success-text)" }}>Healthy</span>}
+                        {health === false && <span style={{ color: "var(--error-text)" }}>Unavailable</span>}
                       </div>
                     </button>
                   );
                 })}
+                {available.length === 0 && (
+                  <div style={{
+                    padding: "0.75rem 1rem",
+                    fontSize: "0.8rem",
+                    color: "var(--text-tertiary)",
+                    border: "1px dashed var(--border-subtle)",
+                    borderRadius: "0.5rem",
+                  }}>
+                    No providers registered for this role yet.
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -307,39 +361,6 @@ export default function SettingsPage() {
 
         {/* Provider Workflow Guide */}
         <ProviderWorkflowGuide />
-
-        {/* Fallback Chain */}
-        <div className="card" style={{ padding: "1.5rem" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
-            <div style={{
-              width: 36, height: 36, borderRadius: "0.625rem",
-              background: "var(--well-peach)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-              <RefreshCw size={18} style={{ color: "var(--accent-primary)" }} />
-            </div>
-            <div>
-              <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 600 }}>Fallback Chain</h3>
-              <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-tertiary)" }}>
-                If the primary provider fails, the system tries providers in this order
-              </p>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-            {(config?.fallback_chain ?? ["api"]).map((name, i) => (
-              <div key={`${name}-${i}`} style={{
-                display: "flex", alignItems: "center", gap: "0.5rem",
-                padding: "0.5rem 0.75rem", borderRadius: "0.5rem",
-                background: "var(--bg-main)", border: "1px solid var(--border-subtle)",
-                fontSize: "0.85rem",
-              }}>
-                <span style={{ fontWeight: 600, color: "var(--accent-primary)", fontSize: "0.75rem" }}>{i + 1}</span>
-                <span>{providers.find((p) => p.name === name)?.display_name ?? name}</span>
-              </div>
-            ))}
-          </div>
-        </div>
 
         {/* Advanced Provider Config JSON */}
         <div className="card" style={{ padding: "1.5rem" }}>
@@ -384,7 +405,7 @@ export default function SettingsPage() {
 
           <JsonConfigEditor
             label="Claude Code config"
-            description="Forwarded to the Claude Code provider (e.g. { 'cli_binary': 'claude', 'fallback_to_api': true })."
+            description="Forwarded to the Claude Code provider (e.g. { 'cli_binary': 'claude' })."
             value={claudeConfigText}
             onChange={(next) => {
               setClaudeConfigText(next);
@@ -467,12 +488,12 @@ export default function SettingsPage() {
                         </div>
                       ) : null}
                       {health === true && (
-                        <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "var(--success)" }}>
+                        <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "var(--success-text)" }}>
                           Provider is connected and healthy.
                         </div>
                       )}
                       {health === false && (
-                        <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "var(--error)" }}>
+                        <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "var(--error-text)" }}>
                           Provider is not available. Check configuration and API keys.
                         </div>
                       )}
@@ -482,7 +503,7 @@ export default function SettingsPage() {
                             marginTop: "0.5rem",
                             padding: "0.5rem 0.6rem",
                             fontSize: "0.75rem",
-                            color: "var(--error)",
+                            color: "var(--error-text)",
                             background: "var(--bg-error-subtle, rgba(239,68,68,0.08))",
                             border: "1px solid var(--error)",
                             borderRadius: "0.375rem",
@@ -551,9 +572,10 @@ function JsonConfigEditor({ label, description, value, onChange, error }: JsonCo
           borderColor: error ? "var(--error)" : undefined,
         }}
         aria-invalid={!!error}
+        aria-label={label}
       />
       {error && (
-        <p style={{ margin: "0.35rem 0 0", fontSize: "0.75rem", color: "var(--error)" }}>
+        <p style={{ margin: "0.35rem 0 0", fontSize: "0.75rem", color: "var(--error-text)" }}>
           {error}
         </p>
       )}
@@ -561,82 +583,298 @@ function JsonConfigEditor({ label, description, value, onChange, error }: JsonCo
   );
 }
 
-const PROVIDER_DESCRIPTIONS = [
+type Mode = "sync" | "paste" | "cli" | "mcp" | "no";
+
+interface MatrixCell {
+  mode: Mode;
+  note: string;
+}
+
+const MATRIX_COLUMNS: {
+  key: "api" | "claude_code" | "cursor";
+  label: string;
+  icon: typeof Cpu;
+  color: string;
+}[] = [
+  { key: "api", label: "Direct API", icon: Cpu, color: "var(--well-blue)" },
   {
-    icon: Cpu,
-    name: "Direct API",
-    color: "var(--well-blue)",
-    what: "Server-side LLM via Anthropic, OpenAI, Groq, or OpenRouter API keys.",
-    when: "Web UI analysis, refinement, and FS generation. The engine behind all providers.",
-    limits: "No autonomous builds. Use Claude Code or Cursor for code generation.",
-  },
-  {
+    key: "claude_code",
+    label: "Claude Code",
     icon: Terminal,
-    name: "Claude Code",
     color: "var(--well-purple)",
-    what: "Tries Claude CLI first for text generation; falls back to Direct API if CLI returns insufficient content. Full builds via CLI agent with MCP tools.",
-    when: "Fully autonomous headless workflows. Ideal when you have a Claude subscription (any model via CLI). Falls back seamlessly.",
-    limits: "Requires Claude CLI installed and authenticated (claude login).",
   },
   {
+    key: "cursor",
+    label: "Cursor",
     icon: Monitor,
-    name: "Cursor",
     color: "var(--well-amber, rgba(245,158,11,0.1))",
-    what: "Full analysis + builds via 88 MCP tools inside the Cursor IDE.",
-    when: "Interactive workflows with IDE visibility. Complete idea-to-production with agent mode.",
-    limits: "Cursor IDE must be running with MCP server connected.",
   },
 ];
+
+const MATRIX_ROWS: {
+  key: string;
+  label: string;
+  cells: Record<"api" | "claude_code" | "cursor", MatrixCell>;
+}[] = [
+  {
+    key: "generate",
+    label: "Generate FS",
+    cells: {
+      api: { mode: "sync", note: "Synchronous call through Direct API." },
+      claude_code: {
+        mode: "cli",
+        note: "Runs via the local claude CLI (no OpenRouter tokens).",
+      },
+      cursor: {
+        mode: "paste",
+        note: "Opens a paste dialog; Cursor generates the FS via MCP.",
+      },
+    },
+  },
+  {
+    key: "analyze",
+    label: "Analyze",
+    cells: {
+      api: { mode: "sync", note: "Synchronous pipeline on Direct API." },
+      claude_code: { mode: "cli", note: "Pipeline runs through claude CLI." },
+      cursor: {
+        mode: "paste",
+        note: "Paste dialog; Cursor submits quality + ambiguity results via MCP.",
+      },
+    },
+  },
+  {
+    key: "reverse",
+    label: "Reverse FS",
+    cells: {
+      api: { mode: "sync", note: "Synchronous reverse pipeline on Direct API." },
+      claude_code: { mode: "cli", note: "Reverse pipeline through claude CLI." },
+      cursor: {
+        mode: "paste",
+        note: "Paste dialog; Cursor submits reverse FS + report via MCP.",
+      },
+    },
+  },
+  {
+    key: "build",
+    label: "Build",
+    cells: {
+      api: { mode: "no", note: "Direct API cannot write multi-file code." },
+      claude_code: {
+        mode: "mcp",
+        note: "Autonomous headless build via claude CLI + MCP.",
+      },
+      cursor: {
+        mode: "mcp",
+        note: "Autonomous build inside Cursor via MCP tools.",
+      },
+    },
+  },
+];
+
+const MODE_STYLE: Record<
+  Mode,
+  { label: string; fg: string; bg: string; border: string }
+> = {
+  sync: {
+    label: "Sync call",
+    fg: "var(--text-accent, #4338ca)",
+    bg: "var(--bg-accent-subtle, #eef2ff)",
+    border: "var(--border-accent, #c7d2fe)",
+  },
+  paste: {
+    label: "Paste in Cursor",
+    fg: "var(--text-warning, #b45309)",
+    bg: "var(--bg-warning-subtle, #fffbeb)",
+    border: "var(--border-warning, #fde68a)",
+  },
+  cli: {
+    label: "Claude CLI",
+    fg: "var(--text-success, #047857)",
+    bg: "var(--bg-success-subtle, #ecfdf5)",
+    border: "var(--border-success, #a7f3d0)",
+  },
+  mcp: {
+    label: "MCP autonomous",
+    fg: "var(--text-success, #047857)",
+    bg: "var(--bg-success-subtle, #ecfdf5)",
+    border: "var(--border-success, #a7f3d0)",
+  },
+  no: {
+    label: "Not supported",
+    fg: "var(--text-tertiary)",
+    bg: "var(--bg-subtle, rgba(0,0,0,0.03))",
+    border: "var(--border-subtle)",
+  },
+};
 
 function ProviderWorkflowGuide() {
   return (
     <div className="card" style={{ padding: "1.5rem" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
-        <div style={{
-          width: 36, height: 36, borderRadius: "0.625rem",
-          background: "var(--well-blue)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.75rem",
+          marginBottom: "1rem",
+        }}
+      >
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: "0.625rem",
+            background: "var(--well-blue)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
           <Info size={18} style={{ color: "var(--accent-primary)" }} />
         </div>
         <div>
-          <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 600 }}>Which Provider Should I Use?</h3>
-          <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-tertiary)" }}>
-            Three providers, three workflows -- pick the one that fits your process
+          <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 600 }}>
+            Provider matrix
+          </h3>
+          <p
+            style={{
+              margin: 0,
+              fontSize: "0.8rem",
+              color: "var(--text-tertiary)",
+            }}
+          >
+            How each action is served by each provider. Cursor never
+            calls the Direct API — it always asks you to paste a prompt.
           </p>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "1rem" }}>
-        {PROVIDER_DESCRIPTIONS.map((p) => {
-          const Icon = p.icon;
-          return (
-            <div key={p.name} style={{
-              padding: "1rem",
-              borderRadius: "0.75rem",
-              background: "var(--bg-main)",
-              border: "1px solid var(--border-subtle)",
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
-                <div style={{
-                  width: 28, height: 28, borderRadius: "0.375rem",
-                  background: p.color, display: "flex",
-                  alignItems: "center", justifyContent: "center",
-                }}>
-                  <Icon size={14} style={{ color: "var(--accent-primary)" }} />
-                </div>
-                <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-primary)" }}>
-                  {p.name}
-                </span>
-              </div>
-              <div style={{ fontSize: "0.8rem", lineHeight: 1.55, color: "var(--text-secondary)" }}>
-                <p style={{ margin: "0 0 0.35rem" }}><strong>What:</strong> {p.what}</p>
-                <p style={{ margin: "0 0 0.35rem" }}><strong>Best for:</strong> {p.when}</p>
-                <p style={{ margin: 0, color: "var(--text-tertiary)", fontStyle: "italic" }}>{p.limits}</p>
-              </div>
-            </div>
-          );
-        })}
+      <div style={{ overflowX: "auto" }}>
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "separate",
+            borderSpacing: 0,
+            fontSize: "0.82rem",
+            minWidth: 640,
+          }}
+        >
+          <thead>
+            <tr>
+              <th
+                style={{
+                  textAlign: "left",
+                  padding: "0.6rem 0.75rem",
+                  fontSize: "0.72rem",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                  color: "var(--text-tertiary)",
+                  borderBottom: "1px solid var(--border-subtle)",
+                }}
+              >
+                Action
+              </th>
+              {MATRIX_COLUMNS.map((col) => {
+                const Icon = col.icon;
+                return (
+                  <th
+                    key={col.key}
+                    style={{
+                      textAlign: "left",
+                      padding: "0.6rem 0.75rem",
+                      borderBottom: "1px solid var(--border-subtle)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "0.4rem",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 22,
+                          height: 22,
+                          borderRadius: "0.375rem",
+                          background: col.color,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Icon size={12} style={{ color: "var(--accent-primary)" }} />
+                      </div>
+                      <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+                        {col.label}
+                      </span>
+                    </div>
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {MATRIX_ROWS.map((row) => (
+              <tr key={row.key}>
+                <th
+                  scope="row"
+                  style={{
+                    textAlign: "left",
+                    padding: "0.75rem",
+                    fontWeight: 600,
+                    color: "var(--text-primary)",
+                    borderBottom: "1px solid var(--border-subtle)",
+                    verticalAlign: "top",
+                  }}
+                >
+                  {row.label}
+                </th>
+                {MATRIX_COLUMNS.map((col) => {
+                  const cell = row.cells[col.key];
+                  const style = MODE_STYLE[cell.mode];
+                  return (
+                    <td
+                      key={col.key}
+                      style={{
+                        padding: "0.75rem",
+                        verticalAlign: "top",
+                        borderBottom: "1px solid var(--border-subtle)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "0.3rem",
+                          padding: "0.15rem 0.45rem",
+                          borderRadius: "999px",
+                          background: style.bg,
+                          border: `1px solid ${style.border}`,
+                          color: style.fg,
+                          fontSize: "0.72rem",
+                          fontWeight: 600,
+                          marginBottom: "0.35rem",
+                        }}
+                      >
+                        {style.label}
+                      </div>
+                      <div
+                        style={{
+                          color: "var(--text-secondary)",
+                          fontSize: "0.78rem",
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        {cell.note}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

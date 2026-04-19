@@ -59,6 +59,7 @@ async def _check_llm() -> ServiceHealth:
     start = time.perf_counter()
     try:
         from app.config import get_settings
+
         settings = get_settings()
 
         # Check the appropriate API key based on provider

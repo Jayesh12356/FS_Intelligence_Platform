@@ -27,9 +27,37 @@ developer-ready work through AI-powered analysis:
 8. **Export** -- JIRA, Confluence, PDF, DOCX, CSV exports.
 9. **Build** -- Autonomous build orchestration via MCP tools with pre/post-build gates.
 
-### Tool orchestration and LLM routing
+### Pick your providers (two roles, three providers)
 
-With `ORCHESTRATION_ENABLED=true`, pipeline LLM calls use the **LLM provider** saved in Settings (`ToolConfigDB`, user `default`): **api** (Direct API / existing env keys) or **claude_code** (Anthropic `claude` CLI on the server host). If an invalid legacy value like `cursor` is stored, it is treated as **api** with a warning log. When `ORCHESTRATION_STRICT_LLM=true` (default), failure of the chosen non-API provider surfaces as an error instead of falling back to Direct API. **Cursor** is intended for MCP build flows, not as a backend for synchronous LLM from the API process. Only three providers exist: **Direct API**, **Claude Code**, and **Cursor**. Environment variables: `ORCHESTRATION_ENABLED`, `ORCHESTRATION_STRICT_LLM`, `CLAUDE_CODE_CLI_PATH` (see root `.env.example`).
+The platform asks two questions in **Settings**:
+
+1. **Document LLM** — who runs Generate FS, Analyze, Refine,
+   Reverse FS and Impact? Pick **Direct API** (server-side OpenRouter
+   / Anthropic keys), **Claude Code** (local `claude` CLI), or
+   **Cursor** (paste-per-action handoff — every click in the UI
+   opens a modal with a one-shot mega-prompt that you paste into a
+   fresh Cursor Agent chat; MCP tools submit the result back).
+2. **Build Agent** — who drives the Build step? Pick **Cursor**
+   (paste the build prompt from `/documents/{id}/build` into a
+   Cursor Agent chat) or **Claude Code** (headless `claude -p`,
+   dispatched with one click from the Build page's *Run Build Now*
+   button). **Direct API** is intentionally unsupported for Build.
+
+`api` and `claude_code` are synchronous and drive the usual LLM
+pipeline. `cursor` is asynchronous and paste-driven — the backend
+mints a `CursorTaskDB` row, returns `{mode: "cursor_task", task_id,
+prompt, mcp_snippet}`, and the frontend opens a `CursorTaskModal`
+that polls until `status = done`.
+
+Token-economy guarantee: the bridge never falls back to Direct API.
+`orchestrated_call_llm` consults the provider registry exactly once;
+on failure it raises `LLMError`. The previously-exposed flags
+`ORCHESTRATION_ENABLED`, `ORCHESTRATION_STRICT_LLM`,
+`CURSOR_LLM_REQUEST_TIMEOUT_SEC`, `CURSOR_WORKER_TTL_SEC`,
+`CURSOR_WORKER_PRESENCE_WAIT_SEC`, and `CURSOR_QUEUE_CLAIM_BATCH`
+have been removed. Remaining environment variables:
+`CLAUDE_CODE_CLI_PATH`, `LLM_TIMEOUT_S`, `LLM_RETRY_ATTEMPTS`,
+`BACKEND_SELF_URL`, `CURSOR_TASK_TTL_SEC` (see root `.env.example`).
 
 ---
 
@@ -58,7 +86,12 @@ With `ORCHESTRATION_ENABLED=true`, pipeline LLM calls use the **LLM provider** s
 2. Returns: original score, refined score, improvement delta, refined text, diff lines, suggestions.
 3. User reviews side-by-side diff on `/documents/[id]/refine`.
 4. `POST /api/fs/{id}/refine/accept` persists refined text as a new `FSVersion`.
-5. Frontend redirects to detail page with `?autoAnalyze=1` to trigger re-analysis.
+5. If the source document was already `COMPLETE`, the status is **kept**
+   (no demotion to `PARSED`) and `analysis_stale` is flipped to `true`.
+   The detail page renders an amber "FS was refined since last analysis
+   — re-analyze to refresh metrics" banner with a one-click
+   **Re-analyze** button. The Build CTAs stay visible immediately. The
+   next successful analyze clears `analysis_stale` back to `false`.
 
 ### Accept/Resolve Workflow
 1. **Edge cases**: `POST /{id}/edge-cases/{eid}/accept` merges `suggested_addition` into
@@ -574,7 +607,10 @@ After uploading a real FS document, verify this checklist:
 
 ### D. Refinement
 - "Get suggestions" returns before/after scores and diff.
-- Accept saves new version and triggers re-analysis.
+- Accept saves new version, **keeps `status = COMPLETE`**, and flips
+  `analysis_stale = true`; the detail page renders the
+  Re-analyze banner and Build CTAs remain visible.
+- Re-analyze button runs the pipeline and clears `analysis_stale`.
 - Version history shows all versions with view/revert.
 
 ### E. Tasks

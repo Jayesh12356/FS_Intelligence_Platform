@@ -34,7 +34,7 @@ def _should_retry(exc: BaseException, transient: Tuple[Type[BaseException], ...]
     return any(tok in msg for tok in ("timeout", "rate limit", "temporarily", "unavailable", "502", "503", "504"))
 
 
-async def llm_retry(
+async def llm_retry[T](
     coro_factory: Callable[[], Awaitable[T]],
     *,
     attempts: int | None = None,
@@ -64,7 +64,11 @@ async def llm_retry(
             delay = delay * (0.7 + 0.6 * random.random())  # 0.7x–1.3x jitter
             logger.warning(
                 "%s attempt %d/%d failed: %s — retrying in %.2fs",
-                label, attempt, max_attempts, exc, delay,
+                label,
+                attempt,
+                max_attempts,
+                exc,
+                delay,
             )
             await asyncio.sleep(delay)
 
@@ -80,7 +84,9 @@ def with_llm_retry(label: str = "llm_call"):
         async def _inner(*args: Any, **kwargs: Any) -> T:
             async def _factory() -> T:
                 return await fn(*args, **kwargs)
+
             return await llm_retry(_factory, label=label)
+
         return _inner
 
     return _wrap

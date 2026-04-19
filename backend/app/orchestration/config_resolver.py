@@ -2,28 +2,39 @@
 
 import logging
 import time
-from typing import List, Optional
+from typing import List
 
 from sqlalchemy import select
 
-from app.config import get_settings
 from app.db.base import async_session_factory
 from app.db.models import ToolConfigDB
 
 logger = logging.getLogger(__name__)
 
 _CACHE_TTL_SEC = 5.0
-_cached_llm_provider: Optional[str] = None
-_cached_fallback_chain: Optional[List[str]] = None
+_cached_llm_provider: str | None = None
+_cached_fallback_chain: List[str] | None = None
 _cache_at: float = 0.0
 
 
 async def _load_config() -> ToolConfigDB | None:
     async with async_session_factory() as session:
-        result = await session.execute(
-            select(ToolConfigDB).where(ToolConfigDB.user_id == "default").limit(1)
-        )
+        result = await session.execute(select(ToolConfigDB).where(ToolConfigDB.user_id == "default").limit(1))
         return result.scalar_one_or_none()
+
+
+# Document-LLM providers that the orchestration layer is allowed to
+# resolve to. Must stay in sync with ``ALLOWED_LLM_PROVIDERS`` in
+# ``app.api.orchestration_router`` — cursor is included here because
+# the queue-bridge worker handoff lets it serve Generate FS / Analyze
+# / Reverse FS like any synchronous provider would.
+_VALID_LLM_PROVIDERS = {"api", "claude_code", "cursor", "mock"}
+
+# Subscription-backed providers must NEVER be silently downgraded to
+# Direct API: doing so would charge OpenRouter / Anthropic credits the
+# user did not authorise. If the user picked one of these, we honour it
+# even when the rest of the cache invalidates around it.
+_NO_FALLBACK_PROVIDERS = {"cursor", "claude_code"}
 
 
 async def _ensure_cache() -> None:
@@ -38,18 +49,27 @@ async def _ensure_cache() -> None:
     if not name:
         name = "api"
 
+    # Unknown providers fall back to Direct API. Cursor and Claude Code
+    # are first-class Document LLMs, so they pass through untouched.
+    if name not in _VALID_LLM_PROVIDERS:
+        logger.warning(
+            "Configured llm_provider=%r is unknown; routing to 'api'.",
+            name,
+        )
+        name = "api"
+
     _cached_llm_provider = name
 
-    settings = get_settings()
-    chain = (row.fallback_chain if row else None) or ["api"]
-    # In strict mode we do NOT silently append "api" as a last-resort provider —
-    # the user asked for a specific provider and wants failures to surface
-    # rather than be papered over by direct API calls.
-    if not settings.ORCHESTRATION_STRICT_LLM and "api" not in chain:
-        chain = chain + ["api"]
-    _cached_fallback_chain = chain
+    # 0.4.0: strict single-provider routing. The bridge no longer walks
+    # a fallback chain, so we publish the chain as exactly the chosen
+    # provider. Legacy callers that read the chain see a one-element
+    # list.
+    _cached_fallback_chain = [name]
     _cache_at = now
-    logger.debug("Resolved orchestration llm_provider=%s, fallback_chain=%s", _cached_llm_provider, _cached_fallback_chain)
+    logger.debug(
+        "Resolved orchestration llm_provider=%s (strict, no fallback)",
+        _cached_llm_provider,
+    )
 
 
 async def get_configured_llm_provider_name() -> str:

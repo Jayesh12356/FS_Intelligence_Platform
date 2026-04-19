@@ -26,7 +26,6 @@ from app.pipeline.state import (
     TaskImpact,
 )
 
-
 # ── Unit Tests: FSChange Model ──────────────────────────
 
 
@@ -256,10 +255,18 @@ class TestVersionNode:
             "fs_id": "test-modify",
             "version_id": "v2",
             "old_sections": [
-                {"heading": "Auth", "content": "Use JWT tokens for authentication. All tokens expire after 24 hours.", "section_index": 0},
+                {
+                    "heading": "Auth",
+                    "content": "Use JWT tokens for authentication. All tokens expire after 24 hours.",
+                    "section_index": 0,
+                },
             ],
             "new_sections": [
-                {"heading": "Auth", "content": "Use OAuth2 for authentication. Refresh tokens every 1 hour.", "section_index": 0},
+                {
+                    "heading": "Auth",
+                    "content": "Use OAuth2 for authentication. Refresh tokens every 1 hour.",
+                    "section_index": 0,
+                },
             ],
             "tasks": [],
             "fs_changes": [],
@@ -333,11 +340,19 @@ class TestVersionNode:
             "fs_id": "test-multi",
             "version_id": "v2",
             "old_sections": [
-                {"heading": "Auth", "content": "JWT-based authentication with 24h token expiry. Support for MFA.", "section_index": 0},
+                {
+                    "heading": "Auth",
+                    "content": "JWT-based authentication with 24h token expiry. Support for MFA.",
+                    "section_index": 0,
+                },
                 {"heading": "Legacy", "content": "IE11 support required for all pages.", "section_index": 1},
             ],
             "new_sections": [
-                {"heading": "Auth", "content": "OAuth2-based authentication with 1h refresh. No MFA requirement initially.", "section_index": 0},
+                {
+                    "heading": "Auth",
+                    "content": "OAuth2-based authentication with 1h refresh. No MFA requirement initially.",
+                    "section_index": 0,
+                },
                 {"heading": "Payments", "content": "Stripe for payment processing.", "section_index": 1},
             ],
             "tasks": [],
@@ -420,7 +435,12 @@ class TestReworkNode:
             "fs_changes": [],
             "task_impacts": [
                 {"task_id": "t1", "impact_type": "INVALIDATED", "reason": "Auth changed", "change_section": "Auth"},
-                {"task_id": "t2", "impact_type": "REQUIRES_REVIEW", "reason": "May be affected", "change_section": "Auth"},
+                {
+                    "task_id": "t2",
+                    "impact_type": "REQUIRES_REVIEW",
+                    "reason": "May be affected",
+                    "change_section": "Auth",
+                },
                 {"task_id": "t3", "impact_type": "UNAFFECTED", "reason": "Not related"},
             ],
             "rework_estimate": {},
@@ -697,7 +717,12 @@ class TestImpactNode:
             call_count += 1
             if call_count == 1:
                 return [
-                    {"task_id": "t1", "task_title": "Shared Task", "impact_type": "REQUIRES_REVIEW", "reason": "Reason 1"},
+                    {
+                        "task_id": "t1",
+                        "task_title": "Shared Task",
+                        "impact_type": "REQUIRES_REVIEW",
+                        "reason": "Reason 1",
+                    },
                 ]
             else:
                 return [
@@ -787,6 +812,7 @@ class TestImpactPipelineGraph:
     def test_impact_graph_builds(self):
         """The impact graph should compile without errors."""
         import app.pipeline.graph as graph_mod
+
         graph_mod._compiled_impact_graph = None
 
         with patch(
@@ -801,6 +827,7 @@ class TestImpactPipelineGraph:
     def test_impact_graph_singleton(self):
         """get_compiled_impact_graph should return a singleton."""
         import app.pipeline.graph as graph_mod
+
         graph_mod._compiled_impact_graph = None
 
         with patch(
@@ -817,6 +844,7 @@ class TestImpactPipelineGraph:
     async def test_impact_pipeline_end_to_end(self):
         """Full impact pipeline should work with mocked LLM."""
         import app.pipeline.graph as graph_mod
+
         graph_mod._compiled_impact_graph = None
 
         mock_llm_response = [

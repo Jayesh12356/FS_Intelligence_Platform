@@ -13,13 +13,12 @@ Usage:
 import asyncio
 import json
 import logging
-from typing import Optional
 
 from crewai import Crew, Process, Task
 
-from app.agents.red_agent import create_red_agent
-from app.agents.blue_agent import create_blue_agent
 from app.agents.arbiter_agent import create_arbiter_agent
+from app.agents.blue_agent import create_blue_agent
+from app.agents.red_agent import create_red_agent
 from app.pipeline.state import DebateVerdict
 
 logger = logging.getLogger(__name__)

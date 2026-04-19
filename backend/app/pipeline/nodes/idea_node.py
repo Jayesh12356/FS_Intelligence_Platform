@@ -1,9 +1,18 @@
 """Idea-to-FS generation node — converts a product idea into a professional FS document."""
 
 import logging
-from typing import Optional
 
 from app.orchestration.pipeline_llm import pipeline_call_llm, pipeline_call_llm_json
+from app.pipeline.prompts.idea import (
+    guided_fs as guided_fs_prompt,
+)
+from app.pipeline.prompts.idea import (
+    guided_questions as guided_questions_prompt,
+)
+from app.pipeline.prompts.idea import (
+    quick as quick_prompt,
+)
+from app.pipeline.prompts.shared.flags import legacy_prompts_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -54,22 +63,25 @@ preferences for scale, tech stack, integrations, compliance, and business model.
 
 async def generate_fs_quick(
     idea: str,
-    industry: Optional[str] = None,
-    complexity: Optional[str] = None,
+    industry: str | None = None,
+    complexity: str | None = None,
 ) -> str:
     """Generate a full FS document from a brief idea description."""
-    context_parts = [f"Product Idea: {idea}"]
-    if industry:
-        context_parts.append(f"Industry: {industry}")
-    if complexity:
-        context_parts.append(f"Complexity Level: {complexity}")
-
-    prompt = "\n".join(context_parts)
+    if legacy_prompts_enabled():
+        context_parts = [f"Product Idea: {idea}"]
+        if industry:
+            context_parts.append(f"Industry: {industry}")
+        if complexity:
+            context_parts.append(f"Complexity Level: {complexity}")
+        system = QUICK_SYSTEM_PROMPT
+        prompt = "\n".join(context_parts)
+    else:
+        system, prompt = quick_prompt.build(idea, industry=industry, complexity=complexity)
 
     logger.info("Generating FS from idea (quick mode): %.100s…", idea)
     result = await pipeline_call_llm(
         prompt=prompt,
-        system=QUICK_SYSTEM_PROMPT,
+        system=system,
         max_tokens=8192,
         temperature=0.3,
         role="longcontext",
@@ -79,9 +91,14 @@ async def generate_fs_quick(
 
 async def generate_guided_questions(idea: str) -> list[dict]:
     """Generate clarifying questions for the guided flow."""
+    if legacy_prompts_enabled():
+        system = GUIDED_QUESTIONS_SYSTEM
+        prompt = f"Product Idea: {idea}"
+    else:
+        system, prompt = guided_questions_prompt.build(idea)
     result = await pipeline_call_llm_json(
-        prompt=f"Product Idea: {idea}",
-        system=GUIDED_QUESTIONS_SYSTEM,
+        prompt=prompt,
+        system=system,
         max_tokens=2048,
         temperature=0.4,
     )
@@ -96,25 +113,28 @@ async def generate_guided_questions(idea: str) -> list[dict]:
 async def generate_fs_guided(
     idea: str,
     answers: dict,
-    industry: Optional[str] = None,
-    complexity: Optional[str] = None,
+    industry: str | None = None,
+    complexity: str | None = None,
 ) -> str:
     """Generate FS using the idea plus user's answers to guided questions."""
-    parts = [f"Product Idea: {idea}"]
-    if industry:
-        parts.append(f"Industry: {industry}")
-    if complexity:
-        parts.append(f"Complexity: {complexity}")
-    parts.append("\nDiscovery Answers:")
-    for q_id, answer in answers.items():
-        parts.append(f"  {q_id}: {answer}")
-
-    prompt = "\n".join(parts)
+    if legacy_prompts_enabled():
+        parts = [f"Product Idea: {idea}"]
+        if industry:
+            parts.append(f"Industry: {industry}")
+        if complexity:
+            parts.append(f"Complexity: {complexity}")
+        parts.append("\nDiscovery Answers:")
+        for q_id, answer in answers.items():
+            parts.append(f"  {q_id}: {answer}")
+        system = GUIDED_GENERATE_SYSTEM
+        prompt = "\n".join(parts)
+    else:
+        system, prompt = guided_fs_prompt.build(idea, answers, industry=industry, complexity=complexity)
 
     logger.info("Generating FS from idea (guided mode): %.100s…", idea)
     result = await pipeline_call_llm(
         prompt=prompt,
-        system=GUIDED_GENERATE_SYSTEM,
+        system=system,
         max_tokens=8192,
         temperature=0.3,
         role="longcontext",

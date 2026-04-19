@@ -17,10 +17,12 @@
   --glass-border: rgba(0, 0, 0, 0.06);
   --bg-input: #F5F5F2;
 
-  /* Text */
+  /* Text — values chosen to satisfy WCAG 2 AA (>=4.5:1) on both
+     --bg-card (#FFFFFF) and --bg-tertiary (#E8E7E3) so badges and
+     muted captions don't trip axe color-contrast checks. */
   --text-primary: #1A1A1A;
-  --text-secondary: #6B6B6B;
-  --text-muted: #9B9B9B;
+  --text-secondary: #545454; /* 7.55:1 on #FFFFFF, 5.71:1 on #E8E7E3 */
+  --text-muted: #5F5F5F;     /* 5.65:1 on #F2F1ED, 4.75:1 on #E8E7E3 */
 
   /* Accent */
   --accent-primary: #2D6A4F;
@@ -45,6 +47,18 @@
   --bg-error-subtle: rgba(220, 38, 38, 0.08);
   --bg-info-subtle: rgba(37, 99, 235, 0.08);
   --bg-accent-subtle: rgba(45, 106, 79, 0.08);
+
+  /* Semantic Foregrounds for use ON the matching --bg-*-subtle
+     surfaces. These are deliberately darker than the canonical
+     --success/--warning/--error/--info tokens so small text on the
+     8%-tinted backgrounds satisfies WCAG 2 AA (>=4.5:1). Use the
+     plain semantic token for icons/borders, this *-text token for
+     legible text. */
+  --success-text: #166534; /* 6.54:1 on #ECF8F1 */
+  --warning-text: #92400E; /* 6.51:1 on #FCF4EB */
+  --error-text:   #991B1B; /* 7.28:1 on #FDECEC */
+  --info-text:    #1E40AF; /* 7.81:1 on #ECF3FD */
+  --accent-text:  #2D6A4F; /* 5.57:1 on #EAF1EC — base accent already passes */
 
   /* Borders */
   --border-color: rgba(0, 0, 0, 0.08);
@@ -78,6 +92,11 @@
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
 
+  /* Reduced-motion: kill *all* CSS transitions/animations and force any
+     element to its end-state regardless of framer-motion's internals.
+     This both honors the user setting and gives the axe e2e gate a
+     deterministic snapshot to evaluate. */
+
   /* Pastel wells (for KPI icons) */
   --well-green: #E1E8D7;
   --well-peach: #F5E6D3;
@@ -86,6 +105,18 @@
   --well-amber: #F5ECD3;
   --well-red: #F5D7D7;
   --well-gray: #E5E4DE;
+
+  /* Back-compat aliases so pages referencing older token names keep
+     working. These are strictly pointers to canonical tokens above; do
+     NOT hard-code different values here. */
+  --color-danger: var(--error);
+  --surface-muted: var(--bg-tertiary);
+  --surface-elevated: var(--bg-secondary);
+  --border-default: var(--border-color);
+  --bg-main: var(--bg-primary);
+  --text-tertiary: var(--text-muted);
+  --error-bg: var(--bg-error-subtle);
+  --success-bg: var(--bg-success-subtle);
 }
 
 /* ── Dark Theme ─────────────────────────────────────────────── */
@@ -106,10 +137,12 @@
   --glass-border: rgba(167, 139, 250, 0.12);
   --bg-input: #15152A;
 
-  /* Text — crisp near-white with cool secondary / muted. */
+  /* Text — crisp near-white with cool secondary / muted.
+     Tuned to satisfy WCAG 2 AA (>=4.5:1) on the deepest dark surface
+     (--bg-primary #07070D) so muted captions/labels remain accessible. */
   --text-primary: #F5F5FB;
-  --text-secondary: #A8A8C6;
-  --text-muted: #6B6B88;
+  --text-secondary: #C8C8DE; /* 11.5:1 on #07070D, 9.5:1 on #14142A */
+  --text-muted: #9B9BB8;     /* 5.83:1 on #14142A — comfortable AA */
 
   /* Accent — vibrant lavender (violet-400/300). */
   --accent-primary: #A78BFA;
@@ -134,6 +167,14 @@
   --bg-info-subtle: rgba(96, 165, 250, 0.14);
   --bg-accent-subtle: rgba(167, 139, 250, 0.14);
 
+  /* Dark-mode badge text — lighter shades so the small labels on the
+     14%-tinted dark surfaces stay above the AA 4.5:1 line. */
+  --success-text: #86EFAC;
+  --warning-text: #FDE68A;
+  --error-text:   #FCA5A5;
+  --info-text:    #BFDBFE;
+  --accent-text:  #C4B5FD;
+
   /* Borders — mostly invisible, with a stronger tier for emphasis. */
   --border-color: rgba(255, 255, 255, 0.07);
   --border-subtle: rgba(255, 255, 255, 0.035);
@@ -156,6 +197,82 @@
   --well-amber: #2B2310;
   --well-red: #2C1515;
   --well-gray: #18182C;
+
+  /* Same back-compat aliases for dark theme. */
+  --color-danger: var(--error);
+  --surface-muted: var(--bg-tertiary);
+  --surface-elevated: var(--bg-secondary);
+  --border-default: var(--border-color);
+  --bg-main: var(--bg-primary);
+  --text-tertiary: var(--text-muted);
+  --error-bg: var(--bg-error-subtle);
+  --success-bg: var(--bg-success-subtle);
+}
+
+/* ── Reduced motion ─────────────────────────────────────────────
+   When the OS-level "reduce motion" setting is on (also set by the
+   axe Playwright suite via `reducedMotion: 'reduce'`), neutralize
+   every CSS animation and transition so framer-motion's variant
+   targets resolve instantly. Combined with the global
+   <MotionConfig reducedMotion="user"> wrapper this guarantees axe
+   sees steady-state colors instead of mid-animation opacity. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Back-compat utility classes referenced by a handful of pages. Each
+   aliases to an existing primitive so the page renders correctly. */
+.badge-muted {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0.1875rem 0.625rem;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.badge-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0.1875rem 0.625rem;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--bg-error-subtle);
+  color: var(--error);
+}
+
+.spin { animation: spin 0.6s linear infinite; }
+.overflow-hidden { overflow: hidden; }
+.text-muted { color: var(--text-muted); }
+
+.collab-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0.1875rem 0.75rem;
+  border-radius: var(--radius-full);
+  background: var(--bg-accent-subtle);
+  color: var(--accent-primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.collab-status-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 /* Dark-theme polish: cards sit as elevated tiles on near-black,
@@ -575,10 +692,14 @@ button { font-family: inherit; }
   white-space: nowrap;
 }
 
-.badge-success, .badge-complete, .badge-parsed { background: var(--bg-success-subtle); color: var(--success); }
-.badge-warning, .badge-analyzing, .badge-parsing { background: var(--bg-warning-subtle); color: var(--warning); }
-.badge-error, .badge-failed { background: var(--bg-error-subtle); color: var(--error); }
-.badge-info, .badge-uploaded { background: var(--bg-info-subtle); color: var(--info); }
+/* WCAG 2 AA: badge text uses the *-text tokens (darker in light
+   theme, lighter in dark theme) so labels on the subtle backgrounds
+   keep a >=4.5:1 contrast ratio. Borders/icons keep the bolder
+   --success/--warning/--error/--info tokens. */
+.badge-success, .badge-complete, .badge-parsed { background: var(--bg-success-subtle); color: var(--success-text); }
+.badge-warning, .badge-analyzing, .badge-parsing { background: var(--bg-warning-subtle); color: var(--warning-text); }
+.badge-error, .badge-failed { background: var(--bg-error-subtle); color: var(--error-text); }
+.badge-info, .badge-uploaded { background: var(--bg-info-subtle); color: var(--info-text); }
 .badge-neutral { background: var(--bg-tertiary); color: var(--text-secondary); }
 .badge-accent { background: var(--bg-accent-subtle); color: var(--accent-primary); }
 
@@ -593,10 +714,10 @@ button { font-family: inherit; }
 
 /* Status badges (back-compat) */
 .status-badge { display: inline-flex; align-items: center; gap: 5px; padding: 0.25rem 0.75rem; border-radius: var(--radius-full); font-size: 0.75rem; font-weight: 600; }
-.status-badge.uploaded { background: var(--bg-info-subtle); color: var(--info); }
-.status-badge.parsing, .status-badge.analyzing { background: var(--bg-warning-subtle); color: var(--warning); }
-.status-badge.complete, .status-badge.parsed { background: var(--bg-success-subtle); color: var(--success); }
-.status-badge.error { background: var(--bg-error-subtle); color: var(--error); }
+.status-badge.uploaded { background: var(--bg-info-subtle); color: var(--info-text); }
+.status-badge.parsing, .status-badge.analyzing { background: var(--bg-warning-subtle); color: var(--warning-text); }
+.status-badge.complete, .status-badge.parsed { background: var(--bg-success-subtle); color: var(--success-text); }
+.status-badge.error { background: var(--bg-error-subtle); color: var(--error-text); }
 
 /* ── Forms ──────────────────────────────────────────────────── */
 
@@ -636,10 +757,10 @@ button { font-family: inherit; }
   line-height: 1.5;
 }
 
-.alert-success { background: var(--bg-success-subtle); color: var(--success); border: 1px solid rgba(22, 163, 74, 0.12); }
-.alert-warning { background: var(--bg-warning-subtle); color: var(--warning); border: 1px solid rgba(217, 119, 6, 0.12); }
-.alert-error { background: var(--bg-error-subtle); color: var(--error); border: 1px solid rgba(220, 38, 38, 0.12); }
-.alert-info { background: var(--bg-info-subtle); color: var(--info); border: 1px solid rgba(37, 99, 235, 0.12); }
+.alert-success { background: var(--bg-success-subtle); color: var(--success-text); border: 1px solid rgba(22, 163, 74, 0.12); }
+.alert-warning { background: var(--bg-warning-subtle); color: var(--warning-text); border: 1px solid rgba(217, 119, 6, 0.12); }
+.alert-error { background: var(--bg-error-subtle); color: var(--error-text); border: 1px solid rgba(220, 38, 38, 0.12); }
+.alert-info { background: var(--bg-info-subtle); color: var(--info-text); border: 1px solid rgba(37, 99, 235, 0.12); }
 
 /* ── Tabs (Segmented Control) ───────────────────────────────── */
 
@@ -820,6 +941,31 @@ button { font-family: inherit; }
 .upload-container h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 0.375rem; letter-spacing: -0.02em; }
 .upload-container .subtitle { color: var(--text-secondary); margin-bottom: 1.5rem; font-size: 0.9375rem; }
 
+.upload-project-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-2xl);
+}
+.upload-project-picker .form-label {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.01em;
+}
+.upload-project-picker .form-label .muted {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.upload-project-picker .form-input {
+  width: 100%;
+}
+
 .upload-zone {
   border: 2px dashed var(--border-color);
   border-radius: var(--radius-2xl);
@@ -863,9 +1009,9 @@ button { font-family: inherit; }
   font-size: 0.875rem;
 }
 
-.upload-status.success { background: var(--bg-success-subtle); color: var(--success); }
-.upload-status.error { background: var(--bg-error-subtle); color: var(--error); }
-.upload-status.loading { background: var(--bg-accent-subtle); color: var(--accent-primary); }
+.upload-status.success { background: var(--bg-success-subtle); color: var(--success-text); }
+.upload-status.error { background: var(--bg-error-subtle); color: var(--error-text); }
+.upload-status.loading { background: var(--bg-accent-subtle); color: var(--accent-text); }
 
 .upload-progress { margin-top: 0.75rem; height: 4px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden; }
 .upload-progress-bar { height: 100%; background: var(--accent-gradient); border-radius: 2px; transition: width var(--transition-normal); }
@@ -1151,15 +1297,15 @@ button { font-family: inherit; }
 }
 
 .detail-tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
+  color: var(--accent-primary);
+  border-bottom-color: var(--accent-primary);
 }
 
 .detail-tab .tab-count {
   font-size: 0.75rem;
   font-weight: 700;
   background: var(--bg-accent-subtle, rgba(99,102,241,.1));
-  color: var(--accent);
+  color: var(--accent-text);
   padding: 0.1rem 0.5rem;
   border-radius: 999px;
   min-width: 1.5rem;
@@ -1172,7 +1318,7 @@ button { font-family: inherit; }
 }
 
 .detail-tab.active .tab-count {
-  background: var(--accent);
+  background: var(--accent-primary);
   color: #fff;
 }
 
